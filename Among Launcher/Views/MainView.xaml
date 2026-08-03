@@ -24,15 +24,14 @@
 
             <!-- Game Cover Image -->
             <Border Grid.Column="0" Width="140" Height="210" CornerRadius="12"
-                    Background="#1A1A1E" BorderBrush="#242429" BorderThickness="1"
+                    Background="{StaticResource GlassSurfaceWeak}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1"
                     Margin="0,0,24,0">
                 <Border.Effect>
-                    <DropShadowEffect Color="#000000" BlurRadius="15" ShadowDepth="2"
-                                      Opacity="0.4" Direction="270"/>
+                    <DropShadowEffect Color="#5865F2" Opacity="0.35" BlurRadius="22" ShadowDepth="4" Direction="270"/>
                 </Border.Effect>
                 <Grid>
                     <!-- Dark placeholder while loading -->
-                    <Rectangle Fill="#1A1A1E"/>
+                    <Rectangle Fill="{StaticResource GlassSurfaceWeak}"/>
                     <!-- Remote cover image -->
                     <Image Source="https://cdn.cloudflare.steamstatic.com/steam/apps/945360/library_600x900.jpg"
                            Stretch="UniformToFill"
@@ -43,7 +42,7 @@
             <!-- Title and Action Bar -->
             <StackPanel Grid.Column="1" VerticalAlignment="Center">
                 <TextBlock Text="Among Us" FontSize="28" FontWeight="Bold"
-                           Foreground="#FFFFFF" Margin="0,0,0,12"/>
+                           Foreground="{StaticResource TextTitle}" Margin="0,0,0,12"/>
                 <StackPanel Orientation="Horizontal">
                     <Button x:Name="PlayButton" Content="PLAY"
                             Click="PlayButton_Click"
@@ -53,8 +52,8 @@
                             Click="InstallButton_Click"
                             Style="{StaticResource SecondaryButton}"
                             Margin="0,0,12,0"/>
-                    <Button x:Name="CopyPathButton" Content="COPY PATH"
-                            Click="CopyPathButton_Click"
+                    <Button x:Name="BrowseFilesButton" Content="BROWSE FILES"
+                            Click="BrowseFilesButton_Click"
                             Style="{StaticResource SecondaryButton}"
                             Margin="0,0,12,0"/>
                     <Button x:Name="LogsButton" Content="LOGS"
@@ -65,7 +64,7 @@
         </Grid>
 
         <!-- Launch Options Card -->
-        <Border Grid.Row="1" Style="{StaticResource SurfaceCard}">
+        <Border Grid.Row="1" Style="{StaticResource GlassCard}">
             <StackPanel>
                 <TextBlock Text="LAUNCH OPTIONS" Style="{StaticResource CardHeader}"/>
                 <Grid>
@@ -75,16 +74,16 @@
                     </Grid.ColumnDefinitions>
                     <StackPanel Grid.Column="0">
                         <CheckBox x:Name="HideConsoleCheckBox" Content="Hide BepInEx console"
-                                  Foreground="#A1A1AA" Margin="0,0,0,12"/>
+                                  Foreground="{StaticResource TextBody}" Margin="0,0,0,12"/>
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
-                            <TextBlock Text="Window Width:" Foreground="#6B6B76" FontSize="13"
+                            <TextBlock Text="Window Width:" Foreground="{StaticResource TextMuted}" FontSize="13"
                                        VerticalAlignment="Center" Margin="0,0,8,0"/>
                             <TextBox x:Name="WidthInput" Text="1280" Width="80"
-                                     Style="{StaticResource InputBox}" Padding="8,4"/>
-                            <TextBlock Text="Height:" Foreground="#6B6B76" FontSize="13"
+                                     Style="{StaticResource GlassInput}" Padding="8,4"/>
+                            <TextBlock Text="Height:" Foreground="{StaticResource TextMuted}" FontSize="13"
                                        VerticalAlignment="Center" Margin="16,0,8,0"/>
                             <TextBox x:Name="HeightInput" Text="720" Width="80"
-                                     Style="{StaticResource InputBox}" Padding="8,4"/>
+                                     Style="{StaticResource GlassInput}" Padding="8,4"/>
                         </StackPanel>
                     </StackPanel>
                     <Button Grid.Column="1" Content="SAVE"
@@ -96,7 +95,7 @@
         </Border>
 
         <!-- LOCAL MODS Card -->
-        <Border Grid.Row="2" Style="{StaticResource SurfaceCard}">
+        <Border Grid.Row="2" Style="{StaticResource GlassCard}">
             <StackPanel>
                 <Grid Margin="0,0,0,12">
                     <Grid.ColumnDefinitions>
@@ -113,14 +112,22 @@
                 <!-- Add Mod Menu (Popup) -->
                 <Popup x:Name="AddModPopup" PlacementTarget="{Binding ElementName=AddModButton}"
                        Placement="Bottom" StaysOpen="False" AllowsTransparency="True">
-                    <Border Background="#1A1A1E" BorderBrush="#242429" BorderThickness="1"
-                            CornerRadius="8" Padding="8" Margin="0,4,0,0">
+                    <Border Background="{StaticResource GlassSurfaceWeak}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1"
+                            CornerRadius="10" Padding="8" Margin="0,4,0,0"
+                            SnapsToDevicePixels="True" UseLayoutRounding="True">
+                        <Border.RenderTransform>
+                            <TranslateTransform/>
+                        </Border.RenderTransform>
                         <Border.Effect>
                             <DropShadowEffect Color="#000000" BlurRadius="12" ShadowDepth="4" Opacity="0.5"/>
                         </Border.Effect>
                         <StackPanel>
                             <Button x:Name="ImportLocalModButton" Content="Import Local Mod (.dll)"
                                     Click="ImportLocalMod_Click"
+                                    Style="{StaticResource SecondaryButton}"
+                                    Height="36" HorizontalAlignment="Stretch" Margin="0,0,0,4"/>
+                            <Button x:Name="InstallPresetModButton" Content="Install Preset Mod"
+                                    Click="InstallPresetMod_Click"
                                     Style="{StaticResource SecondaryButton}"
                                     Height="36" HorizontalAlignment="Stretch"/>
                         </StackPanel>
@@ -131,19 +138,22 @@
                 <ItemsControl x:Name="ModsList">
                     <ItemsControl.ItemTemplate>
                         <DataTemplate>
-                            <Border Background="#1A1A1E" CornerRadius="6" Padding="12" Margin="0,0,0,8">
+                            <Border Background="{StaticResource GlassSurfaceWeak}" BorderBrush="{StaticResource GlassBorder}"
+                                    BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,0,0,8"
+                                    SnapsToDevicePixels="True" UseLayoutRounding="True">
                                 <Grid>
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*"/>
                                         <ColumnDefinition Width="Auto"/>
                                     </Grid.ColumnDefinitions>
                                     <StackPanel Grid.Column="0">
-                                        <TextBlock Text="{Binding Name}" FontWeight="Bold" Foreground="#FFFFFF" FontSize="13"/>
-                                        <TextBlock Text="{Binding Description}" Foreground="#A1A1AA" FontSize="11" Margin="0,2,0,0"/>
+                                        <TextBlock Text="{Binding Name}" FontWeight="Bold" Foreground="{StaticResource TextTitle}" FontSize="13"/>
+                                        <TextBlock Text="{Binding Description}" Foreground="{StaticResource TextBody}" FontSize="11" Margin="0,2,0,0"/>
                                     </StackPanel>
                                     <Button Grid.Column="1" Content="Remove"
                                             Click="RemoveMod_Click"
                                             Style="{StaticResource SecondaryButton}"
+                                            Foreground="{StaticResource AccentBrush}"
                                             Height="24" Padding="12,4" FontSize="11"
                                             VerticalAlignment="Center"/>
                                 </Grid>
@@ -155,13 +165,13 @@
         </Border>
 
         <!-- Mods & Status Card -->
-        <Border Grid.Row="3" Style="{StaticResource SurfaceCard}">
+        <Border Grid.Row="3" Style="{StaticResource GlassCard}">
             <StackPanel>
                 <TextBlock Text="MODS &amp; STATUS" Style="{StaticResource CardHeader}"/>
                 <TextBlock x:Name="GameStatusText" Text="Checking for Among Us installation..."
-                           Foreground="#A1A1AA" TextWrapping="Wrap" FontSize="14" Margin="0,0,0,12"/>
+                           Foreground="{StaticResource TextBody}" TextWrapping="Wrap" FontSize="14" Margin="0,0,0,12"/>
                 <TextBlock x:Name="ModStatusText" Text="No mod loaded"
-                           Foreground="#6B6B76" TextWrapping="Wrap" FontSize="13"/>
+                           Foreground="{StaticResource TextMuted}" TextWrapping="Wrap" FontSize="13"/>
             </StackPanel>
         </Border>
 
@@ -169,9 +179,9 @@
         <StackPanel Grid.Row="4" Margin="0,0,0,8" VerticalAlignment="Top">
             <ProgressBar x:Name="MainProgressBar" Height="8"
                          Visibility="Collapsed" IsIndeterminate="True"
-                         Foreground="#5865F2" Background="#242429"/>
+                         Foreground="#5865F2" Background="{StaticResource GlassSurfaceWeak}"/>
             <TextBlock x:Name="ProgressText" Text=""
-                       Foreground="#6B6B76"
+                       Foreground="{StaticResource TextMuted}"
                        Margin="0,8,0,0" Visibility="Collapsed"/>
         </StackPanel>
     </Grid>
