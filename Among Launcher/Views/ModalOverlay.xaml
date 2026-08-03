@@ -15,7 +15,8 @@
                 CornerRadius="14" Padding="24" MaxWidth="500"
                 HorizontalAlignment="Center" VerticalAlignment="Center"
                 MouseLeftButtonDown="Card_Click"
-                SnapsToDevicePixels="True" UseLayoutRounding="True">
+                SnapsToDevicePixels="True" UseLayoutRounding="True"
+                RenderTransformOrigin="0.5,0.5">
             <Border.RenderTransform>
                 <TransformGroup>
                     <ScaleTransform x:Name="ModalCardScale" ScaleX="0.96" ScaleY="0.96"/>

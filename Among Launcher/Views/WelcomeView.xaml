@@ -22,7 +22,8 @@
         <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Width="420">
             <TextBlock x:Name="TitleText" Text="Among Launcher"
                        FontSize="46" FontWeight="Bold" Foreground="{StaticResource TextTitle}"
-                       HorizontalAlignment="Center" UseLayoutRounding="True" SnapsToDevicePixels="True">
+                       HorizontalAlignment="Center" UseLayoutRounding="True" SnapsToDevicePixels="True"
+                       RenderTransformOrigin="0.5,0.5">
                 <TextBlock.RenderTransform>
                     <ScaleTransform x:Name="TitleScale" ScaleX="0.94" ScaleY="0.94"/>
                 </TextBlock.RenderTransform>
