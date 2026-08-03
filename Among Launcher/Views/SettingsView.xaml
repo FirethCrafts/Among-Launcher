@@ -17,7 +17,7 @@
         <TextBlock Grid.Row="0" Text="Settings" Style="{StaticResource PageTitle}"/>
 
         <!-- Game Path -->
-        <Border Grid.Row="1" Style="{StaticResource SurfaceCard}">
+        <Border Grid.Row="1" Style="{StaticResource GlassCard}">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
@@ -38,17 +38,17 @@
         </Border>
 
         <!-- Server URL -->
-        <Border Grid.Row="2" Style="{StaticResource SurfaceCard}">
+        <Border Grid.Row="2" Style="{StaticResource GlassCard}">
             <StackPanel>
                 <TextBlock Text="SERVER URL" Style="{StaticResource CardHeader}"/>
                 <TextBox x:Name="ServerUrlTextBox"
                          Text="https://yourserver.com/api"
-                         Style="{StaticResource InputBox}"/>
+                         Style="{StaticResource GlassInput}"/>
             </StackPanel>
         </Border>
 
         <!-- Modded Install Path -->
-        <Border Grid.Row="3" Style="{StaticResource SurfaceCard}">
+        <Border Grid.Row="3" Style="{StaticResource GlassCard}">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
