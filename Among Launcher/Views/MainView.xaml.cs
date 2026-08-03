@@ -133,7 +133,7 @@ public partial class MainView
 
     private async Task InstallAmongApiAsync()
     {
-        const string artifactId = "8853080583";
+        const string artifactId = "8853663758";
         var pluginsDir = Path.Combine(_moddedPath!, "BepInEx", "plugins");
         Directory.CreateDirectory(pluginsDir);
 
