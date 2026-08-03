@@ -158,6 +158,9 @@ public partial class MainWindow
         var empty = IsLauncherDirEmpty();
         ShowView(empty ? _welcomeView : _mainView, showSidebar: !empty);
 
+        if (!empty)
+            LoadSavedAvatar();
+
         Loaded += async (_, _) => await _pipeServer.BroadcastMessageAsync("launcher_ready");
     }
 
@@ -267,11 +270,25 @@ public partial class MainWindow
 
     private void OnLoginCompleted(object? sender, DiscordUserProfile profile)
     {
+        // Save avatar to config for reload on next launch
+        var config = Config.LauncherConfig.Load();
+        config.AvatarUrl = profile.AvatarUrl;
+        config.UserName = profile.GlobalName ?? profile.Username;
+        config.Save();
+
+        LoadAvatar(profile.AvatarUrl);
+        ShowView(_mainView, showSidebar: true);
+    }
+
+    private void LoadAvatar(string avatarUrl)
+    {
+        if (string.IsNullOrEmpty(avatarUrl)) return;
+
         try
         {
             var bitmap = new BitmapImage();
             bitmap.BeginInit();
-            bitmap.UriSource = new Uri(profile.AvatarUrl, UriKind.Absolute);
+            bitmap.UriSource = new Uri(avatarUrl, UriKind.Absolute);
             bitmap.CacheOption = BitmapCacheOption.OnLoad;
             bitmap.EndInit();
             SidebarAvatar.Source = bitmap;
@@ -281,8 +298,15 @@ public partial class MainWindow
         {
             // Keep default logo if avatar fails to load
         }
+    }
 
-        ShowView(_mainView, showSidebar: true);
+    private void LoadSavedAvatar()
+    {
+        var config = Config.LauncherConfig.Load();
+        if (!string.IsNullOrEmpty(config.AvatarUrl))
+        {
+            LoadAvatar(config.AvatarUrl);
+        }
     }
 
     private void OnGameStateChanged(object? sender, bool isRunning)

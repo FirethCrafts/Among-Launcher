@@ -16,6 +16,8 @@ public class LauncherConfig
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "AmongLauncher", "ModdedAmongUs");
     public string LastModId { get; set; } = string.Empty;
+    public string AvatarUrl { get; set; } = string.Empty;
+    public string UserName { get; set; } = string.Empty;
 
     public static LauncherConfig Load()
     {
