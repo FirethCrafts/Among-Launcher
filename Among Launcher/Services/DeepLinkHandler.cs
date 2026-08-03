@@ -3,12 +3,14 @@ namespace AmongLauncher.Services;
 public static class DeepLinkHandler
 {
     public const string Scheme = "amongus-launcher";
+    public const string JoinScheme = "amonglauncher";
 
     public static string? FindDeepLinkArgument()
     {
         var args = Environment.GetCommandLineArgs();
         return args.FirstOrDefault(a =>
-            a.StartsWith($"{Scheme}://", StringComparison.OrdinalIgnoreCase));
+            a.StartsWith($"{Scheme}://", StringComparison.OrdinalIgnoreCase) ||
+            a.StartsWith($"{JoinScheme}://", StringComparison.OrdinalIgnoreCase));
     }
 
     public static List<ModDownloadRequest> Parse(string deepLink)
@@ -40,19 +42,39 @@ public static class DeepLinkHandler
         return requests;
     }
 
+    public record JoinRequest(string Code);
+
+    public static JoinRequest? TryParseJoin(string deepLink)
+    {
+        if (!Uri.TryCreate(deepLink, UriKind.Absolute, out var uri))
+            return null;
+        if (!string.Equals(uri.Scheme, JoinScheme, StringComparison.OrdinalIgnoreCase))
+            return null;
+        if (!string.Equals(uri.Host, "join", StringComparison.OrdinalIgnoreCase))
+            return null;
+        var code = ExtractParam(uri.Query.TrimStart('?'), "code");
+        if (string.IsNullOrWhiteSpace(code))
+            return null;
+        code = Uri.UnescapeDataString(code).Trim().ToUpperInvariant();
+        if (code.Length < 4 || code.Length > 8)
+            return null;
+        return new JoinRequest(code);
+    }
+
     public static void RegisterProtocol()
     {
         try
         {
             var exePath = Environment.ProcessPath;
             if (string.IsNullOrEmpty(exePath)) return;
-
-            using var key = Microsoft.Win32.Registry.CurrentUser.CreateSubKey($@"Software\Classes\{Scheme}");
-            key.SetValue("", $"URL:{Scheme} Protocol");
-            key.SetValue("URL Protocol", "");
-
-            using var shell = key.CreateSubKey(@"shell\open\command");
-            shell.SetValue("", $"\"{exePath}\" \"%1\"");
+            foreach (var scheme in new[] { Scheme, JoinScheme })
+            {
+                using var key = Microsoft.Win32.Registry.CurrentUser.CreateSubKey($@"Software\Classes\{scheme}");
+                key.SetValue("", $"URL:{scheme} Protocol");
+                key.SetValue("URL Protocol", "");
+                using var shell = key.CreateSubKey(@"shell\open\command");
+                shell.SetValue("", $"\"{exePath}\" \"%1\"");
+            }
         }
         catch
         {
