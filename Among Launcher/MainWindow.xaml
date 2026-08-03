@@ -23,26 +23,28 @@
         <views:AmbientBackground Grid.RowSpan="2" Grid.ColumnSpan="2"/>
 
         <!-- Custom title bar -->
-        <Grid Grid.Row="0" Background="#08080A">
+        <Border Grid.Row="0" Background="{StaticResource GlassSurfaceStrong}"
+                BorderBrush="{StaticResource GlassBorder}" BorderThickness="0,0,0,1">
+        <Grid>
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
             <TextBlock Text="Among Launcher" FontSize="12" FontWeight="SemiBold"
-                       Foreground="#A1A1AA" VerticalAlignment="Center" Margin="16,0,0,0"/>
+                       Foreground="{StaticResource TextMuted}" VerticalAlignment="Center" Margin="16,0,0,0"/>
 
             <!-- Status badge pill -->
             <Border Grid.Column="1" x:Name="StatusBadge" CornerRadius="14"
-                    Background="#1A1A1E" BorderBrush="#2A2A30" BorderThickness="1"
+                    Background="{StaticResource GlassSurface}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1"
                     Padding="12,6" Margin="0,0,16,0" VerticalAlignment="Center">
                 <Border.RenderTransform>
                     <ScaleTransform x:Name="StatusBadgeScale" ScaleX="1" ScaleY="1"/>
                 </Border.RenderTransform>
                 <StackPanel Orientation="Horizontal">
-                    <Ellipse x:Name="StatusIndicator" Width="8" Height="8" Fill="#6B6B76" Margin="0,0,8,0"/>
+                    <Ellipse x:Name="StatusIndicator" Width="8" Height="8" Fill="{StaticResource TextMuted}" Margin="0,0,8,0"/>
                     <TextBlock x:Name="StatusText" Text="No Game Running" FontSize="12"
-                               Foreground="#6B6B76" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                               Foreground="{StaticResource TextMuted}" VerticalAlignment="Center" Margin="0,0,8,0"/>
                     <Button x:Name="StopGameButton" Content="STOP"
                             Background="#DC2626" BorderThickness="0"
                             Foreground="#FFFFFF" FontSize="11" FontWeight="SemiBold"
@@ -85,16 +87,18 @@
                         shell:WindowChrome.IsHitTestVisibleInChrome="True"/>
             </StackPanel>
         </Grid>
+        </Border>
 
         <!-- Body -->
         <Grid Grid.Row="1">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="72"/>
+                <ColumnDefinition Width="76"/>
                 <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
 
             <!-- Sidebar -->
-            <Border x:Name="Sidebar" Grid.Column="0" Background="{StaticResource SidebarBackground}">
+            <Border x:Name="Sidebar" Grid.Column="0" Background="{StaticResource GlassSurfaceStrong}"
+                    BorderBrush="{StaticResource GlassBorder}" BorderThickness="0,0,1,0">
                 <Border.Effect>
                     <DropShadowEffect Color="#000000" BlurRadius="16" ShadowDepth="4" Direction="0" Opacity="0.5"/>
                 </Border.Effect>
@@ -139,6 +143,35 @@
 
                     <!-- Avatar (bottom) -->
                     <Grid Grid.Row="4" Width="40" Height="40" Margin="0,0,0,16">
+                        <Grid.Style>
+                            <Style TargetType="Grid">
+                                <Setter Property="Effect">
+                                    <Setter.Value>
+                                        <DropShadowEffect Color="#5865F2" BlurRadius="0" ShadowDepth="0" Opacity="0"/>
+                                    </Setter.Value>
+                                </Setter>
+                                <Style.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Trigger.EnterActions>
+                                            <BeginStoryboard>
+                                                <Storyboard>
+                                                    <DoubleAnimation Storyboard.TargetProperty="Effect.BlurRadius" To="16" Duration="0:0:0.2"/>
+                                                    <DoubleAnimation Storyboard.TargetProperty="Effect.Opacity" To="0.6" Duration="0:0:0.2"/>
+                                                </Storyboard>
+                                            </BeginStoryboard>
+                                        </Trigger.EnterActions>
+                                        <Trigger.ExitActions>
+                                            <BeginStoryboard>
+                                                <Storyboard>
+                                                    <DoubleAnimation Storyboard.TargetProperty="Effect.BlurRadius" To="0" Duration="0:0:0.2"/>
+                                                    <DoubleAnimation Storyboard.TargetProperty="Effect.Opacity" To="0" Duration="0:0:0.2"/>
+                                                </Storyboard>
+                                            </BeginStoryboard>
+                                        </Trigger.ExitActions>
+                                    </Trigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Grid.Style>
                         <Ellipse Fill="#5865F2">
                             <Ellipse.Effect>
                                 <DropShadowEffect Color="#5865F2" BlurRadius="14" ShadowDepth="0" Opacity="0.6"/>
