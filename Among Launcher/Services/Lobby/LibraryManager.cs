@@ -67,17 +67,6 @@ public class LibraryManager
         return true;
     }
 
-    /// <summary>Moves a DLL out of a source folder into the library (deletes the source copy).</summary>
-    public bool MoveToLibrary(string sourceFilePath, string? downloadUrl = null, string? version = null)
-    {
-        if (AddToLibrary(sourceFilePath, downloadUrl, version))
-        {
-            try { File.Delete(sourceFilePath); } catch { /* best effort */ }
-            return true;
-        }
-        return false;
-    }
-
     /// <summary>Copies a library DLL into the game's plugins folder.</summary>
     public bool InstallToPlugins(string fileName, string pluginsDir)
     {

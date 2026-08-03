@@ -17,10 +17,4 @@ public class ModProfileManager
         _config.Profiles.Add(new ModProfile { Name = name, Mods = mods });
         _config.Save();
     }
-
-    public void DeleteProfile(string name)
-    {
-        _config.Profiles.RemoveAll(p => p.Name == name);
-        _config.Save();
-    }
 }

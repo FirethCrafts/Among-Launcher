@@ -27,6 +27,7 @@ public partial class MainWindow
     private string? _moddedPath;
     private readonly Services.Lobby.LobbyBackendClient _backend;
     private readonly Services.Lobby.LobbyWebSocketClient _ws;
+    // Kept for its ctor side-effects: subscribes _ws.Kicked / _ws.Rejoin.
     private readonly Services.Lobby.LobbyCommandService _commands;
     private Services.Lobby.LobbyHeartbeatService? _heartbeat;
     private readonly Config.LauncherConfig _config;
@@ -60,7 +61,6 @@ public partial class MainWindow
             },
             rejoin: cmd => RejoinAsync(cmd));
 
-        _mainView.RequestShowWelcome += (_, _) => ShowView(_welcomeView, showSidebar: false);
         _mainView.GameStateChanged += OnGameStateChanged;
         _welcomeView.LoginCompleted += OnLoginCompleted;
 
@@ -386,7 +386,7 @@ public partial class MainWindow
 
         var modSetSync = new Services.Lobby.ModSetSync(
             Path.Combine(moddedPath, "BepInEx", "plugins"),
-            (modId, url, dest) => DownloadModWithRetryAsync(modId, url, dest));
+            (modId, url, dest) => DownloadModAsync(modId, url, dest));
 
         var joinService = new Services.Lobby.LobbyJoinService(
             getLobby: (_, _) => Task.FromResult<LobbyInfo?>(lobby),
@@ -700,24 +700,6 @@ public partial class MainWindow
             .ToList();
     }
 
-    private async Task DownloadModWithRetryAsync(string modId, string url, string destPath)
-    {
-        var delays = new[] { 250, 500, 1000, 2000, 4000 };
-        for (var i = 0; i < delays.Length; i++)
-        {
-            try
-            {
-                await DownloadModAsync(modId, url, destPath);
-                return;
-            }
-            catch (IOException) when (i < delays.Length - 1)
-            {
-                LogDebug($"[Launcher] File locked, retry {i + 1}/{delays.Length} for {destPath}");
-                await Task.Delay(delays[i]);
-            }
-        }
-    }
-
     private async Task DownloadModAsync(string modId, string url, string destPath)
     {
         // Skip if already installed and non-empty
@@ -727,8 +709,9 @@ public partial class MainWindow
             return;
         }
 
-        // Retry up to 3 times for file lock issues
-        for (int attempt = 1; attempt <= 3; attempt++)
+        // Retry up to 5 times with backoff for file lock issues
+        var delays = new[] { 250, 500, 1000, 2000, 4000 };
+        for (int attempt = 0; attempt < delays.Length; attempt++)
         {
             try
             {
@@ -740,10 +723,10 @@ public partial class MainWindow
                 await stream.CopyToAsync(fileStream);
                 return; // success
             }
-            catch (IOException) when (attempt < 3)
+            catch (IOException) when (attempt < delays.Length - 1)
             {
-                LogDebug($"[Launcher] File locked, retrying in 2s (attempt {attempt}/3)...");
-                await Task.Delay(2000);
+                LogDebug($"[Launcher] File locked, retry {attempt + 1}/{delays.Length} for {destPath}");
+                await Task.Delay(delays[attempt]);
             }
         }
     }

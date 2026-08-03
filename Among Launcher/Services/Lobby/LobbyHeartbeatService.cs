@@ -1,5 +1,3 @@
-using AmongLauncher.Models;
-
 namespace AmongLauncher.Services.Lobby;
 
 public class LobbyHeartbeatService

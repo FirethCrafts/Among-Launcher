@@ -5,8 +5,6 @@ public static class GameFinder
     private const string AmongUsExe = "Among Us.exe";
     private const string AmongUsFolder = "Among Us";
 
-    public static string? FindAmongUs() => FindAmongUsWithStorefront().Path;
-
     public static GameSearchResult FindAmongUsForStorefront(Storefront? storefront)
     {
         switch (storefront)

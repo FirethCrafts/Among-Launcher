@@ -65,12 +65,6 @@ public class GameProcessManager
         }
     }
 
-    public void RestartGame(string exePath)
-    {
-        KillGame();
-        LaunchGame(exePath);
-    }
-
     public bool IsGameRunning()
     {
         return _gameProcess != null && !_gameProcess.HasExited;

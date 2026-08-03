@@ -12,18 +12,15 @@ public class LauncherConfig
 
     private static readonly string ConfigPath = Path.Combine(ConfigDir, "config.json");
 
-    public string GamePath { get; set; } = string.Empty;
     public Storefront? Storefront { get; set; }
     public string ServerUrl { get; set; } = "https://yourserver.com/api";
     public string ModdedInstallPath { get; set; } = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "AmongLauncher", "ModdedAmongUs");
-    public string LastModId { get; set; } = string.Empty;
     public string AvatarUrl { get; set; } = string.Empty;
     public string UserName { get; set; } = string.Empty;
     public string BackendWssUrl { get; set; } = "wss://yourserver.com/ws";
     public string DiscordAccessToken { get; set; } = string.Empty;
-    public long DiscordTokenExpiry { get; set; }
     public List<ModProfile> Profiles { get; set; } = new();
     public List<LibraryEntry> Library { get; set; } = new();
 

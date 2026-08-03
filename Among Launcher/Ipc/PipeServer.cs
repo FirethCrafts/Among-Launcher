@@ -16,10 +16,8 @@ public class PipeServer : IDisposable
     private readonly object _lock = new();
     private bool _disposed;
 
-    public bool IsClientConnected => _server?.IsConnected == true;
     public event EventHandler? ClientConnected;
     public event EventHandler? ClientDisconnected;
-    public event EventHandler<string>? RawMessageReceived;
 
     public PipeServer()
     {
@@ -104,8 +102,6 @@ public class PipeServer : IDisposable
             {
                 var message = await ReadMessageAsync(server, ct);
                 if (string.IsNullOrEmpty(message)) break;
-
-                RawMessageReceived?.Invoke(this, message);
 
                 // Log received message
                 LogDebug($"[Pipe] Received: {message}");

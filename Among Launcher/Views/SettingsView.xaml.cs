@@ -11,6 +11,21 @@ public partial class SettingsView
     private bool _isInitializing;
     private readonly AmongUsLocator _locator = new();
 
+    private static string StorefrontLabel(Storefront? storefront) => storefront switch
+    {
+        Storefront.Steam => "Steam",
+        Storefront.Epic => "Epic",
+        Storefront.MicrosoftStore => "Microsoft Store",
+        _ => "Auto"
+    };
+
+    private void SyncComboToStorefront(Storefront? storefront)
+    {
+        _isInitializing = true;
+        StorefrontCombo.SelectedItem = StorefrontLabel(storefront);
+        _isInitializing = false;
+    }
+
     public SettingsView()
     {
         InitializeComponent();
@@ -30,13 +45,7 @@ public partial class SettingsView
             StorefrontCombo.Items.Add("Microsoft Store");
             StorefrontCombo.Items.Add("Auto");
         }
-        StorefrontCombo.SelectedItem = config.Storefront switch
-        {
-            Storefront.Steam => "Steam",
-            Storefront.Epic => "Epic",
-            Storefront.MicrosoftStore => "Microsoft Store",
-            _ => "Auto"
-        };
+        SyncComboToStorefront(config.Storefront);
         _isInitializing = false;
 
         RefreshStorefrontSearch(config.Storefront);
@@ -150,19 +159,6 @@ public partial class SettingsView
         mainWindow.ModalOverlayControl.Show("Choose Among Us Installation", picker);
     }
 
-    private void SyncComboToStorefront(Storefront storefront)
-    {
-        _isInitializing = true;
-        StorefrontCombo.SelectedItem = storefront switch
-        {
-            Storefront.Steam => "Steam",
-            Storefront.Epic => "Epic",
-            Storefront.MicrosoftStore => "Microsoft Store",
-            _ => "Auto"
-        };
-        _isInitializing = false;
-    }
-
     private void SaveStorefront(Storefront? storefront)
     {
         var config = Config.LauncherConfig.Load();
@@ -183,21 +179,12 @@ public partial class SettingsView
         GamePathText.Text = selectedFolder;
 
         var config = Config.LauncherConfig.Load();
-        config.GamePath = selectedFolder;
 
         var matched = MatchStorefrontToFolder(selectedFolder);
         if (matched.HasValue)
         {
             config.Storefront = matched.Value;
-            _isInitializing = true;
-            StorefrontCombo.SelectedItem = matched.Value switch
-            {
-                Storefront.Steam => "Steam",
-                Storefront.Epic => "Epic",
-                Storefront.MicrosoftStore => "Microsoft Store",
-                _ => "Auto"
-            };
-            _isInitializing = false;
+            SyncComboToStorefront(matched.Value);
         }
 
         config.Save();

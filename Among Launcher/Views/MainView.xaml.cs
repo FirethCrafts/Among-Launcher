@@ -1,5 +1,4 @@
 using System.IO;
-using System.IO.Compression;
 using System.Net.Http;
 using System.Text.Json;
 using System.Threading;
@@ -22,7 +21,6 @@ public partial class MainView
     private readonly HttpClient _httpClient = new();
     private Storefront? _storefront;
 
-    public event EventHandler? RequestShowWelcome;
     public event EventHandler<bool>? GameStateChanged;
 
     public MainView()
@@ -539,25 +537,7 @@ public partial class MainView
     // Refresh Mods List
     public void RefreshModsList()
     {
-        if (string.IsNullOrEmpty(_moddedPath)) return;
-
-        var pluginsDir = Path.Combine(_moddedPath, "BepInEx", "plugins");
-        var mods = new List<ModInfo>();
-
-        if (Directory.Exists(pluginsDir))
-        {
-            foreach (var dllFile in Directory.GetFiles(pluginsDir, "*.dll"))
-            {
-                mods.Add(new ModInfo
-                {
-                    Name = Path.GetFileNameWithoutExtension(dllFile),
-                    Description = $"Size: {new FileInfo(dllFile).Length / 1024} KB",
-                    FilePath = dllFile
-                });
-            }
-        }
-
-        ModsList.ItemsSource = mods;
+        ModsList.ItemsSource = GetInstalledMods();
     }
 
     // Profile switcher (WIP: saved profiles store no download URLs, so applying
@@ -669,7 +649,7 @@ public partial class MainView
         StopGame();
 
         var pluginsDir = Path.Combine(_moddedPath, "BepInEx", "plugins");
-        var sync = new ModSetSync(pluginsDir, (_, url, dest) => DownloadModWithRetryAsync(url, dest));
+        var sync = new ModSetSync(pluginsDir, (_, url, dest) => DownloadModToFileAsync(url, dest));
 
         try
         {
@@ -708,33 +688,29 @@ public partial class MainView
         }
     }
 
-    private async Task DownloadModWithRetryAsync(string url, string destPath)
-    {
-        var delays = new[] { 250, 500, 1000, 2000, 4000 };
-        for (var i = 0; i < delays.Length; i++)
-        {
-            try
-            {
-                await DownloadModToFileAsync(url, destPath);
-                return;
-            }
-            catch (IOException) when (i < delays.Length - 1)
-            {
-                await Task.Delay(delays[i]);
-            }
-        }
-    }
-
     private async Task DownloadModToFileAsync(string url, string destPath)
     {
         if (File.Exists(destPath) && new FileInfo(destPath).Length > 0) return;
 
-        var response = await _httpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
-        response.EnsureSuccessStatusCode();
+        // Retry up to 5 times with backoff for file lock issues
+        var delays = new[] { 250, 500, 1000, 2000, 4000 };
+        for (var attempt = 0; attempt < delays.Length; attempt++)
+        {
+            try
+            {
+                var response = await _httpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
+                response.EnsureSuccessStatusCode();
 
-        using var stream = await response.Content.ReadAsStreamAsync();
-        using var fileStream = new FileStream(destPath, FileMode.Create, FileAccess.Write, FileShare.None);
-        await stream.CopyToAsync(fileStream);
+                using var stream = await response.Content.ReadAsStreamAsync();
+                using var fileStream = new FileStream(destPath, FileMode.Create, FileAccess.Write, FileShare.None);
+                await stream.CopyToAsync(fileStream);
+                return;
+            }
+            catch (IOException) when (attempt < delays.Length - 1)
+            {
+                await Task.Delay(delays[attempt]);
+            }
+        }
     }
 
     // Remove Mod
@@ -824,22 +800,20 @@ public partial class MainView
 
     public List<ModInfo> GetInstalledMods()
     {
-        if (string.IsNullOrEmpty(_moddedPath)) return new List<ModInfo>();
+        var mods = new List<ModInfo>();
+        if (string.IsNullOrEmpty(_moddedPath)) return mods;
 
         var pluginsDir = Path.Combine(_moddedPath, "BepInEx", "plugins");
-        var mods = new List<ModInfo>();
+        if (!Directory.Exists(pluginsDir)) return mods;
 
-        if (Directory.Exists(pluginsDir))
+        foreach (var dllFile in Directory.GetFiles(pluginsDir, "*.dll"))
         {
-            foreach (var dllFile in Directory.GetFiles(pluginsDir, "*.dll"))
+            mods.Add(new ModInfo
             {
-                mods.Add(new ModInfo
-                {
-                    Name = Path.GetFileNameWithoutExtension(dllFile),
-                    Description = $"Size: {new FileInfo(dllFile).Length / 1024} KB",
-                    FilePath = dllFile
-                });
-            }
+                Name = Path.GetFileNameWithoutExtension(dllFile),
+                Description = $"Size: {new FileInfo(dllFile).Length / 1024} KB",
+                FilePath = dllFile
+            });
         }
 
         return mods;
