@@ -24,19 +24,17 @@ public partial class SettingsView
 
     private void BrowseGamePath_Click(object sender, RoutedEventArgs e)
     {
-        var dialog = new OpenFileDialog
+        var dialog = new OpenFolderDialog
         {
-            Title = "Select Among Us.exe",
-            Filter = "Executable|Among Us.exe|All Files|*.*"
+            Title = "Select Among Us Folder"
         };
 
         if (dialog.ShowDialog() == true)
         {
-            var path = System.IO.Path.GetDirectoryName(dialog.FileName);
-            GamePathText.Text = path ?? dialog.FileName;
+            GamePathText.Text = dialog.FolderName;
 
             var config = Config.LauncherConfig.Load();
-            config.GamePath = path ?? dialog.FileName;
+            config.GamePath = dialog.FolderName;
             config.Save();
         }
     }
