@@ -105,12 +105,17 @@ public class PipeServer : IDisposable
 
                 RawMessageReceived?.Invoke(this, message);
 
+                // Log received message
+                LogDebug($"[Pipe] Received: {message}");
+
                 var doc = JsonDocument.Parse(message);
                 if (!doc.RootElement.TryGetProperty("type", out var typeProp))
                     continue;
 
                 var msgType = typeProp.GetString() ?? "";
                 var id = doc.RootElement.TryGetProperty("id", out var idProp) ? idProp.GetString() : null;
+
+                LogDebug($"[Pipe] Message type: {msgType}, id: {id}");
 
                 Func<JsonElement, Task<object?>>? handler;
                 lock (_lock)
@@ -120,12 +125,18 @@ public class PipeServer : IDisposable
 
                 if (handler != null)
                 {
+                    LogDebug($"[Pipe] Handling: {msgType}");
                     var response = await handler(doc.RootElement);
                     if (response != null)
                     {
                         var responseJson = JsonSerializer.Serialize(response);
                         await SendMessageAsync(server, responseJson, ct);
+                        LogDebug($"[Pipe] Sent response: {responseJson}");
                     }
+                }
+                else
+                {
+                    LogDebug($"[Pipe] No handler for: {msgType}");
                 }
             }
             catch (OperationCanceledException)
@@ -136,11 +147,22 @@ public class PipeServer : IDisposable
             {
                 break;
             }
-            catch
+            catch (Exception ex)
             {
+                LogDebug($"[Pipe] Error: {ex.Message}");
                 break;
             }
         }
+    }
+
+    private static void LogDebug(string message)
+    {
+        try
+        {
+            var logPath = Path.Combine(Path.GetTempPath(), "AmongLauncher_ipc.log");
+            File.AppendAllText(logPath, $"[{DateTime.Now:HH:mm:ss}] {message}\n");
+        }
+        catch { }
     }
 
     public async Task BroadcastMessageAsync(string messageType, object? payload = null)

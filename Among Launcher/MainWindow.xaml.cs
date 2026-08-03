@@ -54,6 +54,8 @@ public partial class MainWindow
             var downloadUrl = payload.GetProperty("downloadUrl").GetString() ?? "";
             var fileName = payload.GetProperty("fileName").GetString() ?? "";
 
+            LogDebug($"[Launcher] install_mod received: modId={modId}, url={downloadUrl}, file={fileName}");
+
             if (string.IsNullOrEmpty(downloadUrl) || string.IsNullOrEmpty(fileName))
                 return new { type = "error", message = "Missing downloadUrl or fileName" };
 
@@ -65,6 +67,8 @@ public partial class MainWindow
             Directory.CreateDirectory(pluginsDir);
 
             var destPath = Path.Combine(pluginsDir, fileName);
+            LogDebug($"[Launcher] Downloading {fileName} to {destPath}");
+
             var task = DownloadModAsync(modId, downloadUrl, destPath);
 
             lock (_pendingLock) { _pendingInstalls.Add(task); }
@@ -76,6 +80,7 @@ public partial class MainWindow
 
                 if (t.IsCompletedSuccessfully)
                 {
+                    LogDebug($"[Launcher] Download complete: {fileName}");
                     Dispatcher.Invoke(() =>
                     {
                         if (ContentArea.Content is MainView mv)
@@ -87,6 +92,7 @@ public partial class MainWindow
                 else
                 {
                     var error = t.Exception?.InnerException?.Message ?? "Download failed";
+                    LogDebug($"[Launcher] Download failed: {fileName} - {error}");
                     _pipeServer.BroadcastMessageAsync("mod_installed",
                         new { modId, fileName, success = false, error });
                 }
@@ -100,6 +106,7 @@ public partial class MainWindow
         // Handler: AmongAPI requests game restart after all installs complete
         _pipeServer.RegisterHandler("restart_after_install", _ =>
         {
+            LogDebug("[Launcher] restart_after_install received");
             _restartRequested = true;
 
             Dispatcher.Invoke(() =>
@@ -108,6 +115,7 @@ public partial class MainWindow
                     mv.StopGame();
             });
 
+            LogDebug($"[Launcher] Pending installs: {_pendingInstalls.Count}, restart requested: {_restartRequested}");
             CheckRestartAfterInstall();
 
             return Task.FromResult<object?>(new { type = "restart_ack", status = "waiting_for_installs" });
@@ -320,5 +328,15 @@ public partial class MainWindow
 
         return Directory.GetFiles(dir).Length == 0 &&
                Directory.GetDirectories(dir).Length == 0;
+    }
+
+    private static void LogDebug(string message)
+    {
+        try
+        {
+            var logPath = Path.Combine(Path.GetTempPath(), "AmongLauncher_ipc.log");
+            File.AppendAllText(logPath, $"[{DateTime.Now:HH:mm:ss}] {message}\n");
+        }
+        catch { }
     }
 }
