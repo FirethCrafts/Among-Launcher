@@ -25,12 +25,7 @@ public static class GameAssembly
         Type? result = null;
         try
         {
-            var asm = GetAssembly();
-            if (asm != null)
-            {
-                result = asm.GetType(name, false, true);
-                result ??= asm.GetTypes().FirstOrDefault(t => t.Name == name);
-            }
+            result = ResolveType(name);
         }
         catch (Exception ex)
         {
@@ -43,6 +38,67 @@ public static class GameAssembly
             Log?.LogInfo($"[GameAssembly] Resolved type '{result.FullName}'");
         }
         return result;
+    }
+
+    private static Type? ResolveType(string name)
+    {
+        // 1. Assembly-CSharp (all game types).
+        var acs = GetAssembly();
+        if (acs != null)
+        {
+            var t = acs.GetType(name, false, true) ?? acs.GetTypes().FirstOrDefault(x => x.Name == name);
+            if (t != null) return t;
+        }
+
+        // 2. Any other already-loaded assembly (covers Il2CppInterop.Runtime, Il2CppSystem.*, UnityEngine.*).
+        foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+        {
+            if (ReferenceEquals(asm, acs)) continue;
+            try
+            {
+                var t = asm.GetType(name, false, true) ?? asm.GetTypes().FirstOrDefault(x => x.Name == name);
+                if (t != null) return t;
+            }
+            catch
+            {
+                // Some interop assemblies cannot enumerate their types; skip.
+            }
+        }
+
+        // 3. On-disk fallback for the Il2CppInterop runtime (BepInEx core).
+        var interopRuntime = LoadAssemblyByName("Il2CppInterop.Runtime");
+        if (interopRuntime != null)
+        {
+            var t = interopRuntime.GetType(name, false, true) ?? interopRuntime.GetTypes().FirstOrDefault(x => x.Name == name);
+            if (t != null) return t;
+        }
+        return null;
+    }
+
+    private static Assembly? LoadAssemblyByName(string simpleName)
+    {
+        try
+        {
+            var loaded = AppDomain.CurrentDomain.GetAssemblies()
+                .FirstOrDefault(a => string.Equals(a.GetName().Name, simpleName, StringComparison.OrdinalIgnoreCase));
+            if (loaded != null) return loaded;
+
+            foreach (var dir in new[]
+                     {
+                         Path.Combine(Environment.CurrentDirectory, "BepInEx", "core"),
+                         Path.Combine(Environment.CurrentDirectory, "BepInEx", "interop")
+                     })
+            {
+                var path = Path.Combine(dir, simpleName + ".dll");
+                if (File.Exists(path))
+                    return Assembly.LoadFrom(path);
+            }
+        }
+        catch (Exception ex)
+        {
+            Log?.LogWarning($"[GameAssembly] Load '{simpleName}' failed: {ex.Message}");
+        }
+        return null;
     }
 
     public static object? GetStaticProp(Type? type, string name)
@@ -107,6 +163,114 @@ public static class GameAssembly
         }
     }
 
+    public static object? CallInstanceMethod(object? instance, string name, object?[]? args = null, Type[]? argTypes = null)
+    {
+        if (instance == null) return null;
+        try
+        {
+            var type = instance.GetType();
+
+            if (argTypes != null)
+            {
+                var key = $"{type.FullName}::{name}({string.Join(",", argTypes.Select(t => t.Name))})i";
+                MethodInfo? method;
+                if (MemberCache.TryGetValue(key, out var cached) && cached is MethodInfo m)
+                {
+                    method = m;
+                }
+                else
+                {
+                    method = type.GetMethod(name, BindingFlags.Public | BindingFlags.Instance, null, argTypes, null);
+                    if (method != null)
+                        MemberCache[key] = method;
+                }
+                return method?.Invoke(instance, args);
+            }
+
+            // Best-match fallback: resolve by name + parameter count + assignability.
+            // Needed when the exact parameter type (e.g. Il2CppSystem.Collections.IEnumerator)
+            // cannot be expressed with compile-time types.
+            var candidates = type.GetMethods(BindingFlags.Public | BindingFlags.Instance)
+                .Where(m => m.Name == name && m.GetParameters().Length == (args?.Length ?? 0))
+                .Where(m => ArgsMatch(m, args))
+                .ToList();
+            if (candidates.Count == 0)
+            {
+                Log?.LogWarning($"[GameAssembly] No matching instance method {type.Name}.{name} for {args?.Length ?? 0} arg(s).");
+                return null;
+            }
+            if (candidates.Count > 1)
+                Log?.LogWarning($"[GameAssembly] {type.Name}.{name} is ambiguous ({candidates.Count} matches); using first.");
+            return candidates[0].Invoke(instance, args);
+        }
+        catch (Exception ex)
+        {
+            Log?.LogWarning($"[GameAssembly] Call {instance.GetType().Name}.{name} failed: {ex.Message}");
+            return null;
+        }
+    }
+
+    public static bool HasInstanceMethod(object? instance, string name, int argCount)
+    {
+        if (instance == null) return false;
+        try
+        {
+            return instance.GetType()
+                .GetMethods(BindingFlags.Public | BindingFlags.Instance)
+                .Any(m => m.Name == name && m.GetParameters().Length == argCount);
+        }
+        catch (Exception ex)
+        {
+            Log?.LogWarning($"[GameAssembly] HasMethod {instance.GetType().Name}.{name} failed: {ex.Message}");
+            return false;
+        }
+    }
+
+    public static object? CreateInstance(Type? type, object?[]? args, Type[]? argTypes = null)
+    {
+        if (type == null) return null;
+        try
+        {
+            if (argTypes != null)
+            {
+                var key = $"{type.FullName}::new({string.Join(",", argTypes.Select(t => t.Name))})";
+                ConstructorInfo? ctor;
+                if (MemberCache.TryGetValue(key, out var cached) && cached is ConstructorInfo ci)
+                {
+                    ctor = ci;
+                }
+                else
+                {
+                    ctor = type.GetConstructor(BindingFlags.Public | BindingFlags.Instance, null, argTypes, null);
+                    if (ctor != null)
+                        MemberCache[key] = ctor;
+                }
+                return ctor?.Invoke(args);
+            }
+            return Activator.CreateInstance(type, args);
+        }
+        catch (Exception ex)
+        {
+            Log?.LogWarning($"[GameAssembly] Create {type.Name} failed: {ex.Message}");
+            return null;
+        }
+    }
+
+    public static Type? GenericType(string genericDefinitionName, params Type[] typeArgs)
+    {
+        var definition = Type(genericDefinitionName);
+        if (definition == null) return null;
+        try
+        {
+            return definition.MakeGenericType(typeArgs);
+        }
+        catch (Exception ex)
+        {
+            Log?.LogWarning($"[GameAssembly] MakeGenericType {genericDefinitionName} failed: {ex.Message}");
+            return null;
+        }
+    }
+
     public static object? EnumValue(Type? enumType, string name)
     {
         if (enumType == null || !enumType.IsEnum) return null;
@@ -141,6 +305,25 @@ public static class GameAssembly
         if (resolved != null)
             MemberCache[key] = resolved;
         return resolved;
+    }
+
+    private static bool ArgsMatch(MethodInfo method, object?[]? args)
+    {
+        var parameters = method.GetParameters();
+        for (int i = 0; i < parameters.Length; i++)
+        {
+            var param = parameters[i];
+            var arg = args![i];
+            if (arg == null)
+            {
+                if (param.ParameterType.IsValueType && Nullable.GetUnderlyingType(param.ParameterType) == null)
+                    return false;
+                continue;
+            }
+            if (!param.ParameterType.IsInstanceOfType(arg))
+                return false;
+        }
+        return true;
     }
 
     private static Assembly? GetAssembly()

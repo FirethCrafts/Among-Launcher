@@ -67,6 +67,32 @@ public class Plugin : BasePlugin
             };
             tracker.Start();
 
+            // In-game direct lobby join (Task 15)
+            var joiner = new LobbyJoiner(Log);
+            pipe.Disconnected += (_, _) => joiner.Dispose();
+
+            pipe.RegisterHandler("join_lobby", async element =>
+            {
+                JoinResult result;
+                try
+                {
+                    var payload = element.TryGetProperty("payload", out var p) ? p : default;
+                    var code = ReadString(payload, "code");
+                    var region = ReadString(payload, "region");
+                    var regionIp = ReadString(payload, "regionIp");
+                    var regionPort = ReadInt(payload, "regionPort");
+                    result = await joiner.JoinAsync(code, region, regionIp, regionPort);
+                }
+                catch (Exception ex)
+                {
+                    result = new JoinResult(false, ex.Message);
+                }
+
+                FileLogger.Info($"Join lobby result -> success={result.Success} error={result.Error ?? "none"}");
+                _ = pipe.SendMessageAsync("join_lobby_result", new { success = result.Success, error = result.Error });
+                return new { success = result.Success, error = result.Error };
+            });
+
             // Stop polling if the launcher connection drops
             pipe.Disconnected += (_, _) => tracker.Stop();
 
@@ -78,5 +104,19 @@ public class Plugin : BasePlugin
             FileLogger.Error($"Error: {ex.Message}");
             Log.LogError($"[{MyPluginInfo.PLUGIN_NAME}] Error: {ex.Message}");
         }
+    }
+
+    private static string ReadString(JsonElement payload, string name)
+        => payload.ValueKind == JsonValueKind.Object && payload.TryGetProperty(name, out var prop)
+            ? prop.GetString() ?? ""
+            : "";
+
+    private static int ReadInt(JsonElement payload, string name)
+    {
+        if (payload.ValueKind != JsonValueKind.Object || !payload.TryGetProperty(name, out var prop))
+            return 0;
+        if (prop.ValueKind == JsonValueKind.Number)
+            return prop.GetInt32();
+        return int.TryParse(prop.GetString(), out var value) ? value : 0;
     }
 }
