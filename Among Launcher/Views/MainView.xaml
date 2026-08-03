@@ -161,6 +161,29 @@
                         </DataTemplate>
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
+
+                <!-- Profile Switcher -->
+                <StackPanel Margin="0,16,0,0">
+                    <TextBlock Text="PROFILES" Style="{StaticResource CardHeader}" Margin="0,0,0,8"/>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <ComboBox x:Name="ProfileCombo" Grid.Column="0"
+                                  Height="32" Padding="8,4" Margin="0,0,12,0"
+                                  VerticalAlignment="Center" FontSize="13"/>
+                        <Button x:Name="SaveProfileButton" Grid.Column="1" Content="Save Profile"
+                                Click="SaveProfileButton_Click"
+                                Style="{StaticResource SecondaryButton}"
+                                Height="28" Padding="12,4" FontSize="12" Margin="0,0,8,0"/>
+                        <Button x:Name="ApplyProfileButton" Grid.Column="2" Content="Apply Profile"
+                                Click="ApplyProfileButton_Click"
+                                Style="{StaticResource SecondaryButton}"
+                                Height="28" Padding="12,4" FontSize="12"/>
+                    </Grid>
+                </StackPanel>
             </StackPanel>
         </Border>
 

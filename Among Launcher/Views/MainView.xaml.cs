@@ -1,13 +1,16 @@
 using System.IO;
 using System.IO.Compression;
 using System.Net.Http;
+using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
 using Microsoft.Win32;
+using AmongLauncher.Config;
 using AmongLauncher.Game;
 using AmongLauncher.Installer;
 using AmongLauncher.Models;
 using AmongLauncher.GameDetection;
+using AmongLauncher.Services.Lobby;
 
 namespace AmongLauncher.Views;
 
@@ -34,6 +37,7 @@ public partial class MainView
     {
         await CheckGameStatus();
         RefreshModsList();
+        RefreshProfiles();
     }
 
     private async Task CheckGameStatus()
@@ -317,6 +321,168 @@ public partial class MainView
         }
 
         ModsList.ItemsSource = mods;
+    }
+
+    // Profile switcher
+    private void RefreshProfiles()
+    {
+        var profiles = new ModProfileManager(LauncherConfig.Load()).LoadProfiles();
+        ProfileCombo.DisplayMemberPath = nameof(ModProfile.Name);
+        ProfileCombo.ItemsSource = profiles;
+    }
+
+    private void SaveProfileButton_Click(object sender, RoutedEventArgs e)
+    {
+        var mods = GetInstalledMods();
+        if (mods.Count == 0)
+        {
+            MessageBox.Show("No mods are currently installed to save.", "Save Profile",
+                MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var mainWindow = Window.GetWindow(this) as MainWindow;
+        if (mainWindow == null) return;
+
+        var saveButton = new Button
+        {
+            Content = "Save",
+            Height = 36,
+            Padding = new Thickness(20, 8, 20, 8)
+        };
+        var nameInput = new TextBox { Style = (Style)FindResource("GlassInput"), Margin = new Thickness(0, 0, 0, 16) };
+        nameInput.KeyDown += (_, args) =>
+        {
+            if (args.Key == System.Windows.Input.Key.Enter)
+                saveButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        };
+
+        var cancelButton = new Button
+        {
+            Content = "Cancel",
+            Style = (Style)FindResource("SecondaryButton"),
+            Height = 36,
+            Padding = new Thickness(20, 8, 20, 8),
+            Margin = new Thickness(0, 0, 12, 0)
+        };
+
+        var buttons = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right
+        };
+        buttons.Children.Add(cancelButton);
+        buttons.Children.Add(saveButton);
+
+        var panel = new StackPanel();
+        panel.Children.Add(new TextBlock
+        {
+            Text = "Enter a name for this mod profile:",
+            Foreground = (System.Windows.Media.Brush)FindResource("TextBody"),
+            FontSize = 14,
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 0, 0, 12)
+        });
+        panel.Children.Add(nameInput);
+        panel.Children.Add(buttons);
+
+        saveButton.Click += (_, _) =>
+        {
+            var name = nameInput.Text.Trim();
+            if (string.IsNullOrEmpty(name))
+            {
+                MessageBox.Show("Profile name cannot be empty.", "Save Profile",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            mainWindow.ModalOverlayControl.Hide();
+            var entries = mods
+                .Select(m => new ModSetEntry { FileName = Path.GetFileName(m.FilePath) })
+                .ToList();
+            new ModProfileManager(LauncherConfig.Load()).SaveProfile(name, entries);
+            RefreshProfiles();
+            ModStatusText.Text = $"Profile '{name}' saved with {entries.Count} mod(s).";
+        };
+
+        cancelButton.Click += (_, _) => mainWindow.ModalOverlayControl.Hide();
+
+        mainWindow.ModalOverlayControl.Show("Save Profile", panel);
+        nameInput.Focus();
+    }
+
+    private async void ApplyProfileButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (ProfileCombo.SelectedItem is not ModProfile profile)
+        {
+            MessageBox.Show("Select a profile to apply first.", "Apply Profile",
+                MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        if (string.IsNullOrEmpty(_moddedPath))
+        {
+            MessageBox.Show("Please install BepInEx first.", "Apply Profile",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        StopGame();
+
+        var pluginsDir = Path.Combine(_moddedPath, "BepInEx", "plugins");
+        var sync = new ModSetSync(pluginsDir, (_, url, dest) => DownloadModWithRetryAsync(url, dest));
+
+        try
+        {
+            ShowProgress($"Syncing profile '{profile.Name}'...");
+            var missing = await sync.DiffAsync(profile.Mods, CancellationToken.None);
+            if (missing.Count > 0)
+            {
+                ProgressText.Text = $"Installing {missing.Count} missing mod(s)...";
+                await sync.InstallAsync(missing, null, CancellationToken.None);
+                RefreshModsList();
+            }
+
+            ModStatusText.Text = $"Profile '{profile.Name}' applied.";
+            LaunchGame();
+        }
+        catch (Exception ex)
+        {
+            ModStatusText.Text = $"Failed to apply profile: {ex.Message}";
+        }
+        finally
+        {
+            HideProgress();
+        }
+    }
+
+    private async Task DownloadModWithRetryAsync(string url, string destPath)
+    {
+        var delays = new[] { 250, 500, 1000, 2000, 4000 };
+        for (var i = 0; i < delays.Length; i++)
+        {
+            try
+            {
+                await DownloadModToFileAsync(url, destPath);
+                return;
+            }
+            catch (IOException) when (i < delays.Length - 1)
+            {
+                await Task.Delay(delays[i]);
+            }
+        }
+    }
+
+    private async Task DownloadModToFileAsync(string url, string destPath)
+    {
+        if (File.Exists(destPath) && new FileInfo(destPath).Length > 0) return;
+
+        var response = await _httpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
+        response.EnsureSuccessStatusCode();
+
+        using var stream = await response.Content.ReadAsStreamAsync();
+        using var fileStream = new FileStream(destPath, FileMode.Create, FileAccess.Write, FileShare.None);
+        await stream.CopyToAsync(fileStream);
     }
 
     // Remove Mod
