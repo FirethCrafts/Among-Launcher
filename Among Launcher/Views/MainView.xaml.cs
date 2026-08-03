@@ -202,12 +202,27 @@ public partial class MainView
         Directory.CreateDirectory(pluginsDir);
 
         var installed = 0;
+
+        Dispatcher.Invoke(() =>
+        {
+            ModStatusText.Text = "Checking for mods...";
+            ShowProgress("Checking for mods...");
+        });
+
+        // Small delay so user can see the status
+        await Task.Delay(500);
+
         foreach (var mod in manifest.Mods)
         {
             var destPath = Path.Combine(pluginsDir, mod.FileName);
+
+            Dispatcher.Invoke(() => ModStatusText.Text = $"Checking {mod.FileName}...");
+            await Task.Delay(300);
+
             if (File.Exists(destPath) && new FileInfo(destPath).Length > 0)
             {
-                Dispatcher.Invoke(() => ModStatusText.Text = $"✓ {mod.FileName} already installed");
+                Dispatcher.Invoke(() => ModStatusText.Text = $"✓ {mod.FileName} ready");
+                await Task.Delay(200);
                 continue;
             }
 
@@ -218,6 +233,7 @@ public partial class MainView
             installed++;
 
             Dispatcher.Invoke(() => ModStatusText.Text = $"✓ {mod.FileName} installed");
+            await Task.Delay(200);
         }
 
         HideProgress();
