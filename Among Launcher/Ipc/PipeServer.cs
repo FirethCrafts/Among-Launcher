@@ -19,17 +19,6 @@ public class PipeServer : IDisposable
     public event EventHandler? ClientConnected;
     public event EventHandler? ClientDisconnected;
 
-    public PipeServer()
-    {
-        RegisterHandler("heartbeat", _ => Task.FromResult<object?>(new { type = "heartbeat_ack" }));
-        RegisterHandler("mod_status", HandleModStatusAsync);
-        RegisterHandler("download_progress", HandleDownloadProgressAsync);
-        RegisterHandler("mod_installed", HandleModInstalledAsync);
-        RegisterHandler("mod_uninstalled", HandleModUninstalledAsync);
-        RegisterHandler("game_ready", HandleGameReadyAsync);
-        RegisterHandler("error", HandleErrorAsync);
-    }
-
     public void RegisterHandler(string messageType, Func<JsonElement, Task<object?>> handler)
     {
         lock (_lock)
@@ -153,19 +142,7 @@ public class PipeServer : IDisposable
         }
     }
 
-    private static void LogDebug(string message)
-    {
-        try
-        {
-            var logDir = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "AmongLauncher");
-            Directory.CreateDirectory(logDir);
-            var logPath = Path.Combine(logDir, "AmongLauncher_ipc.log");
-            File.AppendAllText(logPath, $"[{DateTime.Now:HH:mm:ss}] {message}\n");
-        }
-        catch { }
-    }
+    private static void LogDebug(string message) => Services.LauncherLog.Write(message);
 
     public async Task BroadcastMessageAsync(string messageType, object? payload = null)
     {
@@ -217,38 +194,6 @@ public class PipeServer : IDisposable
         }
 
         return Encoding.UTF8.GetString(buffer, 0, totalRead);
-    }
-
-    private static Task<object?> HandleModStatusAsync(JsonElement element)
-    {
-        return Task.FromResult<object?>(new { type = "mod_status_ack", status = "ok" });
-    }
-
-    private Task<object?> HandleDownloadProgressAsync(JsonElement element)
-    {
-        return Task.FromResult<object?>(null);
-    }
-
-    private Task<object?> HandleModInstalledAsync(JsonElement element)
-    {
-        return Task.FromResult<object?>(new { type = "mod_installed_ack", status = "ok" });
-    }
-
-    private Task<object?> HandleModUninstalledAsync(JsonElement element)
-    {
-        return Task.FromResult<object?>(new { type = "mod_uninstalled_ack", status = "ok" });
-    }
-
-    private Task<object?> HandleGameReadyAsync(JsonElement element)
-    {
-        return Task.FromResult<object?>(new { type = "game_ready_ack", status = "ok" });
-    }
-
-    private Task<object?> HandleErrorAsync(JsonElement element)
-    {
-        var message = element.TryGetProperty("message", out var msg) ? msg.GetString() : "Unknown error";
-        Console.WriteLine($"[AmongAPI Error] {message}");
-        return Task.FromResult<object?>(null);
     }
 
     public void Dispose()

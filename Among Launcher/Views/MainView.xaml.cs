@@ -104,9 +104,7 @@ public partial class MainView
 
         _storefront = storefront ?? Storefront.Steam;
 
-        _moddedPath = System.IO.Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "AmongLauncher", "ModdedAmongUs");
+        _moddedPath = Config.LauncherConfig.DefaultModdedPath();
 
         ShowProgress("Copying Among Us installation...");
 
@@ -680,30 +678,8 @@ public partial class MainView
         }
     }
 
-    private async Task DownloadModToFileAsync(string url, string destPath)
-    {
-        if (File.Exists(destPath) && new FileInfo(destPath).Length > 0) return;
-
-        // Retry up to 5 times with backoff for file lock issues
-        var delays = new[] { 250, 500, 1000, 2000, 4000 };
-        for (var attempt = 0; attempt < delays.Length; attempt++)
-        {
-            try
-            {
-                var response = await _httpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
-                response.EnsureSuccessStatusCode();
-
-                using var stream = await response.Content.ReadAsStreamAsync();
-                using var fileStream = new FileStream(destPath, FileMode.Create, FileAccess.Write, FileShare.None);
-                await stream.CopyToAsync(fileStream);
-                return;
-            }
-            catch (IOException) when (attempt < delays.Length - 1)
-            {
-                await Task.Delay(delays[attempt]);
-            }
-        }
-    }
+    private Task DownloadModToFileAsync(string url, string destPath) =>
+        Services.ModDownloader.DownloadToFileAsync(_httpClient, url, destPath);
 
     // Remove Mod
     private void RemoveMod_Click(object sender, RoutedEventArgs e)

@@ -12,11 +12,13 @@ public class LauncherConfig
 
     private static readonly string ConfigPath = Path.Combine(ConfigDir, "config.json");
 
-    public Storefront? Storefront { get; set; }
-    public string ServerUrl { get; set; } = "https://yourserver.com/api";
-    public string ModdedInstallPath { get; set; } = Path.Combine(
+    public static string DefaultModdedPath() => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "AmongLauncher", "ModdedAmongUs");
+
+    public Storefront? Storefront { get; set; }
+    public string ServerUrl { get; set; } = "https://yourserver.com/api";
+    public string ModdedInstallPath { get; set; } = DefaultModdedPath();
     public string AvatarUrl { get; set; } = string.Empty;
     public string UserName { get; set; } = string.Empty;
     public string BackendWssUrl { get; set; } = "wss://yourserver.com/ws";

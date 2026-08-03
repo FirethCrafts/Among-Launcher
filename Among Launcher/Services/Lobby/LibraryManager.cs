@@ -12,8 +12,6 @@ public class LibraryManager
     private readonly LauncherConfig _config;
     private readonly string _libraryDir;
 
-    public string LibraryDir => _libraryDir;
-
     public LibraryManager(LauncherConfig config)
     {
         _config = config;

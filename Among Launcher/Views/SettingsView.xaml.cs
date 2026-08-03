@@ -215,9 +215,7 @@ public partial class SettingsView
 
         if (result != MessageBoxResult.Yes) return;
 
-        var moddedPath = System.IO.Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "AmongLauncher", "ModdedAmongUs");
+        var moddedPath = Config.LauncherConfig.DefaultModdedPath();
 
         if (System.IO.Directory.Exists(moddedPath))
         {

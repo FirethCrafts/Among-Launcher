@@ -19,9 +19,6 @@ public partial class MainWindow
     public MainView MainView => _mainView;
     private readonly PipeServer _pipeServer = new();
     private readonly HttpClient _httpClient = new();
-    private readonly List<Task> _pendingInstalls = new();
-    private readonly object _pendingLock = new();
-    private bool _restartRequested;
     private string? _moddedPath;
     private readonly Services.Lobby.LobbyBackendClient _backend;
     private readonly Services.Lobby.LobbyWebSocketClient _ws;
@@ -81,96 +78,6 @@ public partial class MainWindow
                     mv.UpdateConnectionStatus(false);
             });
         };
-
-        // Handler: AmongAPI requests mod install (downloads anytime, regardless of game state)
-        _pipeServer.RegisterHandler("install_mod", async element =>
-        {
-            var payload = element.GetProperty("payload");
-            var modId = payload.GetProperty("modId").GetString() ?? "unknown";
-            var downloadUrl = payload.GetProperty("downloadUrl").GetString() ?? "";
-            var fileName = payload.GetProperty("fileName").GetString() ?? "";
-
-            LogDebug($"[Launcher] install_mod received: modId={modId}, url={downloadUrl}, file={fileName}");
-
-            if (string.IsNullOrEmpty(downloadUrl) || string.IsNullOrEmpty(fileName))
-                return new { type = "error", message = "Missing downloadUrl or fileName" };
-
-            var moddedPath = Dispatcher.Invoke(() => GetModdedPath());
-            if (string.IsNullOrEmpty(moddedPath))
-                return new { type = "error", message = "Modded Among Us not installed" };
-
-            var pluginsDir = Path.Combine(moddedPath, "BepInEx", "plugins");
-            Directory.CreateDirectory(pluginsDir);
-
-            var destPath = Path.Combine(pluginsDir, fileName);
-            LogDebug($"[Launcher] Downloading {fileName} to {destPath}");
-
-            var task = DownloadModAsync(modId, downloadUrl, destPath);
-
-            lock (_pendingLock) { _pendingInstalls.Add(task); }
-
-            // Report progress back to AmongAPI
-            _ = task.ContinueWith(t =>
-            {
-                lock (_pendingLock) { _pendingInstalls.Remove(task); }
-
-                if (t.IsCompletedSuccessfully)
-                {
-                    LogDebug($"[Launcher] Download complete: {fileName}");
-                    Dispatcher.Invoke(() =>
-                    {
-                        if (ContentArea.Content is MainView mv)
-                            mv.RefreshModsList();
-                    });
-                    _pipeServer.BroadcastMessageAsync("mod_installed",
-                        new { modId, fileName, success = true });
-                }
-                else
-                {
-                    var error = t.Exception?.InnerException?.Message ?? "Download failed";
-                    LogDebug($"[Launcher] Download failed: {fileName} - {error}");
-                    _pipeServer.BroadcastMessageAsync("mod_installed",
-                        new { modId, fileName, success = false, error });
-                }
-
-                CheckRestartAfterInstall();
-            });
-
-            return new { type = "install_mod_ack", modId, status = "downloading" };
-        });
-
-        // Handler: AmongAPI requests game restart after all installs complete
-        _pipeServer.RegisterHandler("restart_after_install", async _ =>
-        {
-            LogDebug("[Launcher] restart_after_install received");
-            _restartRequested = true;
-
-            Dispatcher.Invoke(() =>
-            {
-                if (ContentArea.Content is MainView mv)
-                    mv.StopGame();
-            });
-
-            // Wait for game process to fully exit
-            await Task.Delay(2000);
-
-            LogDebug($"[Launcher] Pending installs: {_pendingInstalls.Count}, restart requested: {_restartRequested}");
-            CheckRestartAfterInstall();
-
-            return new { type = "restart_ack", status = "waiting_for_installs" };
-        });
-
-        // Handler: mod_status request
-        _pipeServer.RegisterHandler("mod_status", async element =>
-        {
-            var mods = await Task.Run(() => Dispatcher.Invoke(() =>
-            {
-                if (ContentArea.Content is MainView mv)
-                    return mv.GetInstalledMods();
-                return new List<ModInfo>();
-            }));
-            return new { type = "mod_status_response", mods = mods.Select(m => new { m.Name, m.FilePath }).ToArray() };
-        });
 
         // Handler: game_ready - AmongAPI loaded and connected
         _pipeServer.RegisterHandler("game_ready", _ =>
@@ -384,27 +291,14 @@ public partial class MainWindow
 
         var modSetSync = new Services.Lobby.ModSetSync(
             Path.Combine(moddedPath, "BepInEx", "plugins"),
-            (modId, url, dest) => DownloadModAsync(modId, url, dest));
+            (_, url, dest) => DownloadModAsync(url, dest));
 
         var joinService = new Services.Lobby.LobbyJoinService(
             getLobby: (_, _) => Task.FromResult<LobbyInfo?>(lobby),
             ensureSetup: _ => Task.FromResult(
                 GetModdedPath() != null &&
                 File.Exists(Path.Combine(GetModdedPath()!, "winhttp.dll"))),
-            killGame: async () =>
-            {
-                Dispatcher.Invoke(() =>
-                {
-                    if (ContentArea.Content is MainView mv)
-                        mv.StopGame();
-                });
-                var waited = 0;
-                while (IsAmongUsRunning() && waited < 30)
-                {
-                    await Task.Delay(500);
-                    waited++;
-                }
-            },
+            killGame: () => StopGameAndWaitAsync(),
             launchGame: () =>
             {
                 _gameReadyTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -439,17 +333,7 @@ public partial class MainWindow
         {
             LogDebug($"[Launcher] Rejoin command received for lobby {cmd.LobbyCode}");
 
-            Dispatcher.Invoke(() =>
-            {
-                if (ContentArea.Content is MainView mv)
-                    mv.StopGame();
-            });
-            var waited = 0;
-            while (IsAmongUsRunning() && waited < 30)
-            {
-                await Task.Delay(500);
-                waited++;
-            }
+            await StopGameAndWaitAsync();
 
             Dispatcher.Invoke(() =>
             {
@@ -678,9 +562,7 @@ public partial class MainWindow
         if (!string.IsNullOrEmpty(_moddedPath) && Directory.Exists(_moddedPath))
             return _moddedPath;
 
-        _moddedPath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "AmongLauncher", "ModdedAmongUs");
+        _moddedPath = Config.LauncherConfig.DefaultModdedPath();
 
         return Directory.Exists(_moddedPath) ? _moddedPath : null;
     }
@@ -698,57 +580,8 @@ public partial class MainWindow
             .ToList();
     }
 
-    private async Task DownloadModAsync(string modId, string url, string destPath)
-    {
-        // Skip if already installed and non-empty
-        if (File.Exists(destPath) && new FileInfo(destPath).Length > 0)
-        {
-            LogDebug($"[Launcher] {Path.GetFileName(destPath)} already exists, skipping download");
-            return;
-        }
-
-        // Retry up to 5 times with backoff for file lock issues
-        var delays = new[] { 250, 500, 1000, 2000, 4000 };
-        for (int attempt = 0; attempt < delays.Length; attempt++)
-        {
-            try
-            {
-                var response = await _httpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
-                response.EnsureSuccessStatusCode();
-
-                using var stream = await response.Content.ReadAsStreamAsync();
-                using var fileStream = new FileStream(destPath, FileMode.Create, FileAccess.Write, FileShare.None);
-                await stream.CopyToAsync(fileStream);
-                return; // success
-            }
-            catch (IOException) when (attempt < delays.Length - 1)
-            {
-                LogDebug($"[Launcher] File locked, retry {attempt + 1}/{delays.Length} for {destPath}");
-                await Task.Delay(delays[attempt]);
-            }
-        }
-    }
-
-    private async void CheckRestartAfterInstall()
-    {
-        bool pending;
-        bool restart;
-        lock (_pendingLock)
-        {
-            pending = _pendingInstalls.Count > 0;
-            restart = _restartRequested;
-        }
-
-        if (!pending && restart)
-        {
-            _restartRequested = false;
-            await Dispatcher.InvokeAsync(() =>
-            {
-                if (ContentArea.Content is MainView mv)
-                    mv.LaunchGame();
-            });
-        }
-    }
+    private async Task DownloadModAsync(string url, string destPath) =>
+        await Services.ModDownloader.DownloadToFileAsync(_httpClient, url, destPath, LogDebug);
 
     private void NavButton_Click(object sender, RoutedEventArgs e)
     {
@@ -912,17 +745,20 @@ public partial class MainWindow
     private static bool IsAmongUsRunning() =>
         System.Diagnostics.Process.GetProcessesByName("Among Us").Length > 0;
 
-    private static void LogDebug(string message)
+    private async Task StopGameAndWaitAsync()
     {
-        try
+        Dispatcher.Invoke(() =>
         {
-            var logDir = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "AmongLauncher");
-            Directory.CreateDirectory(logDir);
-            var logPath = Path.Combine(logDir, "AmongLauncher_ipc.log");
-            File.AppendAllText(logPath, $"[{DateTime.Now:HH:mm:ss}] {message}\n");
+            if (ContentArea.Content is MainView mv)
+                mv.StopGame();
+        });
+        var waited = 0;
+        while (IsAmongUsRunning() && waited < 30)
+        {
+            await Task.Delay(500);
+            waited++;
         }
-        catch { }
     }
+
+    private static void LogDebug(string message) => Services.LauncherLog.Write(message);
 }
