@@ -1,64 +1,47 @@
 using System.IO.Compression;
+using System.Reflection;
 
 namespace AmongLauncher.Installer;
 
 public class BepInExInstaller
 {
-    private const string BepInExDownloadUrl =
-        "https://github.com/BepInEx/BepInEx/releases/download/v6.0.0-pre.2/BepInEx-Unity.IL2CPP-win-x64-6.0.0-pre.2.zip";
-
     public async Task InstallAsync(string gamePath, IProgress<int>? progress = null)
     {
+        progress?.Report(0);
+
+        // Extract BepInEx from embedded resource
+        var assembly = Assembly.GetExecutingAssembly();
+        var resourceName = "AmongLauncher.Resources.BepInEx.zip";
+
+        using var stream = assembly.GetManifestResourceStream(resourceName);
+        if (stream == null)
+            throw new FileNotFoundException("BepInEx resource not found in assembly.");
+
         var tempZip = Path.Combine(Path.GetTempPath(), "BepInEx.zip");
 
         try
         {
-            // Download BepInEx
-            using (var httpClient = new HttpClient())
+            // Write stream to temp file
+            await using (var fileStream = new FileStream(tempZip, FileMode.Create, FileAccess.Write, FileShare.None))
             {
-                httpClient.Timeout = TimeSpan.FromMinutes(5);
-
-                var response = await httpClient.GetAsync(BepInExDownloadUrl,
-                    HttpCompletionOption.ResponseHeadersRead);
-
-                response.EnsureSuccessStatusCode();
-
-                var totalBytes = response.Content.Headers.ContentLength ?? -1L;
-                var canReportProgress = totalBytes != -1;
-
-                using (var contentStream = await response.Content.ReadAsStreamAsync())
-                using (var fileStream = new FileStream(tempZip, FileMode.Create, FileAccess.Write, FileShare.None))
-                {
-                    var buffer = new byte[8192];
-                    long totalRead = 0;
-                    int bytesRead;
-
-                    while ((bytesRead = await contentStream.ReadAsync(buffer)) > 0)
-                    {
-                        await fileStream.WriteAsync(buffer.AsMemory(0, bytesRead));
-                        totalRead += bytesRead;
-
-                        if (canReportProgress)
-                        {
-                            var percent = (int)((double)totalRead / totalBytes * 100);
-                            progress?.Report(percent);
-                        }
-                    }
-                }
+                await stream.CopyToAsync(fileStream);
             }
 
+            progress?.Report(50);
+
             // Extract to game folder
-            progress?.Report(100);
             await Task.Run(() =>
             {
                 ZipFile.ExtractToDirectory(tempZip, gamePath, overwriteFiles: true);
             });
+
+            progress?.Report(100);
         }
         finally
         {
             if (File.Exists(tempZip))
             {
-                File.Delete(tempZip);
+                try { File.Delete(tempZip); } catch { }
             }
         }
     }
