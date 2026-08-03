@@ -4,6 +4,8 @@ namespace AmongApi;
 public class Plugin : BasePlugin
 {
     internal static new ManualLogSource Log = null!;
+    private static readonly string PluginDir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)!;
+    private static readonly string ModsDir = Path.Combine(PluginDir, "mods");
 
     public override void Load()
     {
@@ -28,7 +30,35 @@ public class Plugin : BasePlugin
             }
 
             FileLogger.Info($"Found {manifest.Mods.Count} mods in manifest.");
-            Log.LogInfo($"[{MyPluginInfo.PLUGIN_NAME}] Found {manifest.Mods.Count} mods. Connecting to launcher...");
+
+            // Check which mods are already installed
+            Directory.CreateDirectory(ModsDir);
+            var needsInstall = new List<ModEntry>();
+            foreach (var mod in manifest.Mods)
+            {
+                var modPath = Path.Combine(ModsDir, mod.FileName);
+                if (File.Exists(modPath) && new FileInfo(modPath).Length > 0)
+                {
+                    FileLogger.Info($"Already installed: {mod.FileName} v{mod.Version}");
+                    Log.LogInfo($"[{MyPluginInfo.PLUGIN_NAME}] Already installed: {mod.FileName} v{mod.Version}");
+                }
+                else
+                {
+                    needsInstall.Add(mod);
+                    FileLogger.Info($"Needs install: {mod.FileName} v{mod.Version}");
+                    Log.LogInfo($"[{MyPluginInfo.PLUGIN_NAME}] Needs install: {mod.FileName} v{mod.Version}");
+                }
+            }
+
+            if (needsInstall.Count == 0)
+            {
+                FileLogger.Info("All mods already installed. No restart needed.");
+                Log.LogInfo($"[{MyPluginInfo.PLUGIN_NAME}] All mods already installed. Skipping launcher connection.");
+                return;
+            }
+
+            FileLogger.Info($"{needsInstall.Count} mods need installation. Connecting to launcher...");
+            Log.LogInfo($"[{MyPluginInfo.PLUGIN_NAME}] {needsInstall.Count} mods need installation. Connecting to launcher...");
 
             using var pipe = new PipeClient(Log);
             var connected = await pipe.ConnectAsync();
@@ -42,7 +72,7 @@ public class Plugin : BasePlugin
 
             FileLogger.Info("Connected to launcher.");
 
-            foreach (var mod in manifest.Mods)
+            foreach (var mod in needsInstall)
             {
                 try
                 {
@@ -65,8 +95,8 @@ public class Plugin : BasePlugin
                 }
             }
 
-            FileLogger.Info("All mods queued. Requesting restart...");
-            Log.LogInfo($"[{MyPluginInfo.PLUGIN_NAME}] All mods queued. Requesting restart...");
+            FileLogger.Info($"{needsInstall.Count} mods queued. Requesting restart...");
+            Log.LogInfo($"[{MyPluginInfo.PLUGIN_NAME}] {needsInstall.Count} mods queued. Requesting restart...");
             await pipe.SendMessageAsync("restart_after_install");
             FileLogger.Info("Restart request sent.");
         }
