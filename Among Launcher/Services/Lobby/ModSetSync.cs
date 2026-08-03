@@ -35,6 +35,20 @@ public class ModSetSync
             var dest = Path.Combine(_pluginsDir, entry.FileName);
             var item = new ModDownloadItem(entry.DownloadUrl, entry.FileName);
             progress?.Report(item);
+
+            // The host's mirrored mod set only carries file names (GetInstalledModSet
+            // captures FileName), so a joiner sees an empty DownloadUrl. When no URL is
+            // known, skip the download and treat the entry as "verify present" — the file
+            // is often already installed locally. The backend should supply DownloadUrl for
+            // a full mod sync; never throw on an empty URL.
+            if (string.IsNullOrEmpty(entry.DownloadUrl))
+            {
+                item.Status = File.Exists(dest) && new FileInfo(dest).Length > 0
+                    ? "Installed"
+                    : "Failed";
+                continue;
+            }
+
             try
             {
                 await _downloadMod(entry.FileName, entry.DownloadUrl, dest);

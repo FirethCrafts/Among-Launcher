@@ -131,6 +131,75 @@ public static class GameAssembly
         }
     }
 
+    /// <summary>
+    /// Reads an instance member that may be a property or a field (e.g. HostId).
+    /// Resolves silently against the cache; a single failure is logged, never thrown.
+    /// </summary>
+    public static object? GetInstanceMember(object? instance, string name)
+    {
+        if (instance == null) return null;
+        try
+        {
+            var type = instance.GetType();
+            return ResolveProperty(type, name, isStatic: false)?.GetValue(instance)
+                ?? ResolveField(type, name, isStatic: false)?.GetValue(instance);
+        }
+        catch (Exception ex)
+        {
+            Log?.LogWarning($"[GameAssembly] Read member {instance.GetType().Name}.{name} failed: {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Reads a static member that may be a property or a field (e.g. CurrentClient).
+    /// Resolves silently against the cache; a single failure is logged, never thrown.
+    /// </summary>
+    public static object? GetStaticMember(Type? type, string name)
+    {
+        if (type == null) return null;
+        try
+        {
+            return ResolveProperty(type, name, isStatic: true)?.GetValue(null)
+                ?? ResolveField(type, name, isStatic: true)?.GetValue(null);
+        }
+        catch (Exception ex)
+        {
+            Log?.LogWarning($"[GameAssembly] Read static member {type.Name}.{name} failed: {ex.Message}");
+            return null;
+        }
+    }
+
+    public static object? GetStaticField(Type? type, string name)
+    {
+        if (type == null) return null;
+        try
+        {
+            var field = ResolveField(type, name, isStatic: true);
+            return field?.GetValue(null);
+        }
+        catch (Exception ex)
+        {
+            Log?.LogWarning($"[GameAssembly] Read static field {type.Name}.{name} failed: {ex.Message}");
+            return null;
+        }
+    }
+
+    public static object? GetInstanceField(object? instance, string name)
+    {
+        if (instance == null) return null;
+        try
+        {
+            var field = ResolveField(instance.GetType(), name, isStatic: false);
+            return field?.GetValue(instance);
+        }
+        catch (Exception ex)
+        {
+            Log?.LogWarning($"[GameAssembly] Read {instance.GetType().Name}.{name} field failed: {ex.Message}");
+            return null;
+        }
+    }
+
     public static object? CallStaticMethod(Type? type, string name, object?[]? args = null, Type[]? argTypes = null)
     {
         if (type == null) return null;
@@ -302,6 +371,19 @@ public static class GameAssembly
 
         var flags = BindingFlags.Public | (isStatic ? BindingFlags.Static : BindingFlags.Instance);
         var resolved = type.GetProperty(name, flags);
+        if (resolved != null)
+            MemberCache[key] = resolved;
+        return resolved;
+    }
+
+    private static FieldInfo? ResolveField(Type type, string name, bool isStatic)
+    {
+        var key = $"{type.FullName}::{name}:{(isStatic ? 's' : 'i')}f";
+        if (MemberCache.TryGetValue(key, out var cached) && cached is FieldInfo field)
+            return field;
+
+        var flags = BindingFlags.Public | (isStatic ? BindingFlags.Static : BindingFlags.Instance);
+        var resolved = type.GetField(name, flags);
         if (resolved != null)
             MemberCache[key] = resolved;
         return resolved;

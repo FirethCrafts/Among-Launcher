@@ -1,4 +1,5 @@
 using System.Windows;
+using AmongLauncher.Services;
 
 namespace AmongLauncher;
 
@@ -12,6 +13,25 @@ public partial class App
     protected override void OnStartup(StartupEventArgs e)
     {
         ReduceMotion = !SystemParameters.ClientAreaAnimation;
+
+        var deepLink = DeepLinkHandler.FindDeepLinkArgument();
+
+        // Single-instance: only the primary process hosts the UI and the IPC pipe.
+        if (!SingleInstance.TryBecomePrimary(out _))
+        {
+            if (deepLink != null)
+                SingleInstance.ForwardDeepLink(deepLink);
+            Shutdown();
+            return;
+        }
+
+        // As primary, accept deep links forwarded by later instances.
+        SingleInstance.StartRedirectServer(link => DeepLinkReceived?.Invoke(link));
+
         base.OnStartup(e);
+
+        var window = new MainWindow(deepLink);
+        MainWindow = window;
+        window.Show();
     }
 }

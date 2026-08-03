@@ -55,6 +55,10 @@ public class ChatCommandHandler : IDisposable
             {
                 await Task.Delay(PollIntervalMs, cts.Token);
             }
+            catch (ObjectDisposedException)
+            {
+                break;
+            }
             catch (OperationCanceledException)
             {
                 break;

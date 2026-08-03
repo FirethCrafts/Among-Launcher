@@ -16,6 +16,7 @@ public class GameStateTracker : IDisposable
     private readonly object _lock = new();
     private CancellationTokenSource? _cts;
     private bool _wasInLobby;
+    private bool _lastWasHost;
     private int _lastPlayerCount = -1;
 
     public event EventHandler<LobbyInfo>? LobbyCreated;
@@ -60,6 +61,10 @@ public class GameStateTracker : IDisposable
             {
                 await Task.Delay(PollIntervalMs, cts.Token);
             }
+            catch (ObjectDisposedException)
+            {
+                break;
+            }
             catch (OperationCanceledException)
             {
                 break;
@@ -72,12 +77,14 @@ public class GameStateTracker : IDisposable
         bool inLobby;
         string code;
         int count;
+        bool isHost;
 
         try
         {
             inLobby = IsInLobby();
             code = LobbyCode();
             count = PlayerCount();
+            isHost = IsHost();
         }
         catch (Exception ex)
         {
@@ -87,17 +94,37 @@ public class GameStateTracker : IDisposable
 
         lock (_lock)
         {
+            // Only meaningful while in a lobby; kept for the leave transition, when the
+            // connection may already be torn down and the host check would be unreliable.
+            if (inLobby)
+                _lastWasHost = isHost;
+
             if (inLobby && !_wasInLobby)
             {
-                _log.LogInfo($"[GameStateTracker] Lobby created (code {code}, players {count}).");
-                _lastPlayerCount = count >= 0 ? count : -1;
-                LobbyCreated?.Invoke(this, new LobbyInfo(code, "", "", 0));
+                if (_lastWasHost)
+                {
+                    _log.LogInfo($"[GameStateTracker] Lobby created (code {code}, players {count}).");
+                    _lastPlayerCount = count >= 0 ? count : -1;
+                    LobbyCreated?.Invoke(this, new LobbyInfo(code, "", "", 0));
+                }
+                else
+                {
+                    _log.LogInfo("[GameStateTracker] Entered a lobby as a non-host; skipping lobby_created.");
+                }
             }
             else if (!inLobby && _wasInLobby)
             {
-                _log.LogInfo("[GameStateTracker] Lobby closed.");
-                _lastPlayerCount = -1;
-                LobbyClosed?.Invoke(this, "");
+                if (_lastWasHost)
+                {
+                    _log.LogInfo("[GameStateTracker] Lobby closed.");
+                    _lastPlayerCount = -1;
+                    LobbyClosed?.Invoke(this, "");
+                }
+                else
+                {
+                    _log.LogInfo("[GameStateTracker] Left a lobby as a non-host; skipping lobby_closed.");
+                }
+                _lastWasHost = false;
             }
 
             if (inLobby && count >= 0)
@@ -143,6 +170,24 @@ public class GameStateTracker : IDisposable
             return false;
 
         return GameAssembly.ToBool(GameAssembly.GetInstanceProp(client, "InOnlineScene"));
+    }
+
+    /// <summary>
+    /// True when the local client is the lobby host. Uses the research-verified
+    /// signal AmongUsClient.Instance.HostId == InnerNetClient.CurrentClient
+    /// (HostId is an instance property; CurrentClient is a static int on InnerNetClient).
+    /// </summary>
+    private static bool IsHost()
+    {
+        var amongUsClient = GameAssembly.Type("AmongUsClient");
+        var client = GameAssembly.GetStaticProp(amongUsClient, "Instance");
+        if (client == null)
+            return false;
+
+        var hostId = GameAssembly.ToInt(GameAssembly.GetInstanceMember(client, "HostId"));
+        var innerNetClient = GameAssembly.Type("InnerNet.InnerNetClient");
+        var currentClient = GameAssembly.ToInt(GameAssembly.GetStaticMember(innerNetClient, "CurrentClient"));
+        return currentClient >= 0 && hostId == currentClient;
     }
 
     private static string LobbyCode()

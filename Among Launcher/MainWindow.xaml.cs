@@ -29,6 +29,7 @@ public partial class MainWindow
     private readonly Services.Lobby.LobbyWebSocketClient _ws;
     private readonly Services.Lobby.LobbyCommandService _commands;
     private Services.Lobby.LobbyHeartbeatService? _heartbeat;
+    private readonly Config.LauncherConfig _config;
     private string _userId = "";
     private LobbyInfo? _activeLobby;
     private Views.HostControlPanelView? _hostPanel;
@@ -44,8 +45,9 @@ public partial class MainWindow
     {
         InitializeComponent();
         _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("AmongUsLauncher");
-        _backend = new Services.Lobby.LobbyBackendClient(_httpClient, Config.LauncherConfig.Load());
-        _ws = new Services.Lobby.LobbyWebSocketClient(Config.LauncherConfig.Load());
+        _config = Config.LauncherConfig.Load();
+        _backend = new Services.Lobby.LobbyBackendClient(_httpClient, _config);
+        _ws = new Services.Lobby.LobbyWebSocketClient(_config);
         _commands = new Services.Lobby.LobbyCommandService(_ws,
             killGame: () =>
             {
@@ -188,13 +190,20 @@ public partial class MainWindow
         _pipeServer.RegisterHandler("lobby_created", async element =>
         {
             var p = element.GetProperty("payload");
+            // After host gating only the host's mod emits lobby_created, so the local
+            // signed-in user is the host. The tracker sends regionPort 0; fall back to
+            // the default port when it is missing or non-positive.
+            var regionPort = p.TryGetProperty("regionPort", out var rp) && rp.GetInt32() > 0
+                ? rp.GetInt32()
+                : 22023;
             var info = new LobbyInfo
             {
                 Code = p.GetProperty("code").GetString() ?? "",
                 Region = p.GetProperty("region").GetString() ?? "",
                 RegionIp = p.GetProperty("regionIp").GetString() ?? "",
-                RegionPort = p.TryGetProperty("regionPort", out var rp) ? rp.GetInt32() : 22023,
-                ModSet = GetInstalledModSet()
+                RegionPort = regionPort,
+                ModSet = GetInstalledModSet(),
+                HostUserId = _userId
             };
             _activeLobby = info;
             _lobbyPlayerNames.Clear();
@@ -397,7 +406,7 @@ public partial class MainWindow
             },
             waitForGameReady: () => WaitForGameReadyAsync(),
             sendJoinLobby: l => _pipeServer.BroadcastMessageAsync("join_lobby",
-                new { l.Code, l.Region, l.RegionIp, l.RegionPort }),
+                new { code = l.Code, region = l.Region, regionIp = l.RegionIp, regionPort = l.RegionPort }),
             modSetSync);
 
         var outcome = await joinService.JoinLobbyAsync(lobby.Code, CancellationToken.None);
@@ -508,8 +517,24 @@ public partial class MainWindow
         return Task.FromResult<object?>(null);
     }
 
-    private List<LobbyPlayer> BuildPlayerList() =>
-        _lobbyPlayerNames.Select(n => new LobbyPlayer("", n, false)).ToList();
+    private List<LobbyPlayer> BuildPlayerList()
+    {
+        // Discord ID resolution is a backend concern (deferred); player names are
+        // matched against the logged-in user (the host) via config UserName, falling
+        // back to marking the single-player row as host.
+        var players = _lobbyPlayerNames.Select(n => new LobbyPlayer("", n, false)).ToList();
+
+        var hostName = _config.UserName;
+        var hostIndex = players.FindIndex(p =>
+            !string.IsNullOrEmpty(hostName) &&
+            string.Equals(p.PlayerName, hostName, StringComparison.OrdinalIgnoreCase));
+        if (hostIndex < 0 && players.Count == 1)
+            hostIndex = 0;
+        if (hostIndex >= 0)
+            players[hostIndex] = players[hostIndex] with { IsHost = true };
+
+        return players;
+    }
 
     private void ShowHostPanel(LobbyInfo info)
     {
@@ -532,7 +557,20 @@ public partial class MainWindow
         };
         panel.DisbandRequested += (_, _) => _ = ConfirmDisbandAsync(info.Code);
         panel.KickRequested += async (_, targetUserId) =>
+        {
+            // Rows without a resolved Discord ID cannot be kicked; no-op with feedback
+            // rather than calling the backend with an empty target.
+            if (string.IsNullOrEmpty(targetUserId))
+            {
+                Dispatcher.Invoke(() =>
+                {
+                    if (ContentArea.Content is MainView mv)
+                        mv.UpdateModStatusText("Cannot kick: player has no resolved Discord ID");
+                });
+                return;
+            }
             await _backend.KickAsync(info.Code, targetUserId, CancellationToken.None);
+        };
         panel.UpdatePlayers(BuildPlayerList());
         _hostPanel = panel;
         ShowView(panel, showSidebar: true);
@@ -787,10 +825,9 @@ public partial class MainWindow
         _userId = profile.Id;
 
         // Save avatar to config for reload on next launch
-        var config = Config.LauncherConfig.Load();
-        config.AvatarUrl = profile.AvatarUrl;
-        config.UserName = profile.GlobalName ?? profile.Username;
-        config.Save();
+        _config.AvatarUrl = profile.AvatarUrl;
+        _config.UserName = profile.GlobalName ?? profile.Username;
+        _config.Save();
 
         LoadAvatar(profile.AvatarUrl);
         ShowView(_mainView, showSidebar: true);
@@ -818,10 +855,9 @@ public partial class MainWindow
 
     private void LoadSavedAvatar()
     {
-        var config = Config.LauncherConfig.Load();
-        if (!string.IsNullOrEmpty(config.AvatarUrl))
+        if (!string.IsNullOrEmpty(_config.AvatarUrl))
         {
-            LoadAvatar(config.AvatarUrl);
+            LoadAvatar(_config.AvatarUrl);
         }
     }
 
