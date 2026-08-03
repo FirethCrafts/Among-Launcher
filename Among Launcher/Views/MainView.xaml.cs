@@ -158,6 +158,19 @@ public partial class MainView
         }
     }
 
+    public void LaunchGame()
+    {
+        if (_gameManager.IsGameRunning()) return;
+        if (string.IsNullOrEmpty(_moddedPath)) return;
+
+        var exePath = System.IO.Path.Combine(_moddedPath, "Among Us.exe");
+        if (!System.IO.File.Exists(exePath)) return;
+
+        _gameManager.LaunchGame(exePath);
+        SetPlayButtonRunning(true);
+        ModStatusText.Text = "Game launched. AmongAPI.dll will load via BepInEx.";
+    }
+
     private void CopyPathButton_Click(object sender, RoutedEventArgs e)
     {
         if (string.IsNullOrEmpty(_moddedPath)) return;
@@ -381,7 +394,7 @@ public partial class MainView
     }
 
     // Refresh Mods List
-    private void RefreshModsList()
+    public void RefreshModsList()
     {
         if (string.IsNullOrEmpty(_moddedPath)) return;
 

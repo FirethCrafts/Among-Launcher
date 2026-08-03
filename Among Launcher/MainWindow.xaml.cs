@@ -1,4 +1,5 @@
 using System.IO;
+using System.Net.Http;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
@@ -16,12 +17,18 @@ public partial class MainWindow
     private readonly SettingsView _settingsView = new();
     private readonly WelcomeView _welcomeView = new();
     private readonly PipeServer _pipeServer = new();
+    private readonly HttpClient _httpClient = new();
+    private readonly List<Task> _pendingInstalls = new();
+    private readonly object _pendingLock = new();
+    private bool _restartRequested;
+    private string? _moddedPath;
 
     public ModalOverlay ModalOverlayControl => ModalOverlay;
 
     public MainWindow()
     {
         InitializeComponent();
+        _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("AmongUsLauncher");
 
         _mainView.RequestShowWelcome += (_, _) => ShowView(_welcomeView, showSidebar: false);
         _mainView.GameStateChanged += OnGameStateChanged;
@@ -39,6 +46,74 @@ public partial class MainWindow
                 mv.UpdateConnectionStatus(false);
         });
 
+        // Handler: AmongAPI requests mod install (downloads anytime, regardless of game state)
+        _pipeServer.RegisterHandler("install_mod", async element =>
+        {
+            var payload = element.GetProperty("payload");
+            var modId = payload.GetProperty("modId").GetString() ?? "unknown";
+            var downloadUrl = payload.GetProperty("downloadUrl").GetString() ?? "";
+            var fileName = payload.GetProperty("fileName").GetString() ?? "";
+
+            if (string.IsNullOrEmpty(downloadUrl) || string.IsNullOrEmpty(fileName))
+                return new { type = "error", message = "Missing downloadUrl or fileName" };
+
+            var moddedPath = Dispatcher.Invoke(() => GetModdedPath());
+            if (string.IsNullOrEmpty(moddedPath))
+                return new { type = "error", message = "Modded Among Us not installed" };
+
+            var pluginsDir = Path.Combine(moddedPath, "BepInEx", "plugins");
+            Directory.CreateDirectory(pluginsDir);
+
+            var destPath = Path.Combine(pluginsDir, fileName);
+            var task = DownloadModAsync(modId, downloadUrl, destPath);
+
+            lock (_pendingLock) { _pendingInstalls.Add(task); }
+
+            // Report progress back to AmongAPI
+            _ = task.ContinueWith(t =>
+            {
+                lock (_pendingLock) { _pendingInstalls.Remove(task); }
+
+                if (t.IsCompletedSuccessfully)
+                {
+                    Dispatcher.Invoke(() =>
+                    {
+                        if (ContentArea.Content is MainView mv)
+                            mv.RefreshModsList();
+                    });
+                    _pipeServer.BroadcastMessageAsync("mod_installed",
+                        new { modId, fileName, success = true });
+                }
+                else
+                {
+                    var error = t.Exception?.InnerException?.Message ?? "Download failed";
+                    _pipeServer.BroadcastMessageAsync("mod_installed",
+                        new { modId, fileName, success = false, error });
+                }
+
+                CheckRestartAfterInstall();
+            });
+
+            return new { type = "install_mod_ack", modId, status = "downloading" };
+        });
+
+        // Handler: AmongAPI requests game restart after all installs complete
+        _pipeServer.RegisterHandler("restart_after_install", _ =>
+        {
+            _restartRequested = true;
+
+            Dispatcher.Invoke(() =>
+            {
+                if (ContentArea.Content is MainView mv)
+                    mv.StopGame();
+            });
+
+            CheckRestartAfterInstall();
+
+            return Task.FromResult<object?>(new { type = "restart_ack", status = "waiting_for_installs" });
+        });
+
+        // Handler: mod_status request
         _pipeServer.RegisterHandler("mod_status", async element =>
         {
             var mods = await Task.Run(() => Dispatcher.Invoke(() =>
@@ -50,6 +125,7 @@ public partial class MainWindow
             return new { type = "mod_status_response", mods = mods.Select(m => new { m.Name, m.FilePath }).ToArray() };
         });
 
+        // Handler: game_ready
         _pipeServer.RegisterHandler("game_ready", _ =>
         {
             Dispatcher.Invoke(() =>
@@ -66,6 +142,49 @@ public partial class MainWindow
         ShowView(empty ? _welcomeView : _mainView, showSidebar: !empty);
 
         Loaded += async (_, _) => await _pipeServer.BroadcastMessageAsync("launcher_ready");
+    }
+
+    private string? GetModdedPath()
+    {
+        if (!string.IsNullOrEmpty(_moddedPath) && Directory.Exists(_moddedPath))
+            return _moddedPath;
+
+        _moddedPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "AmongLauncher", "ModdedAmongUs");
+
+        return Directory.Exists(_moddedPath) ? _moddedPath : null;
+    }
+
+    private async Task DownloadModAsync(string modId, string url, string destPath)
+    {
+        var response = await _httpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
+        response.EnsureSuccessStatusCode();
+
+        using var stream = await response.Content.ReadAsStreamAsync();
+        using var fileStream = new FileStream(destPath, FileMode.Create, FileAccess.Write, FileShare.None);
+        await stream.CopyToAsync(fileStream);
+    }
+
+    private async void CheckRestartAfterInstall()
+    {
+        bool pending;
+        bool restart;
+        lock (_pendingLock)
+        {
+            pending = _pendingInstalls.Count > 0;
+            restart = _restartRequested;
+        }
+
+        if (!pending && restart)
+        {
+            _restartRequested = false;
+            await Dispatcher.InvokeAsync(() =>
+            {
+                if (ContentArea.Content is MainView mv)
+                    mv.LaunchGame();
+            });
+        }
     }
 
     private void NavButton_Click(object sender, RoutedEventArgs e)

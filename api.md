@@ -52,23 +52,6 @@ Every message (request or response) must have this top-level structure:
 
 ### Launcher → AmongAPI (Requests)
 
-#### `install_mod`
-Tell the mod to install a specific mod from the server.
-
-```json
-{
-  "type": "install_mod",
-  "id": "a1b2c3d4",
-  "payload": {
-    "modId": "aunlocker",
-    "downloadUrl": "https://github.com/.../AUnlocker.dll",
-    "fileName": "AUnlocker.dll"
-  }
-}
-```
-
-**Response:** `mod_installed_ack`
-
 #### `uninstall_mod`
 Tell the mod to remove an installed mod.
 
@@ -115,6 +98,53 @@ Tell AmongAPI the launcher is about to restart the game.
 ---
 
 ### AmongAPI → Launcher (Requests)
+
+#### `install_mod`
+Tell the launcher to download and install a mod DLL. Works regardless of game state — the launcher downloads to `BepInEx/plugins/` immediately.
+
+```json
+{
+  "type": "install_mod",
+  "id": "a1b2c3d4",
+  "payload": {
+    "modId": "aunlocker",
+    "downloadUrl": "https://github.com/astra1dev/AUnlocker/releases/latest/download/AUnlocker.dll",
+    "fileName": "AUnlocker.dll"
+  }
+}
+```
+
+**Response:** `install_mod_ack`
+
+The launcher will also broadcast `mod_installed` when the download completes:
+```json
+{
+  "type": "mod_installed",
+  "id": "x1y2z3w4",
+  "payload": {
+    "modId": "aunlocker",
+    "fileName": "AUnlocker.dll",
+    "success": true
+  }
+}
+```
+
+#### `restart_after_install`
+Tell the launcher to kill the game, wait for all pending mod installs to finish, then restart Among Us.
+
+```json
+{
+  "type": "restart_after_install",
+  "id": "r5s6t7u8"
+}
+```
+
+**Response:** `restart_ack`
+
+The launcher will:
+1. Kill the Among Us process immediately
+2. Wait for all pending `install_mod` downloads to complete
+3. Automatically relaunch Among Us when all installs are done
 
 #### `mod_status`
 Report the current loaded mod status to the launcher.
@@ -259,6 +289,8 @@ The launcher runs `PipeServer` on the main window. Key integration points:
 
 - **On client connect:** Update the mod status text to "AmongAPI connected"
 - **On client disconnect:** Update the mod status text to "No mod loaded"
+- **On `install_mod`:** Download mod DLL from `downloadUrl` to `BepInEx/plugins/`, broadcast `mod_installed` on completion
+- **On `restart_after_install`:** Kill game process, wait for all pending installs, then relaunch
 - **On `mod_status`:** Return the list of installed mods from `BepInEx/plugins/`
 - **On `game_ready`:** Update the mod status text to "Game loaded — AmongAPI active"
 - **On `download_progress`:** Update the progress bar in the UI
@@ -274,37 +306,41 @@ The mod runs `PipeClient` in its `Plugin.Load()`:
 var client = new PipeClient();
 await client.ConnectAsync();
 
-// Register custom handlers
-client.RegisterHandler("install_mod", async element =>
-{
-    var payload = element.GetProperty("payload");
-    var downloadUrl = payload.GetProperty("downloadUrl").GetString()!;
-    var fileName = payload.GetProperty("fileName").GetString()!;
-    
-    await DownloadAndInstallModAsync(downloadUrl, fileName);
-    
-    await client.SendMessageAsync("mod_installed", new { modId = payload.GetProperty("modId").GetString() });
-    return null;
+// Request the launcher to install a mod
+await client.SendMessageAsync("install_mod", new {
+    modId = "aunlocker",
+    downloadUrl = "https://github.com/astra1dev/AUnlocker/releases/latest/download/AUnlocker.dll",
+    fileName = "AUnlocker.dll"
 });
+
+// Request game restart after installs complete
+await client.SendMessageAsync("restart_after_install");
 
 // Report game ready when loaded
 await client.SendMessageAsync("game_ready", new { gameVersion = "2026.6.5" });
 ```
 
-## Example Flow: Installing a Mod
+## Example Flow: API-Driven Mod Install
+
+1. AmongAPI sends `install_mod` to the launcher with `downloadUrl` and `fileName`.
+2. Launcher downloads the DLL to `BepInEx/plugins/` (works even if game is running).
+3. Launcher broadcasts `mod_installed` when download completes.
+4. Launcher refreshes the mod list in the UI.
+5. AmongAPI receives `mod_installed` and loads the new DLL.
+
+## Example Flow: Restart After Install
+
+1. AmongAPI sends `restart_after_install` to the launcher.
+2. Launcher kills the Among Us process immediately.
+3. Launcher waits for all pending `install_mod` downloads to finish.
+4. Once all installs complete, launcher automatically relaunches Among Us.
+5. AmongAPI reconnects on the new game instance.
+6. AmongAPI sends `game_ready` when the game loads.
+7. Launcher updates the status badge to "Running" and shows "Game loaded — AmongAPI active".
+
+## Example Flow: Launcher-Initiated Install
 
 1. User clicks "Install" on a preset mod in the launcher UI.
 2. Launcher downloads the mod DLL from GitHub.
 3. Launcher writes the DLL to `BepInEx/plugins/`.
-4. Launcher sends `install_mod` message to AmongAPI via the pipe.
-5. AmongAPI receives the message, loads the new DLL, and responds with `mod_installed`.
-6. Launcher updates the mod list in the UI.
-
-## Example Flow: Game Restart
-
-1. AmongAPI detects that a restart is needed (new mod loaded).
-2. AmongAPI sends `restart_game` to the launcher via the pipe.
-3. Launcher kills the game process and relaunches it.
-4. AmongAPI reconnects on the new game instance.
-5. AmongAPI sends `game_ready` when the game loads.
-6. Launcher updates the status badge to "Running" and shows "Game loaded — AmongAPI active".
+4. Launcher updates the mod list in the UI.
