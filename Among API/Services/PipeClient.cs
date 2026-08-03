@@ -18,6 +18,7 @@ public class PipeClient : IDisposable
     private readonly Dictionary<string, TaskCompletionSource<JsonElement>> _pending = new();
     private readonly Dictionary<string, Func<JsonElement, Task<object?>>> _handlers = new();
     private readonly object _lock = new();
+    private readonly SemaphoreSlim _writeGate = new(1, 1);
 
     public bool IsConnected => _connected;
     public event EventHandler? Connected;
@@ -124,11 +125,19 @@ public class PipeClient : IDisposable
 
     private async Task WriteFrameAsync(string json, CancellationToken ct)
     {
-        var data = Encoding.UTF8.GetBytes(json);
-        var header = BitConverter.GetBytes(data.Length);
-        await _client!.WriteAsync(header, ct);
-        await _client.WriteAsync(data, ct);
-        await _client.FlushAsync(ct);
+        await _writeGate.WaitAsync(ct);
+        try
+        {
+            var data = Encoding.UTF8.GetBytes(json);
+            var header = BitConverter.GetBytes(data.Length);
+            await _client!.WriteAsync(header, ct);
+            await _client.WriteAsync(data, ct);
+            await _client.FlushAsync(ct);
+        }
+        finally
+        {
+            _writeGate.Release();
+        }
     }
 
     private async Task SendRawAsync(string json)
@@ -176,7 +185,7 @@ public class PipeClient : IDisposable
                     }
                 }
 
-                // Handle broadcasts from launcher
+                // Handle broadcasts from launcher and dispatch handlers/events
                 if (doc.RootElement.TryGetProperty("type", out var typeProp))
                 {
                     var msgType = typeProp.GetString() ?? "";
@@ -211,20 +220,27 @@ public class PipeClient : IDisposable
                         }
                     }
 
-                    MessageReceived?.Invoke(this, doc.RootElement);
-                    if (msgType == "join_lobby")
+                    try
                     {
-                        JoinLobbyRequested?.Invoke(this, EventArgs.Empty);
-                    }
-                    else if (msgType == "kick")
-                    {
-                        var reason = "";
-                        if (doc.RootElement.TryGetProperty("payload", out var payloadProp) &&
-                            payloadProp.TryGetProperty("reason", out var reasonProp))
+                        MessageReceived?.Invoke(this, doc.RootElement);
+                        if (msgType == "join_lobby")
                         {
-                            reason = reasonProp.GetString() ?? "";
+                            JoinLobbyRequested?.Invoke(this, EventArgs.Empty);
                         }
-                        KickRequested?.Invoke(this, new KickRequestedEventArgs { Reason = reason });
+                        else if (msgType == "kick")
+                        {
+                            var reason = "";
+                            if (doc.RootElement.TryGetProperty("payload", out var payloadProp) &&
+                                payloadProp.TryGetProperty("reason", out var reasonProp))
+                            {
+                                reason = reasonProp.GetString() ?? "";
+                            }
+                            KickRequested?.Invoke(this, new KickRequestedEventArgs { Reason = reason });
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _log.LogError($"[Pipe] Event dispatch for {msgType} failed: {ex.Message}");
                     }
                 }
             }
