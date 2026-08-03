@@ -48,7 +48,10 @@ public partial class SettingsView
 
         var storefront = SelectedStorefront();
         RefreshStorefrontSearch(storefront);
-        SaveStorefront(storefront);
+        if (storefront.HasValue)
+        {
+            SaveStorefront(storefront.Value);
+        }
     }
 
     private Storefront? SelectedStorefront()
@@ -64,6 +67,12 @@ public partial class SettingsView
 
     private void RefreshStorefrontSearch(Storefront? storefront)
     {
+        if (storefront == null)
+        {
+            RunAutoScan();
+            return;
+        }
+
         var result = _locator.FindAmongUsForStorefront(storefront);
 
         if (result.Path != null)
@@ -74,50 +83,49 @@ public partial class SettingsView
         }
 
         GamePathText.Text = "Not found";
+        StorefrontStatusText.Text = "";
+    }
 
-        if (storefront == null)
+    private void RunAutoScan()
+    {
+        var all = _locator.FindAmongUsWithStorefront();
+
+        if (all.DetectedButUnavailable)
         {
-            var all = _locator.FindAmongUsWithStorefront();
-
-            if (all.DetectedButUnavailable)
-            {
-                StorefrontStatusText.Text =
-                    "An install was detected but is inaccessible. See the guide in the main install flow.";
-                return;
-            }
-
-            var found = new List<GameSearchResult>();
-            foreach (var sf in new[] { Storefront.Steam, Storefront.Epic, Storefront.MicrosoftStore })
-            {
-                var candidate = _locator.FindAmongUsForStorefront(sf);
-                if (candidate.Path != null) found.Add(candidate);
-            }
-
-            if (found.Count == 0)
-            {
-                StorefrontStatusText.Text = "No Among Us installation found.";
-                return;
-            }
-
-            if (found.Count == 1)
-            {
-                var only = found[0];
-                GamePathText.Text = only.Path;
-                if (only.Storefront.HasValue)
-                {
-                    SaveStorefront(only.Storefront.Value);
-                    SyncComboToStorefront(only.Storefront.Value);
-                }
-                StorefrontStatusText.Text = $"Auto-detected: {only.Storefront}";
-                return;
-            }
-
-            OpenPicker(found);
+            GamePathText.Text = "Not found";
+            StorefrontStatusText.Text =
+                "An install was detected but is inaccessible. See the guide in the main install flow.";
+            return;
         }
-        else
+
+        var found = new List<GameSearchResult>();
+        foreach (var sf in new[] { Storefront.Steam, Storefront.Epic, Storefront.MicrosoftStore })
         {
-            StorefrontStatusText.Text = "";
+            var candidate = _locator.FindAmongUsForStorefront(sf);
+            if (candidate.Path != null) found.Add(candidate);
         }
+
+        if (found.Count == 0)
+        {
+            GamePathText.Text = "Not found";
+            StorefrontStatusText.Text = "No Among Us installation found.";
+            return;
+        }
+
+        if (found.Count == 1)
+        {
+            var only = found[0];
+            GamePathText.Text = only.Path;
+            if (only.Storefront.HasValue)
+            {
+                SaveStorefront(only.Storefront.Value);
+                SyncComboToStorefront(only.Storefront.Value);
+            }
+            StorefrontStatusText.Text = $"Auto-detected: {only.Storefront}";
+            return;
+        }
+
+        OpenPicker(found);
     }
 
     private void OpenPicker(List<GameSearchResult> found)
