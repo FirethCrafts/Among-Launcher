@@ -13,14 +13,14 @@
         </Grid.RowDefinitions>
 
         <TextBlock Grid.Row="0" Text="IPC Log" FontSize="14" FontWeight="SemiBold"
-                   Foreground="#A1A1AA" Margin="0,0,0,10"/>
+                   Foreground="{StaticResource TextBody}" Margin="0,0,0,10"/>
 
-        <Border Grid.Row="1" Background="#0B0B0E" BorderBrush="#242429" BorderThickness="1"
+        <Border Grid.Row="1" Background="{StaticResource GlassSurfaceWeak}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1"
                 CornerRadius="6" Padding="12">
             <ScrollViewer x:Name="LogScrollViewer" VerticalScrollBarVisibility="Auto"
                           HorizontalScrollBarVisibility="Disabled">
                 <TextBlock x:Name="LogContent" Text="No logs yet..."
-                           Foreground="#A1A1AA" FontSize="12"
+                           Foreground="{StaticResource TextBody}" FontSize="12"
                            FontFamily="Consolas" TextWrapping="Wrap"/>
             </ScrollViewer>
         </Border>

@@ -11,10 +11,14 @@
         <Rectangle Fill="#000000" Opacity="0.7" MouseLeftButtonDown="Backdrop_Click"/>
         
         <!-- Centered Modal Card -->
-        <Border Background="#151518" BorderBrush="#242429" BorderThickness="1"
-                CornerRadius="12" Padding="24" MaxWidth="500"
+        <Border x:Name="ModalCard" Background="{StaticResource GlassSurfaceStrong}" BorderBrush="{StaticResource GlassEdgeBorder}" BorderThickness="1"
+                CornerRadius="14" Padding="24" MaxWidth="500"
                 HorizontalAlignment="Center" VerticalAlignment="Center"
-                MouseLeftButtonDown="Card_Click">
+                MouseLeftButtonDown="Card_Click"
+                SnapsToDevicePixels="True" UseLayoutRounding="True">
+            <Border.RenderTransform>
+                <TranslateTransform/>
+            </Border.RenderTransform>
             <Border.Effect>
                 <DropShadowEffect Color="#000000" BlurRadius="20" ShadowDepth="8" Opacity="0.6"/>
             </Border.Effect>
@@ -31,10 +35,10 @@
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
                     <TextBlock x:Name="ModalTitle" Text="Modal" FontSize="18" FontWeight="Bold"
-                               Foreground="#FFFFFF" VerticalAlignment="Center"/>
+                               Foreground="{StaticResource TextTitle}" VerticalAlignment="Center"/>
                     <Button Grid.Column="1" Content="✕" FontSize="16"
                             Background="Transparent" BorderThickness="0"
-                            Foreground="#FFFFFF" Cursor="Hand"
+                            Foreground="{StaticResource TextTitle}" Cursor="Hand"
                             Width="32" Height="32"
                             Click="CloseButton_Click">
                         <Button.Style>
@@ -47,8 +51,8 @@
                                             </Border>
                                             <ControlTemplate.Triggers>
                                                 <Trigger Property="IsMouseOver" Value="True">
-                                                    <Setter TargetName="B" Property="Background" Value="#242429"/>
-                                                    <Setter Property="Foreground" Value="#FFFFFF"/>
+                                                    <Setter TargetName="B" Property="Background" Value="{StaticResource GlassSurfaceWeak}"/>
+                                                    <Setter Property="Foreground" Value="{StaticResource TextTitle}"/>
                                                 </Trigger>
                                             </ControlTemplate.Triggers>
                                         </ControlTemplate>
