@@ -198,7 +198,11 @@ public partial class MainWindow
             await _backend.CreateLobbyAsync(new CreateLobbyRequest(info.Code, info.Region, info.RegionIp, info.RegionPort, info.ModSet, _userId), CancellationToken.None);
             StartHeartbeat(info.Code);
             _ = _ws.ConnectAsync(info.Code, CancellationToken.None);
-            if (_userId == info.HostUserId || string.IsNullOrEmpty(_userId))
+            // Only the host's mod emits lobby_created, so the host check is normally authoritative.
+            // Keep the empty-user fallback (string.IsNullOrEmpty) so testing without a signed-in
+            // profile still surfaces the host panel; when a userId IS set, require an exact match
+            // so a non-host user never sees host controls.
+            if (string.IsNullOrEmpty(_userId) || _userId == info.HostUserId)
             {
                 Dispatcher.Invoke(() => ShowHostPanel(info));
             }
@@ -508,7 +512,21 @@ public partial class MainWindow
     {
         var panel = new Views.HostControlPanelView(info);
         panel.RePostRequested += async (_, _) =>
-            await _backend.RepostAsync(info.Code, CancellationToken.None);
+        {
+            try
+            {
+                await _backend.RepostAsync(info.Code, CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                LogDebug($"[Launcher] Repost failed: {ex.Message}");
+                Dispatcher.Invoke(() =>
+                {
+                    if (ContentArea.Content is MainView mv)
+                        mv.UpdateModStatusText($"Repost failed: {ex.Message}");
+                });
+            }
+        };
         panel.DisbandRequested += (_, _) => _ = ConfirmDisbandAsync(info.Code);
         panel.KickRequested += async (_, targetUserId) =>
             await _backend.KickAsync(info.Code, targetUserId, CancellationToken.None);
@@ -528,7 +546,20 @@ public partial class MainWindow
         confirmModal.Confirmed += async (_, _) =>
         {
             ModalOverlay.Hide();
-            await _backend.DisbandAsync(code, CancellationToken.None);
+            try
+            {
+                await _backend.DisbandAsync(code, CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                LogDebug($"[Launcher] Disband failed: {ex.Message}");
+                Dispatcher.Invoke(() =>
+                {
+                    if (ContentArea.Content is MainView mv)
+                        mv.UpdateModStatusText($"Disband failed: {ex.Message}");
+                });
+                return;
+            }
             _ws.Disconnect();
             StopHeartbeat();
             _activeLobby = null;
