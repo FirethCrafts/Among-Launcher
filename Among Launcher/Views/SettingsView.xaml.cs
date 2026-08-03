@@ -17,7 +17,7 @@ public partial class SettingsView
         var config = Config.LauncherConfig.Load();
         ServerUrlTextBox.Text = config.ServerUrl;
 
-        var locator = new Steam.AmongUsLocator();
+        var locator = new GameDetection.AmongUsLocator();
         var path = locator.FindAmongUs();
         GamePathText.Text = path ?? "Not found";
     }

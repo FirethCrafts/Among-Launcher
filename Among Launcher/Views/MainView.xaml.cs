@@ -8,7 +8,7 @@ using Microsoft.Win32;
 using AmongLauncher.Game;
 using AmongLauncher.Installer;
 using AmongLauncher.Models;
-using AmongLauncher.Steam;
+using AmongLauncher.GameDetection;
 
 namespace AmongLauncher.Views;
 
@@ -46,7 +46,7 @@ public partial class MainView
 
         if (gamePath == null)
         {
-            GameStatusText.Text = "Among Us not found. Please install Among Us via Steam.";
+            GameStatusText.Text = "Among Us not found. Please install Among Us via Steam, Epic Games, or Xbox Game Pass.";
             PlayButton.IsEnabled = false;
             CopyPathButton.IsEnabled = false;
             AddModButton.IsEnabled = false;

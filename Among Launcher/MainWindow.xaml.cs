@@ -112,7 +112,7 @@ public partial class MainWindow
         });
 
         // Handler: AmongAPI requests game restart after all installs complete
-        _pipeServer.RegisterHandler("restart_after_install", _ =>
+        _pipeServer.RegisterHandler("restart_after_install", async _ =>
         {
             LogDebug("[Launcher] restart_after_install received");
             _restartRequested = true;
@@ -123,10 +123,13 @@ public partial class MainWindow
                     mv.StopGame();
             });
 
+            // Wait for game process to fully exit
+            await Task.Delay(2000);
+
             LogDebug($"[Launcher] Pending installs: {_pendingInstalls.Count}, restart requested: {_restartRequested}");
             CheckRestartAfterInstall();
 
-            return Task.FromResult<object?>(new { type = "restart_ack", status = "waiting_for_installs" });
+            return new { type = "restart_ack", status = "waiting_for_installs" };
         });
 
         // Handler: mod_status request
@@ -178,12 +181,32 @@ public partial class MainWindow
 
     private async Task DownloadModAsync(string modId, string url, string destPath)
     {
-        var response = await _httpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
-        response.EnsureSuccessStatusCode();
+        // Skip if already installed and non-empty
+        if (File.Exists(destPath) && new FileInfo(destPath).Length > 0)
+        {
+            LogDebug($"[Launcher] {Path.GetFileName(destPath)} already exists, skipping download");
+            return;
+        }
 
-        using var stream = await response.Content.ReadAsStreamAsync();
-        using var fileStream = new FileStream(destPath, FileMode.Create, FileAccess.Write, FileShare.None);
-        await stream.CopyToAsync(fileStream);
+        // Retry up to 3 times for file lock issues
+        for (int attempt = 1; attempt <= 3; attempt++)
+        {
+            try
+            {
+                var response = await _httpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
+                response.EnsureSuccessStatusCode();
+
+                using var stream = await response.Content.ReadAsStreamAsync();
+                using var fileStream = new FileStream(destPath, FileMode.Create, FileAccess.Write, FileShare.None);
+                await stream.CopyToAsync(fileStream);
+                return; // success
+            }
+            catch (IOException) when (attempt < 3)
+            {
+                LogDebug($"[Launcher] File locked, retrying in 2s (attempt {attempt}/3)...");
+                await Task.Delay(2000);
+            }
+        }
     }
 
     private async void CheckRestartAfterInstall()

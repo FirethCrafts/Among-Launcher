@@ -56,4 +56,20 @@ public partial class LogViewerModal : UserControl
             LogContent.Text = "Failed to clear logs.";
         }
     }
+
+    private void CopyToClipboard_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var text = LogContent.Text;
+            if (string.IsNullOrEmpty(text) || text == "No logs yet...")
+                return;
+
+            Clipboard.SetText(text);
+        }
+        catch
+        {
+            // silently fail
+        }
+    }
 }
