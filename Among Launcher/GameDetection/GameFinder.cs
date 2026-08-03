@@ -183,23 +183,32 @@ public static class GameFinder
 
     private static GameSearchResult FindAmongUsXbox()
     {
-        var xboxPaths = new[]
+        foreach (var drive in DriveInfo.GetDrives())
         {
-            @"C:\XboxGames",
-            @"D:\XboxGames",
-            @"E:\XboxGames",
-            @"F:\XboxGames"
-        };
+            if (drive.DriveType != DriveType.Fixed || !drive.IsReady) continue;
 
-        foreach (var root in xboxPaths)
-        {
-            var gamePath = Path.Combine(root, AmongUsFolder, AmongUsExe);
-            if (File.Exists(gamePath))
-                return new GameSearchResult
+            var root = drive.RootDirectory.FullName;
+
+            foreach (var gameFolder in new[] { "Among Us", "AmongUs" })
+            {
+                var candidates = new[]
                 {
-                    Path = Path.GetDirectoryName(gamePath),
-                    Storefront = Storefront.MicrosoftStore
+                    Path.Combine(root, gameFolder, AmongUsExe),
+                    Path.Combine(root, gameFolder, "Content", AmongUsExe)
                 };
+
+                foreach (var candidate in candidates)
+                {
+                    if (File.Exists(candidate))
+                    {
+                        return new GameSearchResult
+                        {
+                            Path = Path.GetDirectoryName(candidate),
+                            Storefront = Storefront.MicrosoftStore
+                        };
+                    }
+                }
+            }
         }
 
         try
@@ -215,16 +224,42 @@ public static class GameFinder
                 {
                     var gamePath = Path.Combine(dir, AmongUsExe);
                     if (File.Exists(gamePath))
+                    {
                         return new GameSearchResult
                         {
                             Path = dir,
                             Storefront = Storefront.MicrosoftStore
                         };
+                    }
                 }
+            }
+        }
+        catch (UnauthorizedAccessException)
+        {
+            if (IsAmongUsInstalledFromMsStore())
+            {
+                return new GameSearchResult { Storefront = Storefront.MicrosoftStore, DetectedButUnavailable = true };
             }
         }
         catch { }
 
         return new GameSearchResult();
+    }
+
+    public static bool IsAmongUsInstalledFromMsStore()
+    {
+        try
+        {
+            var packagesDir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "Packages");
+
+            return Directory.Exists(packagesDir) &&
+                Directory.GetDirectories(packagesDir, "InnerSloth.LLC-*").Length > 0;
+        }
+        catch
+        {
+            return false;
+        }
     }
 }
