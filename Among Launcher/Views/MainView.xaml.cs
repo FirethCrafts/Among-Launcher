@@ -6,6 +6,7 @@ using System.Windows.Controls;
 using Microsoft.Win32;
 using AmongLauncher.Game;
 using AmongLauncher.Installer;
+using AmongLauncher.Models;
 using AmongLauncher.Steam;
 
 namespace AmongLauncher.Views;
@@ -478,11 +479,41 @@ public partial class MainView
         MainProgressBar.Visibility = Visibility.Collapsed;
         ProgressText.Visibility = Visibility.Collapsed;
     }
-}
 
-public class ModInfo
-{
-    public string Name { get; set; } = "";
-    public string Description { get; set; } = "";
-    public string FilePath { get; set; } = "";
+    // IPC helper methods
+    public void UpdateConnectionStatus(bool connected)
+    {
+        if (connected)
+            ModStatusText.Text = "AmongAPI connected";
+        else
+            ModStatusText.Text = "No mod loaded";
+    }
+
+    public List<ModInfo> GetInstalledMods()
+    {
+        if (string.IsNullOrEmpty(_moddedPath)) return new List<ModInfo>();
+
+        var pluginsDir = Path.Combine(_moddedPath, "BepInEx", "plugins");
+        var mods = new List<ModInfo>();
+
+        if (Directory.Exists(pluginsDir))
+        {
+            foreach (var dllFile in Directory.GetFiles(pluginsDir, "*.dll"))
+            {
+                mods.Add(new ModInfo
+                {
+                    Name = Path.GetFileNameWithoutExtension(dllFile),
+                    Description = $"Size: {new FileInfo(dllFile).Length / 1024} KB",
+                    FilePath = dllFile
+                });
+            }
+        }
+
+        return mods;
+    }
+
+    public void UpdateModStatusText(string text)
+    {
+        ModStatusText.Text = text;
+    }
 }

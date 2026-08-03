@@ -11,4 +11,5 @@ public class ModInfo
     public bool RequiresRestart { get; set; }
     public List<string> Dependencies { get; set; } = [];
     public string EntryPoint { get; set; } = string.Empty;
+    public string FilePath { get; set; } = string.Empty;
 }

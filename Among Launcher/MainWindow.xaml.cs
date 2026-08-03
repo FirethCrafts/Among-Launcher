@@ -1,8 +1,10 @@
 using System.IO;
+using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using AmongLauncher.Ipc;
 using AmongLauncher.Models;
 using AmongLauncher.Views;
 
@@ -13,6 +15,7 @@ public partial class MainWindow
     private readonly MainView _mainView = new();
     private readonly SettingsView _settingsView = new();
     private readonly WelcomeView _welcomeView = new();
+    private readonly PipeServer _pipeServer = new();
 
     public ModalOverlay ModalOverlayControl => ModalOverlay;
 
@@ -24,8 +27,45 @@ public partial class MainWindow
         _mainView.GameStateChanged += OnGameStateChanged;
         _welcomeView.LoginCompleted += OnLoginCompleted;
 
+        _pipeServer.ClientConnected += (_, _) => Dispatcher.Invoke(() =>
+        {
+            if (ContentArea.Content is MainView mv)
+                mv.UpdateConnectionStatus(true);
+        });
+
+        _pipeServer.ClientDisconnected += (_, _) => Dispatcher.Invoke(() =>
+        {
+            if (ContentArea.Content is MainView mv)
+                mv.UpdateConnectionStatus(false);
+        });
+
+        _pipeServer.RegisterHandler("mod_status", async element =>
+        {
+            var mods = await Task.Run(() => Dispatcher.Invoke(() =>
+            {
+                if (ContentArea.Content is MainView mv)
+                    return mv.GetInstalledMods();
+                return new List<ModInfo>();
+            }));
+            return new { type = "mod_status_response", mods = mods.Select(m => new { m.Name, m.FilePath }).ToArray() };
+        });
+
+        _pipeServer.RegisterHandler("game_ready", _ =>
+        {
+            Dispatcher.Invoke(() =>
+            {
+                if (ContentArea.Content is MainView mv)
+                    mv.UpdateModStatusText("Game loaded — AmongAPI active");
+            });
+            return Task.FromResult<object?>(new { type = "game_ready_ack" });
+        });
+
+        _pipeServer.Start();
+
         var empty = IsLauncherDirEmpty();
         ShowView(empty ? _welcomeView : _mainView, showSidebar: !empty);
+
+        Loaded += async (_, _) => await _pipeServer.BroadcastMessageAsync("launcher_ready");
     }
 
     private void NavButton_Click(object sender, RoutedEventArgs e)
