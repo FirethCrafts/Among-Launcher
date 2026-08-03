@@ -467,6 +467,7 @@ public partial class MainView
         var saveButton = new Button
         {
             Content = "Save",
+            Style = (Style)FindResource("StopButton"),
             Height = 36,
             Padding = new Thickness(20, 8, 20, 8)
         };
