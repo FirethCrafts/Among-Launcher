@@ -93,8 +93,19 @@ public class Plugin : BasePlugin
                 return new { success = result.Success, error = result.Error };
             });
 
+            // In-game host chat commands (Task 16): /repost and /disband
+            var commands = new ChatCommandHandler(Log);
+            commands.OnRepost = () => _ = pipe.SendMessageAsync("lobby_created", _lastLobby);
+            commands.OnDisband = () =>
+            {
+                _ = pipe.SendMessageAsync("lobby_closed", new { code = _lastLobby?.Code ?? "", reason = "disband" });
+                LeaveLobby();
+            };
+            commands.Start();
+
             // Stop polling if the launcher connection drops
             pipe.Disconnected += (_, _) => tracker.Stop();
+            pipe.Disconnected += (_, _) => commands.Dispose();
 
             // Keep connection alive - launcher may send commands later
             await Task.Delay(Timeout.Infinite);
@@ -103,6 +114,46 @@ public class Plugin : BasePlugin
         {
             FileLogger.Error($"Error: {ex.Message}");
             Log.LogError($"[{MyPluginInfo.PLUGIN_NAME}] Error: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Leaves the current lobby via the game API: AmongUsClient.Instance.ExitGame
+    /// (DisconnectReasons.ExitGame) — the same path the in-game "leave" button uses.
+    /// All reflection calls are wrapped in try/catch; failures are logged, never thrown.
+    /// </summary>
+    private static void LeaveLobby()
+    {
+        try
+        {
+            var amongUsClient = GameAssembly.Type("AmongUsClient");
+            var client = GameAssembly.GetStaticProp(amongUsClient, "Instance");
+            if (client == null)
+            {
+                FileLogger.Warn("LeaveLobby: AmongUsClient not available; nothing to leave.");
+                return;
+            }
+
+            var disconnectReasons = GameAssembly.Type("DisconnectReasons");
+            var exitGame = GameAssembly.EnumValue(disconnectReasons, "ExitGame");
+            if (exitGame == null)
+            {
+                FileLogger.Warn("LeaveLobby: DisconnectReasons.ExitGame not found.");
+                return;
+            }
+
+            if (!GameAssembly.HasInstanceMethod(client, "ExitGame", 1))
+            {
+                FileLogger.Warn("LeaveLobby: ExitGame(DisconnectReasons) not found.");
+                return;
+            }
+
+            GameAssembly.CallInstanceMethod(client, "ExitGame", new object?[] { exitGame });
+            FileLogger.Info("LeaveLobby: ExitGame(DisconnectReasons.ExitGame) invoked.");
+        }
+        catch (Exception ex)
+        {
+            FileLogger.Error($"LeaveLobby failed: {ex.Message}");
         }
     }
 
