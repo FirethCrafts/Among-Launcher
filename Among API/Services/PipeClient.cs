@@ -28,27 +28,37 @@ public class PipeClient : IDisposable
 
     public async Task<bool> ConnectAsync(CancellationToken ct = default)
     {
-        try
+        // Retry connection with increasing delays
+        for (int attempt = 1; attempt <= 5; attempt++)
         {
-            _client = new NamedPipeClientStream(
-                ".",
-                PipeName,
-                PipeDirection.InOut,
-                PipeOptions.Asynchronous);
+            try
+            {
+                _log.LogInfo($"[Pipe] Connection attempt {attempt}/5...");
 
-            await _client.ConnectAsync(5000, ct);
-            _connected = true;
-            _cts = new CancellationTokenSource();
-            _listenTask = ListenAsync(_cts.Token);
-            Connected?.Invoke(this, EventArgs.Empty);
-            _log.LogInfo("[Pipe] Connected to launcher.");
-            return true;
+                _client = new NamedPipeClientStream(
+                    ".",
+                    PipeName,
+                    PipeDirection.InOut,
+                    PipeOptions.Asynchronous);
+
+                await _client.ConnectAsync(10000, ct);
+                _connected = true;
+                _cts = new CancellationTokenSource();
+                _listenTask = ListenAsync(_cts.Token);
+                Connected?.Invoke(this, EventArgs.Empty);
+                _log.LogInfo("[Pipe] Connected to launcher!");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _log.LogWarning($"[Pipe] Attempt {attempt} failed: {ex.Message}");
+                if (attempt < 5)
+                    await Task.Delay(2000, ct);
+            }
         }
-        catch (Exception ex)
-        {
-            _log.LogWarning($"[Pipe] Could not connect to launcher: {ex.Message}");
-            return false;
-        }
+
+        _log.LogWarning("[Pipe] Could not connect to launcher after 5 attempts.");
+        return false;
     }
 
     public async Task<JsonElement?> SendMessageAsync(string messageType, object? payload = null, CancellationToken ct = default)
