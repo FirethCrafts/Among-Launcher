@@ -4,8 +4,6 @@ namespace AmongApi;
 public class Plugin : BasePlugin
 {
     internal static new ManualLogSource Log = null!;
-    private static readonly string PluginDir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)!;
-    private static readonly string ModsDir = Path.Combine(PluginDir, "mods");
 
     public override void Load()
     {
@@ -21,106 +19,49 @@ public class Plugin : BasePlugin
     {
         try
         {
-            var manifest = LoadEmbeddedManifest();
-            if (manifest == null || manifest.Mods.Count == 0)
-            {
-                FileLogger.Info("No mods in manifest.");
-                Log.LogInfo($"[{MyPluginInfo.PLUGIN_NAME}] No mods in manifest.");
-                return;
-            }
-
-            FileLogger.Info($"Found {manifest.Mods.Count} mods in manifest.");
-
-            // Check which mods are already installed
-            Directory.CreateDirectory(ModsDir);
-            var needsInstall = new List<ModEntry>();
-            foreach (var mod in manifest.Mods)
-            {
-                var modPath = Path.Combine(ModsDir, mod.FileName);
-                if (File.Exists(modPath) && new FileInfo(modPath).Length > 0)
-                {
-                    FileLogger.Info($"Already installed: {mod.FileName} v{mod.Version}");
-                    Log.LogInfo($"[{MyPluginInfo.PLUGIN_NAME}] Already installed: {mod.FileName} v{mod.Version}");
-                }
-                else
-                {
-                    needsInstall.Add(mod);
-                    FileLogger.Info($"Needs install: {mod.FileName} v{mod.Version}");
-                    Log.LogInfo($"[{MyPluginInfo.PLUGIN_NAME}] Needs install: {mod.FileName} v{mod.Version}");
-                }
-            }
-
-            if (needsInstall.Count == 0)
-            {
-                FileLogger.Info("All mods already installed. No restart needed.");
-                Log.LogInfo($"[{MyPluginInfo.PLUGIN_NAME}] All mods already installed. Skipping launcher connection.");
-                return;
-            }
-
-            FileLogger.Info($"{needsInstall.Count} mods need installation. Connecting to launcher...");
-            Log.LogInfo($"[{MyPluginInfo.PLUGIN_NAME}] {needsInstall.Count} mods need installation. Connecting to launcher...");
+            FileLogger.Info("Connecting to launcher...");
+            Log.LogInfo($"[{MyPluginInfo.PLUGIN_NAME}] Connecting to launcher...");
 
             using var pipe = new PipeClient(Log);
             var connected = await pipe.ConnectAsync();
 
             if (!connected)
             {
-                FileLogger.Warn("Launcher not running. Mods will not be installed.");
-                Log.LogWarning($"[{MyPluginInfo.PLUGIN_NAME}] Launcher not running. Mods will not be installed.");
+                FileLogger.Warn("Launcher not running. Waiting for reconnection...");
+                Log.LogWarning($"[{MyPluginInfo.PLUGIN_NAME}] Launcher not running.");
                 return;
             }
 
-            FileLogger.Info("Connected to launcher.");
+            FileLogger.Info("Connected to launcher. Sending game_ready...");
+            Log.LogInfo($"[{MyPluginInfo.PLUGIN_NAME}] Connected to launcher.");
 
-            foreach (var mod in needsInstall)
+            // Tell launcher the game is ready - launcher handles mod installation
+            var response = await pipe.SendMessageAsync("game_ready");
+            if (response.HasValue)
             {
-                try
+                var restart = response.Value.TryGetProperty("restart", out var r) && r.GetBoolean();
+                FileLogger.Info($"Launcher response: restart={restart}");
+
+                if (restart)
                 {
-                    FileLogger.Info($"Requesting install: {mod.FileName} v{mod.Version}");
-                    Log.LogInfo($"[{MyPluginInfo.PLUGIN_NAME}] Requesting install: {mod.FileName} v{mod.Version}");
-
-                    await pipe.SendMessageAsync("install_mod", new
-                    {
-                        modId = mod.Id,
-                        downloadUrl = mod.Url,
-                        fileName = mod.FileName
-                    });
-
-                    FileLogger.Info($"Install request sent for {mod.FileName}.");
+                    FileLogger.Info("New mods installed. Waiting for restart command...");
+                    Log.LogInfo($"[{MyPluginInfo.PLUGIN_NAME}] New mods installed. Waiting for restart...");
+                    // The launcher will send a "restart" broadcast - just wait
+                    await Task.Delay(Timeout.Infinite);
                 }
-                catch (Exception ex)
+                else
                 {
-                    FileLogger.Error($"Failed to request install for {mod.FileName}: {ex.Message}");
-                    Log.LogError($"[{MyPluginInfo.PLUGIN_NAME}] Failed to request install for {mod.FileName}: {ex.Message}");
+                    FileLogger.Info("All mods installed. Plugin ready.");
+                    Log.LogInfo($"[{MyPluginInfo.PLUGIN_NAME}] All mods installed. Plugin ready.");
+                    // Keep connection alive
+                    await Task.Delay(Timeout.Infinite);
                 }
             }
-
-            FileLogger.Info($"{needsInstall.Count} mods queued. Requesting restart...");
-            Log.LogInfo($"[{MyPluginInfo.PLUGIN_NAME}] {needsInstall.Count} mods queued. Requesting restart...");
-            await pipe.SendMessageAsync("restart_after_install");
-            FileLogger.Info("Restart request sent.");
         }
         catch (Exception ex)
         {
             FileLogger.Error($"Error: {ex.Message}");
             Log.LogError($"[{MyPluginInfo.PLUGIN_NAME}] Error: {ex.Message}");
         }
-    }
-
-    private static ModManifest? LoadEmbeddedManifest()
-    {
-        var assembly = Assembly.GetExecutingAssembly();
-        var stream = assembly.GetManifestResourceStream("manifest.json");
-        if (stream == null)
-        {
-            FileLogger.Error("Embedded manifest not found!");
-            Log.LogError($"[{MyPluginInfo.PLUGIN_NAME}] Embedded manifest not found!");
-            return null;
-        }
-
-        using var reader = new StreamReader(stream);
-        var json = reader.ReadToEnd();
-        FileLogger.Info("Manifest loaded.");
-        return JsonSerializer.Deserialize<ModManifest>(json);
     }
 }

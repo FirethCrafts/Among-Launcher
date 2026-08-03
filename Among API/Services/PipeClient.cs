@@ -1,5 +1,6 @@
 using System.IO.Pipes;
 using System.Text;
+using System.Text.Json;
 
 namespace AmongApi.Services;
 
@@ -15,6 +16,7 @@ public class PipeClient : IDisposable
     private bool _connected;
     private bool _disposed;
     private readonly Dictionary<string, TaskCompletionSource<JsonElement>> _pending = new();
+    private readonly Dictionary<string, Func<JsonElement, Task<object?>>> _handlers = new();
     private readonly object _lock = new();
 
     public bool IsConnected => _connected;
@@ -26,9 +28,16 @@ public class PipeClient : IDisposable
         _log = log;
     }
 
+    public void RegisterHandler(string messageType, Func<JsonElement, Task<object?>> handler)
+    {
+        lock (_lock)
+        {
+            _handlers[messageType] = handler;
+        }
+    }
+
     public async Task<bool> ConnectAsync(CancellationToken ct = default)
     {
-        // Retry connection with increasing delays
         for (int attempt = 1; attempt <= 5; attempt++)
         {
             try
@@ -137,6 +146,7 @@ public class PipeClient : IDisposable
                 var message = Encoding.UTF8.GetString(buffer, 0, totalRead);
                 var doc = JsonDocument.Parse(message);
 
+                // Check if this is a response to a pending request
                 if (doc.RootElement.TryGetProperty("id", out var idProp))
                 {
                     var id = idProp.GetString() ?? "";
@@ -148,6 +158,18 @@ public class PipeClient : IDisposable
                             tcs.TrySetResult(doc.RootElement);
                             continue;
                         }
+                    }
+                }
+
+                // Handle broadcasts from launcher
+                if (doc.RootElement.TryGetProperty("type", out var typeProp))
+                {
+                    var msgType = typeProp.GetString() ?? "";
+                    if (msgType == "restart")
+                    {
+                        _log.LogInfo("[Pipe] Received restart command from launcher.");
+                        // The game will be killed by the launcher, so we just exit
+                        break;
                     }
                 }
             }
