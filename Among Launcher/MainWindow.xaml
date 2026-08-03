@@ -1,0 +1,160 @@
+<Window x:Class="AmongLauncher.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
+        xmlns:views="clr-namespace:AmongLauncher.Views"
+        Title="Among Launcher" Height="640" Width="980"
+        Background="{StaticResource AppBackground}"
+        WindowStartupLocation="CenterScreen"
+        WindowStyle="None" ResizeMode="CanResize"
+        BorderThickness="1" BorderBrush="#242429">
+    <shell:WindowChrome.WindowChrome>
+        <shell:WindowChrome GlassFrameThickness="0" CaptionHeight="36"
+                            ResizeBorderThickness="6" UseAeroCaptionButtons="False"/>
+    </shell:WindowChrome.WindowChrome>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="36"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <!-- Custom title bar -->
+        <Grid Grid.Row="0" Background="#08080A">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <TextBlock Text="Among Launcher" FontSize="12" FontWeight="SemiBold"
+                       Foreground="#A1A1AA" VerticalAlignment="Center" Margin="16,0,0,0"/>
+
+            <!-- Status badge pill -->
+            <Border Grid.Column="1" x:Name="StatusBadge" CornerRadius="14"
+                    Background="#1A1A1E" BorderBrush="#2A2A30" BorderThickness="1"
+                    Padding="12,6" Margin="0,0,16,0" VerticalAlignment="Center">
+                <Border.RenderTransform>
+                    <ScaleTransform x:Name="StatusBadgeScale" ScaleX="1" ScaleY="1"/>
+                </Border.RenderTransform>
+                <StackPanel Orientation="Horizontal">
+                    <Ellipse x:Name="StatusIndicator" Width="8" Height="8" Fill="#6B6B76" Margin="0,0,8,0"/>
+                    <TextBlock x:Name="StatusText" Text="No Game Running" FontSize="12"
+                               Foreground="#6B6B76" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                    <Button x:Name="StopGameButton" Content="STOP"
+                            Background="#DC2626" BorderThickness="0"
+                            Foreground="#FFFFFF" FontSize="11" FontWeight="SemiBold"
+                            Padding="8,4"
+                            Visibility="Collapsed"
+                            Click="StopGameButton_Click">
+                        <Button.Style>
+                            <Style TargetType="Button">
+                                <Setter Property="Template">
+                                    <Setter.Value>
+                                        <ControlTemplate TargetType="Button">
+                                            <Border x:Name="BtnBorder" Background="{TemplateBinding Background}"
+                                                    CornerRadius="6" Padding="{TemplateBinding Padding}">
+                                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                            </Border>
+                                            <ControlTemplate.Triggers>
+                                                <Trigger Property="IsMouseOver" Value="True">
+                                                    <Setter TargetName="BtnBorder" Property="Background" Value="#EF4444"/>
+                                                </Trigger>
+                                            </ControlTemplate.Triggers>
+                                        </ControlTemplate>
+                                    </Setter.Value>
+                                </Setter>
+                            </Style>
+                        </Button.Style>
+                    </Button>
+                </StackPanel>
+            </Border>
+
+            <!-- Window controls -->
+            <StackPanel Grid.Column="2" Orientation="Horizontal">
+                <Button Content="&#xE921;" FontFamily="Segoe MDL2 Assets" FontSize="10"
+                        Style="{StaticResource TitleBarButton}" Click="Minimize_Click"
+                        shell:WindowChrome.IsHitTestVisibleInChrome="True"/>
+                <Button Content="&#xE922;" FontFamily="Segoe MDL2 Assets" FontSize="10"
+                        Style="{StaticResource TitleBarButton}" Click="Maximize_Click"
+                        shell:WindowChrome.IsHitTestVisibleInChrome="True"/>
+                <Button Content="&#xE8BB;" FontFamily="Segoe MDL2 Assets" FontSize="10"
+                        Style="{StaticResource CloseButton}" Click="Close_Click"
+                        shell:WindowChrome.IsHitTestVisibleInChrome="True"/>
+            </StackPanel>
+        </Grid>
+
+        <!-- Body -->
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="72"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- Sidebar -->
+            <Border x:Name="Sidebar" Grid.Column="0" Background="{StaticResource SidebarBackground}">
+                <Border.Effect>
+                    <DropShadowEffect Color="#000000" BlurRadius="16" ShadowDepth="4" Direction="0" Opacity="0.5"/>
+                </Border.Effect>
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <!-- Home (top) -->
+                    <Button x:Name="HomeButton" Grid.Row="0" Tag="MainView"
+                            Click="NavButton_Click"
+                            Style="{StaticResource NavButton}"
+                            Margin="0,18,0,0" ToolTip="Home">
+                        <Path Data="{StaticResource HomeIcon}" Stretch="Uniform" Width="24" Height="24"
+                              Fill="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}"/>
+                    </Button>
+
+                    <!-- Spacer -->
+                    <StackPanel Grid.Row="1"/>
+
+                    <!-- Settings (above logout) -->
+                    <Button x:Name="SettingsButton" Grid.Row="2" Tag="SettingsView"
+                            Click="NavButton_Click"
+                            Style="{StaticResource NavButton}"
+                            Margin="0,0,0,8" ToolTip="Settings">
+                        <Path Data="{StaticResource SettingsIcon}" Stretch="Uniform" Width="24" Height="24"
+                              Fill="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}"/>
+                    </Button>
+
+                    <!-- Logout (above avatar) -->
+                    <Button x:Name="LogoutButton" Grid.Row="3"
+                            Click="Logout_Click"
+                            Style="{StaticResource NavButton}"
+                            Margin="0,0,0,8" ToolTip="Logout">
+                        <Path Data="{StaticResource LogoutIcon}" Stretch="Uniform" Width="24" Height="24"
+                              Fill="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}"/>
+                    </Button>
+
+                    <!-- Avatar (bottom) -->
+                    <Grid Grid.Row="4" Width="40" Height="40" Margin="0,0,0,16">
+                        <Ellipse Fill="#5865F2">
+                            <Ellipse.Effect>
+                                <DropShadowEffect Color="#5865F2" BlurRadius="14" ShadowDepth="0" Opacity="0.6"/>
+                            </Ellipse.Effect>
+                        </Ellipse>
+                        <Image x:Name="SidebarAvatar" Stretch="UniformToFill" Visibility="Collapsed">
+                            <Image.Clip>
+                                <EllipseGeometry Center="20,20" RadiusX="20" RadiusY="20"/>
+                            </Image.Clip>
+                        </Image>
+                    </Grid>
+                </Grid>
+            </Border>
+
+            <!-- Content area -->
+            <ContentControl Grid.Column="1" x:Name="ContentArea" Margin="25"/>
+        </Grid>
+
+        <!-- Modal Overlay (top layer) -->
+        <views:ModalOverlay x:Name="ModalOverlay" Grid.RowSpan="2" Grid.ColumnSpan="2"/>
+    </Grid>
+</Window>

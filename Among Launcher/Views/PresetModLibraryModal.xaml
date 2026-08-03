@@ -1,0 +1,95 @@
+<UserControl x:Class="AmongLauncher.Views.PresetModLibraryModal"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             mc:Ignorable="d"
+             d:DesignHeight="400" d:DesignWidth="450">
+    <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="400">
+        <StackPanel>
+            <!-- AUnlocker -->
+            <Border Background="#1A1A1E" CornerRadius="8" Padding="16" Margin="0,0,0,12">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0">
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                            <TextBlock Text="AUnlocker" FontWeight="Bold" Foreground="#FFFFFF" FontSize="14"/>
+                            <TextBlock Text="v1.0.0" FontSize="11" Foreground="#6B6B76" Margin="8,0,0,0"/>
+                        </StackPanel>
+                        <TextBlock Text="Unlocker utility for Among Us" Foreground="#A1A1AA" FontSize="12"/>
+                    </StackPanel>
+                    <Button x:Name="InstallAUnlockerButton" Grid.Column="1" Content="Install"
+                            Click="InstallAUnlocker_Click"
+                            Style="{StaticResource SaveButton}"
+                            Height="32" Padding="16,6" VerticalAlignment="Center"/>
+                </Grid>
+            </Border>
+
+            <!-- Better Among Us -->
+            <Border Background="#1A1A1E" CornerRadius="8" Padding="16" Margin="0,0,0,12">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0">
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                            <TextBlock Text="Better Among Us" FontWeight="Bold" Foreground="#FFFFFF" FontSize="14"/>
+                            <TextBlock Text="v2.3.1" FontSize="11" Foreground="#6B6B76" Margin="8,0,0,0"/>
+                        </StackPanel>
+                        <TextBlock Text="QoL improvements and enhancements" Foreground="#A1A1AA" FontSize="12"/>
+                    </StackPanel>
+                    <Button x:Name="InstallBetterAUButton" Grid.Column="1" Content="Install"
+                            Click="InstallBetterAU_Click"
+                            Style="{StaticResource SaveButton}"
+                            Height="32" Padding="16,6" VerticalAlignment="Center"/>
+                </Grid>
+            </Border>
+
+            <!-- Town of Us -->
+            <Border Background="#1A1A1E" CornerRadius="8" Padding="16" Margin="0,0,0,12">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0">
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                            <TextBlock Text="Town of Us" FontWeight="Bold" Foreground="#FFFFFF" FontSize="14"/>
+                            <TextBlock Text="v3.5.2" FontSize="11" Foreground="#6B6B76" Margin="8,0,0,0"/>
+                        </StackPanel>
+                        <TextBlock Text="New roles and game modes" Foreground="#A1A1AA" FontSize="12"/>
+                    </StackPanel>
+                    <Button x:Name="InstallTownOfUsButton" Grid.Column="1" Content="Install"
+                            Click="InstallTownOfUs_Click"
+                            Style="{StaticResource SaveButton}"
+                            Height="32" Padding="16,6" VerticalAlignment="Center"/>
+                </Grid>
+            </Border>
+
+            <!-- The Other Roles -->
+            <Border Background="#1A1A1E" CornerRadius="8" Padding="16" Margin="0,0,0,0">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0">
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                            <TextBlock Text="The Other Roles" FontWeight="Bold" Foreground="#FFFFFF" FontSize="14"/>
+                            <TextBlock Text="v1.2.0" FontSize="11" Foreground="#6B6B76" Margin="8,0,0,0"/>
+                        </StackPanel>
+                        <TextBlock Text="Additional roles and features" Foreground="#A1A1AA" FontSize="12"/>
+                    </StackPanel>
+                    <Button x:Name="InstallOtherRolesButton" Grid.Column="1" Content="Install"
+                            Click="InstallOtherRoles_Click"
+                            Style="{StaticResource SaveButton}"
+                            Height="32" Padding="16,6" VerticalAlignment="Center"/>
+                </Grid>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>
