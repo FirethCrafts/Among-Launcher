@@ -8,7 +8,7 @@
              Visibility="Collapsed">
     <Grid>
         <!-- Darkened Backdrop -->
-        <Rectangle Fill="#000000" Opacity="0.7" MouseLeftButtonDown="Backdrop_Click"/>
+        <Rectangle x:Name="Backdrop" Fill="#000000" Opacity="0.7" MouseLeftButtonDown="Backdrop_Click"/>
         
         <!-- Centered Modal Card -->
         <Border x:Name="ModalCard" Background="{StaticResource GlassSurfaceStrong}" BorderBrush="{StaticResource GlassEdgeBorder}" BorderThickness="1"
@@ -17,7 +17,10 @@
                 MouseLeftButtonDown="Card_Click"
                 SnapsToDevicePixels="True" UseLayoutRounding="True">
             <Border.RenderTransform>
-                <TranslateTransform/>
+                <TransformGroup>
+                    <ScaleTransform x:Name="ModalCardScale" ScaleX="0.96" ScaleY="0.96"/>
+                    <TranslateTransform x:Name="ModalCardTranslate" Y="8"/>
+                </TransformGroup>
             </Border.RenderTransform>
             <Border.Effect>
                 <DropShadowEffect Color="#000000" BlurRadius="20" ShadowDepth="8" Opacity="0.6"/>

@@ -19,19 +19,33 @@ public partial class ModalOverlay : UserControl
         ModalContent.Content = content;
         Visibility = Visibility.Visible;
 
-        // Entrance: fade + slide up
+        // Backdrop fade in
+        Backdrop.Opacity = 0;
+        Backdrop.BeginAnimation(OpacityProperty,
+            new DoubleAnimation(0, 0.7, new Duration(TimeSpan.FromMilliseconds(220))));
+
+        // Card entrance: fade + slide up + slight grow
         ModalCard.Opacity = 0;
-        if (ModalCard.RenderTransform is TranslateTransform t)
-            t.Y = 8;
+        ModalCardScale.ScaleX = 0.96;
+        ModalCardScale.ScaleY = 0.96;
+        ModalCardTranslate.Y = 8;
 
         var fade = new DoubleAnimation(0, 1, new Duration(TimeSpan.FromMilliseconds(220)));
         ModalCard.BeginAnimation(OpacityProperty, fade);
 
-        if (ModalCard.RenderTransform is TranslateTransform tt && !App.ReduceMotion)
-        {
-            tt.BeginAnimation(TranslateTransform.YProperty,
-                new DoubleAnimation(8, 0, new Duration(TimeSpan.FromMilliseconds(220))));
-        }
+        if (App.ReduceMotion) return;
+
+        ModalCardTranslate.BeginAnimation(TranslateTransform.YProperty,
+            new DoubleAnimation(8, 0, new Duration(TimeSpan.FromMilliseconds(220)))
+            {
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+            });
+
+        var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
+        ModalCardScale.BeginAnimation(ScaleTransform.ScaleXProperty,
+            new DoubleAnimation(0.96, 1, new Duration(TimeSpan.FromMilliseconds(220))) { EasingFunction = ease });
+        ModalCardScale.BeginAnimation(ScaleTransform.ScaleYProperty,
+            new DoubleAnimation(0.96, 1, new Duration(TimeSpan.FromMilliseconds(220))) { EasingFunction = ease });
     }
 
     public void Hide()
