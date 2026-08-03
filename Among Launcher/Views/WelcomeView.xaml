@@ -20,7 +20,7 @@
         </Ellipse>
 
         <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Width="420">
-            <TextBlock x:Name="TitleText" Text="Among Launcher"
+            <TextBlock Text="Among Launcher"
                        FontSize="46" FontWeight="Bold" Foreground="{StaticResource TextTitle}"
                        HorizontalAlignment="Center" UseLayoutRounding="True" SnapsToDevicePixels="True"
                        RenderTransformOrigin="0.5,0.5">
@@ -28,7 +28,7 @@
                     <ScaleTransform x:Name="TitleScale" ScaleX="0.94" ScaleY="0.94"/>
                 </TextBlock.RenderTransform>
                 <TextBlock.Effect>
-                    <DropShadowEffect x:Name="TitleGlow" Color="#5865F2" BlurRadius="14" ShadowDepth="0" Opacity="0.35"/>
+                    <DropShadowEffect Color="#5865F2" BlurRadius="14" ShadowDepth="0" Opacity="0.35"/>
                 </TextBlock.Effect>
             </TextBlock>
             <TextBlock x:Name="SubtitleText" Text="Your modded Among Us, managed."

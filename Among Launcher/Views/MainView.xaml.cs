@@ -1,5 +1,3 @@
-using System.IO;
-using System.Net.Http;
 using System.Text.Json;
 using System.Threading;
 using System.Windows;
@@ -284,12 +282,6 @@ public partial class MainView
 
         var logViewer = new LogViewerModal();
         mainWindow.ModalOverlayControl.Show("IPC Logs", logViewer);
-    }
-
-    private void SaveLaunchOptions_Click(object sender, RoutedEventArgs e)
-    {
-        // TODO: Implement save launch options logic
-        MessageBox.Show("Launch options saved!", "Success", MessageBoxButton.OK, MessageBoxImage.Information);
     }
 
     // Add Mod Button - Show menu
@@ -658,7 +650,7 @@ public partial class MainView
             if (missing.Count > 0)
             {
                 ProgressText.Text = $"Installing {missing.Count} missing mod(s)...";
-                await sync.InstallAsync(missing, null, CancellationToken.None);
+                await sync.InstallAsync(missing, CancellationToken.None);
                 RefreshModsList();
             }
 

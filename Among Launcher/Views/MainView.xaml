@@ -63,37 +63,6 @@
             </StackPanel>
         </Grid>
 
-        <!-- Launch Options Card -->
-        <Border Grid.Row="1" Style="{StaticResource GlassCard}">
-            <StackPanel>
-                <TextBlock Text="LAUNCH OPTIONS" Style="{StaticResource CardHeader}"/>
-                <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
-                    </Grid.ColumnDefinitions>
-                    <StackPanel Grid.Column="0">
-                        <CheckBox x:Name="HideConsoleCheckBox" Content="Hide BepInEx console"
-                                  Foreground="{StaticResource TextBody}" Margin="0,0,0,12"/>
-                        <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
-                            <TextBlock Text="Window Width:" Foreground="{StaticResource TextMuted}" FontSize="13"
-                                       VerticalAlignment="Center" Margin="0,0,8,0"/>
-                            <TextBox x:Name="WidthInput" Text="1280" Width="80"
-                                     Style="{StaticResource GlassInput}" Padding="8,4"/>
-                            <TextBlock Text="Height:" Foreground="{StaticResource TextMuted}" FontSize="13"
-                                       VerticalAlignment="Center" Margin="16,0,8,0"/>
-                            <TextBox x:Name="HeightInput" Text="720" Width="80"
-                                     Style="{StaticResource GlassInput}" Padding="8,4"/>
-                        </StackPanel>
-                    </StackPanel>
-                    <Button Grid.Column="1" Content="SAVE"
-                            Click="SaveLaunchOptions_Click"
-                            Style="{StaticResource SaveButton}"
-                            VerticalAlignment="Bottom"/>
-                </Grid>
-            </StackPanel>
-        </Border>
-
         <!-- LOCAL MODS Card -->
         <Border Grid.Row="2" Style="{StaticResource GlassCard}">
             <StackPanel>

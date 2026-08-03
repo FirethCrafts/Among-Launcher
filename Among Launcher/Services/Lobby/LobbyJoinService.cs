@@ -46,7 +46,7 @@ public class LobbyJoinService
         if (missing.Count > 0)
         {
             await _killGame();
-            await _modSetSync.InstallAsync(missing, null, ct);
+            await _modSetSync.InstallAsync(missing, ct);
         }
 
         await _launchGame();

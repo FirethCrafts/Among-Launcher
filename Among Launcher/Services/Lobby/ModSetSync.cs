@@ -27,14 +27,12 @@ public class ModSetSync
         return Task.FromResult(missing);
     }
 
-    public async Task InstallAsync(List<ModSetEntry> missing, IProgress<ModDownloadItem>? progress, CancellationToken ct)
+    public async Task InstallAsync(List<ModSetEntry> missing, CancellationToken ct)
     {
         foreach (var entry in missing)
         {
             ct.ThrowIfCancellationRequested();
             var dest = Path.Combine(_pluginsDir, entry.FileName);
-            var item = new ModDownloadItem(entry.DownloadUrl, entry.FileName);
-            progress?.Report(item);
 
             // The host's mirrored mod set only carries file names (GetInstalledModSet
             // captures FileName), so a joiner sees an empty DownloadUrl. When no URL is
@@ -42,23 +40,9 @@ public class ModSetSync
             // is often already installed locally. The backend should supply DownloadUrl for
             // a full mod sync; never throw on an empty URL.
             if (string.IsNullOrEmpty(entry.DownloadUrl))
-            {
-                item.Status = File.Exists(dest) && new FileInfo(dest).Length > 0
-                    ? "Installed"
-                    : "Failed";
                 continue;
-            }
 
-            try
-            {
-                await _downloadMod(entry.FileName, entry.DownloadUrl, dest);
-                item.Status = "Installed";
-            }
-            catch
-            {
-                item.Status = "Failed";
-                throw;
-            }
+            await _downloadMod(entry.FileName, entry.DownloadUrl, dest);
         }
     }
 }

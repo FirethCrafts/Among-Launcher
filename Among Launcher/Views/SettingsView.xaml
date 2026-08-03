@@ -61,8 +61,7 @@
                 </Grid.ColumnDefinitions>
                 <StackPanel Grid.Column="0">
                     <TextBlock Text="MODDED INSTALL PATH" Style="{StaticResource CardHeader}"/>
-                    <TextBlock x:Name="InstallPathText"
-                               Text="%LocalAppData%\AmongLauncher\ModdedAmongUs"
+                    <TextBlock Text="%LocalAppData%\AmongLauncher\ModdedAmongUs"
                                TextTrimming="CharacterEllipsis" FontSize="13"
                                Foreground="{StaticResource TextMuted}"/>
                 </StackPanel>

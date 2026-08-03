@@ -38,9 +38,6 @@
             <Border Grid.Column="1" x:Name="StatusBadge" CornerRadius="14"
                     Background="{StaticResource GlassSurface}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1"
                     Padding="12,6" Margin="0,0,16,0" VerticalAlignment="Center">
-                <Border.RenderTransform>
-                    <ScaleTransform x:Name="StatusBadgeScale" ScaleX="1" ScaleY="1"/>
-                </Border.RenderTransform>
                 <StackPanel Orientation="Horizontal">
                     <Ellipse x:Name="StatusIndicator" Width="8" Height="8" Fill="{StaticResource TextMuted}" Margin="0,0,8,0"/>
                     <TextBlock x:Name="StatusText" Text="No Game Running" FontSize="12"
