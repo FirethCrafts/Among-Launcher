@@ -25,9 +25,14 @@
                 </Grid.ColumnDefinitions>
                 <StackPanel Grid.Column="0">
                     <TextBlock Text="AMONG US PATH" Style="{StaticResource CardHeader}"/>
+                    <ComboBox x:Name="StorefrontCombo" Style="{StaticResource GlassCombo}"
+                              SelectionChanged="StorefrontCombo_SelectionChanged"
+                              Margin="0,4,0,8" Width="200" HorizontalAlignment="Left"/>
                     <TextBlock x:Name="GamePathText" Text="Auto-detecting..."
                                TextTrimming="CharacterEllipsis" FontSize="13"
                                Foreground="{StaticResource TextMuted}"/>
+                    <TextBlock x:Name="StorefrontStatusText" Text="" FontSize="11"
+                               Foreground="{StaticResource TextMuted}" Margin="0,4,0,0"/>
                 </StackPanel>
                 <Button Grid.Column="1" Click="BrowseGamePath_Click"
                         Style="{StaticResource IconButton}" ToolTip="Browse">
