@@ -127,6 +127,10 @@
                                     Click="ImportLocalMod_Click"
                                     Style="{StaticResource SecondaryButton}"
                                     Height="36" HorizontalAlignment="Stretch" Margin="0,0,0,4"/>
+                            <Button x:Name="InstallLibraryModButton" Content="From Library"
+                                    Click="InstallLibraryMod_Click"
+                                    Style="{StaticResource SecondaryButton}"
+                                    Height="36" HorizontalAlignment="Stretch" Margin="0,0,0,4"/>
                             <Button x:Name="InstallPresetModButton" Content="Install Preset Mod"
                                     Click="InstallPresetMod_Click"
                                     Style="{StaticResource SecondaryButton}"
@@ -146,12 +150,20 @@
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*"/>
                                         <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="Auto"/>
                                     </Grid.ColumnDefinitions>
                                     <StackPanel Grid.Column="0">
                                         <TextBlock Text="{Binding Name}" FontWeight="Bold" Foreground="{StaticResource TextTitle}" FontSize="13"/>
                                         <TextBlock Text="{Binding Description}" Foreground="{StaticResource TextBody}" FontSize="11" Margin="0,2,0,0"/>
                                     </StackPanel>
-                                    <Button Grid.Column="1" Content="Remove"
+                                    <Button Grid.Column="1" Content="To Library"
+                                            Click="ToLibraryMod_Click"
+                                            Style="{StaticResource SecondaryButton}"
+                                            Foreground="#10B981"
+                                            Height="24" Padding="12,4" FontSize="11"
+                                            Margin="0,0,8,0"
+                                            VerticalAlignment="Center"/>
+                                    <Button Grid.Column="2" Content="Remove"
                                             Click="RemoveMod_Click"
                                             Style="{StaticResource SecondaryButton}"
                                             Foreground="{StaticResource AccentBrush}"

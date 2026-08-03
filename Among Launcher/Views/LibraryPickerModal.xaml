@@ -1,0 +1,36 @@
+<UserControl x:Class="AmongLauncher.Views.LibraryPickerModal"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             mc:Ignorable="d"
+             d:DesignHeight="400" d:DesignWidth="450">
+    <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="360">
+        <ItemsControl ItemsSource="{Binding Entries}">
+            <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                    <Border Background="{StaticResource GlassSurfaceWeak}" BorderBrush="{StaticResource GlassBorder}"
+                            BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,0,0,8"
+                            SnapsToDevicePixels="True" UseLayoutRounding="True">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                <TextBlock Text="{Binding FileName}" FontWeight="Bold"
+                                           Foreground="{StaticResource TextTitle}" FontSize="13"/>
+                                <TextBlock Text="{Binding Version}" FontSize="11"
+                                           Foreground="{StaticResource TextMuted}" Margin="0,2,0,0"/>
+                            </StackPanel>
+                            <Button Grid.Column="1" Content="Pick"
+                                    Style="{StaticResource SaveButton}"
+                                    Height="28" Padding="14,4" VerticalAlignment="Center"
+                                    Click="PickButton_Click" Tag="{Binding}"/>
+                        </Grid>
+                    </Border>
+                </DataTemplate>
+            </ItemsControl.ItemTemplate>
+        </ItemsControl>
+    </ScrollViewer>
+</UserControl>

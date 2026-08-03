@@ -16,6 +16,9 @@ public partial class MainWindow
     private readonly MainView _mainView = new();
     private readonly SettingsView _settingsView = new();
     private readonly WelcomeView _welcomeView = new();
+    private readonly LibraryView _libraryView = new();
+
+    public MainView MainView => _mainView;
     private readonly PipeServer _pipeServer = new();
     private readonly HttpClient _httpClient = new();
     private readonly List<Task> _pendingInstalls = new();
@@ -722,6 +725,7 @@ public partial class MainWindow
         var view = tag switch
         {
             "MainView" => _mainView,
+            "LibraryView" => _libraryView,
             "SettingsView" => _settingsView,
             _ => ContentArea.Content
         };
@@ -760,7 +764,9 @@ public partial class MainWindow
 
         if (showSidebar)
         {
-            var active = view == _mainView ? HomeButton : SettingsButton;
+            var active = view == _mainView ? HomeButton
+                       : view == _libraryView ? LibraryButton
+                       : SettingsButton;
             SetActiveNav(active);
         }
     }
@@ -768,7 +774,7 @@ public partial class MainWindow
     private void SetActiveNav(Button active)
     {
         var activeBg = new SolidColorBrush(Color.FromRgb(0x22, 0x22, 0x26));
-        foreach (var btn in new[] { HomeButton, SettingsButton, LogoutButton })
+        foreach (var btn in new[] { HomeButton, LibraryButton, SettingsButton, LogoutButton })
         {
             var isActive = btn == active;
             btn.Foreground = new SolidColorBrush(isActive ? Colors.White : (Color)FindResource("NavIconColor"));

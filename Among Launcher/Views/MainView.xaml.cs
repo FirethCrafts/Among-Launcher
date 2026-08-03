@@ -319,6 +319,68 @@ public partial class MainView
         }
     }
 
+    // From Library - install a library mod into the game
+    private void InstallLibraryMod_Click(object sender, RoutedEventArgs e)
+    {
+        AddModPopup.IsOpen = false;
+
+        if (string.IsNullOrEmpty(_moddedPath))
+        {
+            MessageBox.Show("Please install BepInEx first.", "Error", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        var library = new LibraryManager(LauncherConfig.Load());
+        var entries = library.LoadLibrary();
+
+        if (entries.Count == 0)
+        {
+            MessageBox.Show("Your library is empty. Copy mods to the library from the Home screen first.",
+                "From Library", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var mainWindow = Window.GetWindow(this) as MainWindow;
+        if (mainWindow == null) return;
+
+        // Show a picker listing library mods
+        var picker = new LibraryPickerModal(entries);
+        picker.PickRequested += (_, entry) =>
+        {
+            mainWindow.ModalOverlayControl.Hide();
+            var pluginsDir = Path.Combine(_moddedPath, "BepInEx", "plugins");
+            if (library.InstallToPlugins(entry.FileName, pluginsDir))
+            {
+                RefreshModsList();
+                ModStatusText.Text = $"Installed '{entry.FileName}' from library.";
+            }
+            else
+            {
+                MessageBox.Show($"Library file '{entry.FileName}' is missing.", "From Library",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        };
+
+        mainWindow.ModalOverlayControl.Show("From Library", picker);
+    }
+
+    // To Library - copy a local mod into the library
+    private void ToLibraryMod_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button button || button.DataContext is not ModInfo mod) return;
+        if (string.IsNullOrEmpty(mod.FilePath)) return;
+
+        var library = new LibraryManager(LauncherConfig.Load());
+        if (library.AddToLibrary(mod.FilePath))
+        {
+            ModStatusText.Text = $"Copied '{mod.Name}' to library.";
+        }
+        else
+        {
+            MessageBox.Show("Failed to copy mod to library.", "To Library", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
     // Install Preset Mod - Show preset library modal
     private void InstallPresetMod_Click(object sender, RoutedEventArgs e)
     {
@@ -564,7 +626,20 @@ public partial class MainView
                 RefreshModsList();
             }
 
-            ModStatusText.Text = $"Profile '{profile.Name}' applied.";
+            // Move any installed mods that don't belong to this profile into the library.
+            var keepNames = profile.Mods.Select(m => m.FileName).ToList();
+            var library = new LibraryManager(LauncherConfig.Load());
+            var moved = library.MoveNonListedToLibrary(pluginsDir, keepNames);
+            if (moved.Count > 0)
+            {
+                RefreshModsList();
+                ModStatusText.Text = $"Profile '{profile.Name}' applied. Moved {moved.Count} mod(s) to library.";
+            }
+            else
+            {
+                ModStatusText.Text = $"Profile '{profile.Name}' applied.";
+            }
+
             LaunchGame();
         }
         catch (Exception ex)

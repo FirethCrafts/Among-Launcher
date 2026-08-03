@@ -105,6 +105,7 @@
                 <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
                         <RowDefinition Height="*"/>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
@@ -115,16 +116,25 @@
                     <Button x:Name="HomeButton" Grid.Row="0" Tag="MainView"
                             Click="NavButton_Click"
                             Style="{StaticResource NavButton}"
-                            Margin="0,18,0,0" ToolTip="Home">
+                            Margin="0,18,0,8" ToolTip="Home">
                         <Path Data="{StaticResource HomeIcon}" Stretch="Uniform" Width="24" Height="24"
                               Fill="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}"/>
                     </Button>
 
+                    <!-- Library (below home) -->
+                    <Button x:Name="LibraryButton" Grid.Row="1" Tag="LibraryView"
+                            Click="NavButton_Click"
+                            Style="{StaticResource NavButton}"
+                            Margin="0,0,0,8" ToolTip="Library">
+                        <Path Data="{StaticResource LibraryIcon}" Stretch="Uniform" Width="24" Height="24"
+                              Fill="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}"/>
+                    </Button>
+
                     <!-- Spacer -->
-                    <StackPanel Grid.Row="1"/>
+                    <StackPanel Grid.Row="2"/>
 
                     <!-- Settings (above logout) -->
-                    <Button x:Name="SettingsButton" Grid.Row="2" Tag="SettingsView"
+                    <Button x:Name="SettingsButton" Grid.Row="3" Tag="SettingsView"
                             Click="NavButton_Click"
                             Style="{StaticResource NavButton}"
                             Margin="0,0,0,8" ToolTip="Settings">
@@ -133,7 +143,7 @@
                     </Button>
 
                     <!-- Logout (above avatar) -->
-                    <Button x:Name="LogoutButton" Grid.Row="3"
+                    <Button x:Name="LogoutButton" Grid.Row="4"
                             Click="Logout_Click"
                             Style="{StaticResource NavButton}"
                             Margin="0,0,0,8" ToolTip="Logout">
@@ -142,7 +152,7 @@
                     </Button>
 
                     <!-- Avatar (bottom) -->
-                    <Grid Grid.Row="4" Width="40" Height="40" Margin="0,0,0,16">
+                    <Grid Grid.Row="5" Width="40" Height="40" Margin="0,0,0,16">
                         <Grid.Style>
                             <Style TargetType="Grid">
                                 <Setter Property="Effect">
