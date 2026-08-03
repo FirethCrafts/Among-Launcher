@@ -4,11 +4,19 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              mc:Ignorable="d"
-             d:DesignHeight="200" d:DesignWidth="460">
+             d:DesignHeight="320" d:DesignWidth="460">
     <StackPanel>
-        <TextBlock x:Name="ExplanationText" TextWrapping="Wrap" Margin="0,0,0,16"/>
-        <TextBlock x:Name="AnswerText" TextWrapping="Wrap" Margin="0,0,0,24"/>
+        <TextBlock x:Name="ExplanationText" FontSize="14"
+                   Foreground="{StaticResource TextBody}" TextWrapping="Wrap" Margin="0,0,0,16"/>
+        <TextBlock x:Name="AnswerText" FontSize="14"
+                   Foreground="{StaticResource TextBody}" TextWrapping="Wrap" Margin="0,0,0,20"/>
+        <TextBlock FontSize="13" Foreground="{StaticResource TextMuted}" Margin="0,0,0,24">
+            <Hyperlink x:Name="GuideLink" NavigateUri="https://github.com/FirethCrafts/Among-Launcher/blob/master/docs/adaptation-guide.md">
+                Guide: How to fix this
+            </Hyperlink>
+        </TextBlock>
         <Button x:Name="OkButton" Content="OK" Click="OkButton_Click"
-                HorizontalAlignment="Right" Height="36" Padding="24,8"/>
+                Style="{StaticResource StopButton}"
+                Height="36" Padding="24,8" HorizontalAlignment="Right"/>
     </StackPanel>
 </UserControl>
