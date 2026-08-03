@@ -128,8 +128,7 @@ public class Plugin : BasePlugin
     {
         try
         {
-            var amongUsClient = GameAssembly.Type("AmongUsClient");
-            var client = GameAssembly.GetStaticProp(amongUsClient, "Instance");
+            var client = GameAssembly.AmongUsClient();
             if (client == null)
             {
                 FileLogger.Warn("LeaveLobby: AmongUsClient not available; nothing to leave.");

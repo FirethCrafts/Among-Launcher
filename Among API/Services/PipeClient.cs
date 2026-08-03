@@ -15,19 +15,11 @@ public class PipeClient : IDisposable
     private Task? _listenTask;
     private bool _connected;
     private bool _disposed;
-    private readonly Dictionary<string, TaskCompletionSource<JsonElement>> _pending = new();
     private readonly Dictionary<string, Func<JsonElement, Task<object?>>> _handlers = new();
     private readonly object _lock = new();
     private readonly SemaphoreSlim _writeGate = new(1, 1);
 
-    public bool IsConnected => _connected;
-    public event EventHandler? Connected;
     public event EventHandler? Disconnected;
-    public event EventHandler<JsonElement>? MessageReceived;
-    public event EventHandler? JoinLobbyRequested;
-    public event EventHandler<KickRequestedEventArgs>? KickRequested;
-
-    public class KickRequestedEventArgs : EventArgs { public string Reason { get; init; } = ""; }
 
     public PipeClient(ManualLogSource log)
     {
@@ -60,7 +52,6 @@ public class PipeClient : IDisposable
                 _connected = true;
                 _cts = new CancellationTokenSource();
                 _listenTask = ListenAsync(_cts.Token);
-                Connected?.Invoke(this, EventArgs.Empty);
                 _log.LogInfo("[Pipe] Connected to launcher!");
                 return true;
             }
@@ -76,51 +67,22 @@ public class PipeClient : IDisposable
         return false;
     }
 
-    public async Task<JsonElement?> SendMessageAsync(string messageType, object? payload = null, CancellationToken ct = default)
+    public async Task SendMessageAsync(string messageType, object? payload = null, CancellationToken ct = default)
     {
         if (_client == null || !_client.IsConnected)
-            return null;
-
-        var id = Guid.NewGuid().ToString("N")[..8];
+            return;
 
         var message = new Dictionary<string, object>
         {
             ["type"] = messageType,
-            ["id"] = id,
+            ["id"] = Guid.NewGuid().ToString("N")[..8],
             ["timestamp"] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
         };
 
         if (payload != null)
             message["payload"] = payload;
 
-        var tcs = new TaskCompletionSource<JsonElement>();
-        lock (_lock)
-        {
-            _pending[id] = tcs;
-        }
-
-        var json = JsonSerializer.Serialize(message);
-
-        try
-        {
-            await WriteFrameAsync(json, ct);
-        }
-        catch
-        {
-            lock (_lock) { _pending.Remove(id); }
-            return null;
-        }
-
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        try
-        {
-            return await tcs.Task.WaitAsync(timeout.Token);
-        }
-        catch
-        {
-            lock (_lock) { _pending.Remove(id); }
-            return null;
-        }
+        await WriteFrameAsync(JsonSerializer.Serialize(message), ct);
     }
 
     private async Task WriteFrameAsync(string json, CancellationToken ct)
@@ -170,22 +132,7 @@ public class PipeClient : IDisposable
                 var message = Encoding.UTF8.GetString(buffer, 0, totalRead);
                 var doc = JsonDocument.Parse(message);
 
-                // Check if this is a response to a pending request
-                if (doc.RootElement.TryGetProperty("id", out var idProp))
-                {
-                    var id = idProp.GetString() ?? "";
-                    lock (_lock)
-                    {
-                        if (_pending.TryGetValue(id, out var tcs))
-                        {
-                            _pending.Remove(id);
-                            tcs.TrySetResult(doc.RootElement);
-                            continue;
-                        }
-                    }
-                }
-
-                // Handle broadcasts from launcher and dispatch handlers/events
+                // Handle broadcasts from launcher and dispatch handlers
                 if (doc.RootElement.TryGetProperty("type", out var typeProp))
                 {
                     var msgType = typeProp.GetString() ?? "";
@@ -218,29 +165,6 @@ public class PipeClient : IDisposable
                         {
                             _log.LogError($"[Pipe] Handler {msgType} failed: {ex.Message}");
                         }
-                    }
-
-                    try
-                    {
-                        MessageReceived?.Invoke(this, doc.RootElement);
-                        if (msgType == "join_lobby")
-                        {
-                            JoinLobbyRequested?.Invoke(this, EventArgs.Empty);
-                        }
-                        else if (msgType == "kick")
-                        {
-                            var reason = "";
-                            if (doc.RootElement.TryGetProperty("payload", out var payloadProp) &&
-                                payloadProp.TryGetProperty("reason", out var reasonProp))
-                            {
-                                reason = reasonProp.GetString() ?? "";
-                            }
-                            KickRequested?.Invoke(this, new KickRequestedEventArgs { Reason = reason });
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        _log.LogError($"[Pipe] Event dispatch for {msgType} failed: {ex.Message}");
                     }
                 }
             }

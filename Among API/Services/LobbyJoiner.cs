@@ -222,8 +222,7 @@ public class LobbyJoiner : IDisposable
         _log.LogInfo($"[LobbyJoiner] Code '{request.Code}' -> gameId {gameId}.");
 
         // 6. Join via coroutine: CoJoinOnlineGameFromCode(gameId, fromEnterCode:false) + StartCoroutine.
-        var amongUsClientType = GameAssembly.Type("AmongUsClient");
-        var client = GameAssembly.GetStaticProp(amongUsClientType, "Instance");
+        var client = GameAssembly.AmongUsClient();
         if (client == null)
             return new JoinResult(false, "AmongUsClient not available (not in main menu?)");
 
@@ -242,21 +241,7 @@ public class LobbyJoiner : IDisposable
         return new JoinResult(true, null);
     }
 
-    private static bool AlreadyInLobby()
-    {
-        var lobbyBehaviour = GameAssembly.Type("LobbyBehaviour");
-        if (GameAssembly.GetStaticProp(lobbyBehaviour, "Instance") != null)
-            return true;
-
-        var amongUsClient = GameAssembly.Type("AmongUsClient");
-        var client = GameAssembly.GetStaticProp(amongUsClient, "Instance");
-        if (client == null)
-            return false;
-
-        var gameStateEnum = GameAssembly.Type("InnerNet.InnerNetClient")?.GetNestedType("GameStates");
-        var state = GameAssembly.GetInstanceProp(client, "GameState");
-        return GameAssembly.EnumEquals(state, GameAssembly.EnumValue(gameStateEnum, "Joined"));
-    }
+    private static bool AlreadyInLobby() => GameAssembly.InLobby();
 
     private static string StripScheme(string endpoint)
     {

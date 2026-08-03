@@ -170,36 +170,6 @@ public static class GameAssembly
         }
     }
 
-    public static object? GetStaticField(Type? type, string name)
-    {
-        if (type == null) return null;
-        try
-        {
-            var field = ResolveField(type, name, isStatic: true);
-            return field?.GetValue(null);
-        }
-        catch (Exception ex)
-        {
-            Log?.LogWarning($"[GameAssembly] Read static field {type.Name}.{name} failed: {ex.Message}");
-            return null;
-        }
-    }
-
-    public static object? GetInstanceField(object? instance, string name)
-    {
-        if (instance == null) return null;
-        try
-        {
-            var field = ResolveField(instance.GetType(), name, isStatic: false);
-            return field?.GetValue(instance);
-        }
-        catch (Exception ex)
-        {
-            Log?.LogWarning($"[GameAssembly] Read {instance.GetType().Name}.{name} field failed: {ex.Message}");
-            return null;
-        }
-    }
-
     public static object? CallStaticMethod(Type? type, string name, object?[]? args = null, Type[]? argTypes = null)
     {
         if (type == null) return null;
@@ -362,6 +332,31 @@ public static class GameAssembly
     public static bool ToBool(object? value) => value is bool b && b;
 
     public static string ToStr(object? value) => value as string ?? "";
+
+    /// <summary>
+    /// True when the client is in a lobby: the lobby scene object exists, or the
+    /// client is connected (GameState == Joined) and in the online scene.
+    /// </summary>
+    public static bool InLobby()
+    {
+        var lobbyBehaviour = Type("LobbyBehaviour");
+        if (GetStaticProp(lobbyBehaviour, "Instance") != null)
+            return true;
+
+        var client = AmongUsClient();
+        if (client == null)
+            return false;
+
+        var gameStateEnum = Type("InnerNet.InnerNetClient")?.GetNestedType("GameStates");
+        var state = GetInstanceProp(client, "GameState");
+        if (!EnumEquals(state, EnumValue(gameStateEnum, "Joined")))
+            return false;
+
+        return ToBool(GetInstanceProp(client, "InOnlineScene"));
+    }
+
+    /// <summary>Gets AmongUsClient.Instance (null-safe).</summary>
+    public static object? AmongUsClient() => GetStaticProp(Type("AmongUsClient"), "Instance");
 
     private static PropertyInfo? ResolveProperty(Type type, string name, bool isStatic)
     {

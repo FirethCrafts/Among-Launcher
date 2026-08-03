@@ -153,24 +153,7 @@ public class GameStateTracker : IDisposable
         }
     }
 
-    private static bool IsInLobby()
-    {
-        var lobbyBehaviour = GameAssembly.Type("LobbyBehaviour");
-        if (GameAssembly.GetStaticProp(lobbyBehaviour, "Instance") != null)
-            return true;
-
-        var amongUsClient = GameAssembly.Type("AmongUsClient");
-        var client = GameAssembly.GetStaticProp(amongUsClient, "Instance");
-        if (client == null)
-            return false;
-
-        var gameStateEnum = GameAssembly.Type("InnerNet.InnerNetClient")?.GetNestedType("GameStates");
-        var state = GameAssembly.GetInstanceProp(client, "GameState");
-        if (!GameAssembly.EnumEquals(state, GameAssembly.EnumValue(gameStateEnum, "Joined")))
-            return false;
-
-        return GameAssembly.ToBool(GameAssembly.GetInstanceProp(client, "InOnlineScene"));
-    }
+    private static bool IsInLobby() => GameAssembly.InLobby();
 
     /// <summary>
     /// True when the local client is the lobby host. Uses the research-verified
@@ -179,8 +162,7 @@ public class GameStateTracker : IDisposable
     /// </summary>
     private static bool IsHost()
     {
-        var amongUsClient = GameAssembly.Type("AmongUsClient");
-        var client = GameAssembly.GetStaticProp(amongUsClient, "Instance");
+        var client = GameAssembly.AmongUsClient();
         if (client == null)
             return false;
 
@@ -192,8 +174,7 @@ public class GameStateTracker : IDisposable
 
     private static string LobbyCode()
     {
-        var amongUsClient = GameAssembly.Type("AmongUsClient");
-        var client = GameAssembly.GetStaticProp(amongUsClient, "Instance");
+        var client = GameAssembly.AmongUsClient();
         if (client == null)
             return "";
 
