@@ -7,7 +7,7 @@ public class AmongUsLocator
         return GameFinder.FindAmongUs();
     }
 
-    public (string? Path, Storefront? Storefront) FindAmongUsWithStorefront()
+    public GameSearchResult FindAmongUsWithStorefront()
     {
         return GameFinder.FindAmongUsWithStorefront();
     }

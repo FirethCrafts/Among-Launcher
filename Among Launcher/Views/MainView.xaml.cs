@@ -87,13 +87,22 @@ public partial class MainView
     private async void InstallButton_Click(object sender, RoutedEventArgs e)
     {
         var locator = new AmongUsLocator();
-        var (sourcePath, storefront) = locator.FindAmongUsWithStorefront();
+        var result = locator.FindAmongUsWithStorefront();
 
-        if (sourcePath == null)
+        if (result.DetectedButUnavailable)
+        {
+            ShowMsStoreAccessModal(result.Storefront);
+            return;
+        }
+
+        if (result.Path == null)
         {
             MessageBox.Show("Among Us installation not found.", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
             return;
         }
+
+        var sourcePath = result.Path;
+        var storefront = result.Storefront;
 
         _storefront = storefront ?? Storefront.Steam;
 
@@ -148,11 +157,21 @@ public partial class MainView
         }
     }
 
+    private void ShowMsStoreAccessModal(Storefront? storefront)
+    {
+        var mainWindow = Window.GetWindow(this) as MainWindow;
+        if (mainWindow == null) return;
+        var modal = new MsStoreAccessModal();
+        modal.Configure(storefront);
+        mainWindow.ModalOverlayControl.Show(
+            storefront == Storefront.Epic ? "Epic install not found" : "Microsoft Store copy blocked",
+            modal);
+    }
+
     private async Task InstallAmongApiAsync()
     {
         const string downloadUrl = "https://github.com/FirethCrafts/Among-Launcher/releases/latest/download/AmongApi.dll";
-        var pluginsDir = Path.Combine(_moddedPath!, "BepInEx", "plugins");
-        Directory.CreateDirectory(pluginsDir);
+        var pluginsDir = Path.Combine(_moddedPath!, "BepInEx", "plugins");        Directory.CreateDirectory(pluginsDir);
 
         var destPath = Path.Combine(pluginsDir, "AmongApi.dll");
 

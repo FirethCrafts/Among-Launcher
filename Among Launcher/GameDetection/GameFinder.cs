@@ -7,18 +7,22 @@ public static class GameFinder
 
     public static string? FindAmongUs() => FindAmongUsWithStorefront().Path;
 
-    public static (string? Path, Storefront? Storefront) FindAmongUsWithStorefront()
+    public static GameSearchResult FindAmongUsWithStorefront()
     {
         var steam = FindAmongUsSteam();
-        if (steam != null) return (steam, Storefront.Steam);
+        if (steam != null) return new GameSearchResult { Path = steam, Storefront = Storefront.Steam };
 
         var epic = FindAmongUsEpic();
-        if (epic != null) return (epic, Storefront.Epic);
+        if (epic.Path != null) return epic;
 
         var xbox = FindAmongUsXbox();
-        if (xbox != null) return (xbox, Storefront.MicrosoftStore);
+        if (xbox.Path != null) return xbox;
 
-        return (null, null);
+        return epic.DetectedButUnavailable
+            ? epic
+            : xbox.DetectedButUnavailable
+                ? xbox
+                : new GameSearchResult();
     }
 
     private static string? FindAmongUsSteam()
@@ -50,7 +54,7 @@ public static class GameFinder
         return null;
     }
 
-    private static string? FindAmongUsEpic()
+    private static GameSearchResult FindAmongUsEpic()
     {
         try
         {
@@ -58,7 +62,7 @@ public static class GameFinder
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "Epic", "EpicGamesLauncher", "Saved", "Config", "Windows", "GameUserSettings.ini");
 
-            if (!File.Exists(configPath)) return null;
+            if (!File.Exists(configPath)) return new GameSearchResult();
 
             var lines = File.ReadAllLines(configPath);
             foreach (var line in lines)
@@ -71,7 +75,11 @@ public static class GameFinder
 
                 var gamePath = Path.Combine(installDir, AmongUsFolder, AmongUsExe);
                 if (File.Exists(gamePath))
-                    return Path.GetDirectoryName(gamePath);
+                    return new GameSearchResult
+                    {
+                        Path = Path.GetDirectoryName(gamePath),
+                        Storefront = Storefront.Epic
+                    };
             }
         }
         catch { }
@@ -86,13 +94,13 @@ public static class GameFinder
         foreach (var path in epicFallback)
         {
             if (File.Exists(Path.Combine(path, AmongUsExe)))
-                return path;
+                return new GameSearchResult { Path = path, Storefront = Storefront.Epic };
         }
 
-        return null;
+        return new GameSearchResult();
     }
 
-    private static string? FindAmongUsXbox()
+    private static GameSearchResult FindAmongUsXbox()
     {
         var xboxPaths = new[]
         {
@@ -106,7 +114,11 @@ public static class GameFinder
         {
             var gamePath = Path.Combine(root, AmongUsFolder, AmongUsExe);
             if (File.Exists(gamePath))
-                return Path.GetDirectoryName(gamePath);
+                return new GameSearchResult
+                {
+                    Path = Path.GetDirectoryName(gamePath),
+                    Storefront = Storefront.MicrosoftStore
+                };
         }
 
         try
@@ -122,12 +134,16 @@ public static class GameFinder
                 {
                     var gamePath = Path.Combine(dir, AmongUsExe);
                     if (File.Exists(gamePath))
-                        return dir;
+                        return new GameSearchResult
+                        {
+                            Path = dir,
+                            Storefront = Storefront.MicrosoftStore
+                        };
                 }
             }
         }
         catch { }
 
-        return null;
+        return new GameSearchResult();
     }
 }
