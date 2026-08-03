@@ -418,3 +418,45 @@ pipe.RegisterHandler("join_lobby", async element =>
 3. Launcher waits for all pending `install_mod` downloads to finish.
 4. Once all installs complete, launcher automatically relaunches Among Us.
 5. AmongAPI reconnects on the new game instance and sends `game_ready`.
+
+
+---
+
+# Among Backend HTTP + WebSocket API
+
+REST + WebSocket contract implemented by the self-hosted `Among Backend` server. The launcher talks to it for lobby mirroring, join resolution, heartbeats, and live kick/rejoin pushes.
+
+## Base URL
+
+`ServerUrl` in launcher config (e.g. `https://yourserver.com/api`). All REST requests from the launcher set `Authorization: Bearer <DiscordAccessToken>` when a token is present (the backend may ignore or use it for identity).
+
+## REST Endpoints
+
+| Method | Endpoint | Body | Purpose |
+|--------|----------|------|---------|
+| POST | `/lobby` | `{ code, region, regionIp, regionPort, modSet, hostUserId }` | Create/register a lobby. If the host previously ran a lobby with connected launchers and the mod set differs, pushes `rejoin` to the old lobby's guests. Re-POSTing an existing code refreshes it. |
+| GET | `/lobby/{code}` | — | Fetch a lobby ? `{ code, region, regionIp, regionPort, modSet, hostUserId, playerCount }`. 404 if not found. |
+| POST | `/lobby/{code}/repost` | — | Refresh the Discord embed. |
+| POST | `/lobby/{code}/kick` | `{ targetUserId, reason? }` | Push `kick` to the lobby's connected launchers over WebSocket. |
+| POST | `/lobby/{code}/players` | `{ playerCount }` | Report the current player count (updates the embed). |
+| DELETE | `/lobby/{code}` | — | Disband/delete a lobby and remove its Discord embed. |
+| POST | `/lobby/{code}/heartbeat` | `{ code, hostUserId }` | Keepalive from the host launcher. Lobbies that stop heartbeating are auto-expired after the grace period. |
+
+`modSet` entries: `{ fileName, downloadUrl, sha256?, version? }`.
+
+## WebSocket
+
+- **Endpoint:** `<BackendWssUrl>?code={lobbyCode}` (e.g. `wss://yourserver.com/ws?code=ALSKDJ`).
+- **Auth:** `Authorization: Bearer <DiscordAccessToken>` header.
+- **Server ? launcher messages:**
+  - `kick` — `{ "type": "kick", "reason": "..." }` ? launcher kills the game.
+  - `rejoin` — `{ "type": "rejoin", "payload": { "lobbyCode", "modSet", "region", "regionIp", "regionPort" } }` ? launcher installs the new mod set, relaunches, and rejoins.
+- The launcher reconnects with backoff on drop and re-declares its lobby via the `?code=` param.
+
+## Heartbeat Expiry
+
+`POST /lobby/{code}/heartbeat` must be sent by the host while hosting. The backend expires a lobby (deleting state + embed) if no heartbeat arrives within `Lobby:HeartbeatGraceSeconds` (default 90s).
+
+## Discord Embed
+
+When `Discord:WebhookUrl` is configured in `appsettings.json`, the backend posts a live invite embed with a **Join Lobby** button (`amonglauncher://join?code=...`), the player count, region, and host. The embed is edited on player-count/`/repost` changes and deleted on disband/expiry. Without the webhook, the backend still works locally (embed is a no-op).

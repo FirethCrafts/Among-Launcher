@@ -34,11 +34,13 @@ AmongLauncher/          WPF application
 └── Views/              UI views (MainView, SettingsView, WelcomeView, HostControlPanelView, modals)
 
 Among API/              BepInEx IL2CPP plugin (runs inside Among Us)
-├── Services/           Mod sync, file management, mod loader
-├── Config/             Plugin configuration
-├── Contracts/          Interfaces for mod system
-├── Models/             Mod manifest and entry models
+├── Services/           Pipe client, game-state tracker, lobby joiner, chat commands
 └── Plugin.cs           BepInEx plugin entry point
+
+Among Backend/          Self-hosted lobby backend (ASP.NET Core)
+├── Services/           Lobby store, WebSocket hub, Discord embed notifier, heartbeat expiry
+├── Models/             Lobby / mod-set models
+└── Program.cs          REST + WebSocket endpoints
 ```
 
 ## Getting Started
@@ -78,6 +80,20 @@ The launcher communicates with the in-game AmongAPI plugin via named pipes. See 
 - Transport: Length-prefixed JSON over Windows Named Pipes
 - Bidirectional — either side can send messages at any time
 
+## Among Backend
+
+The self-hosted lobby backend lives in `Among Backend/` (ASP.NET Core, .NET 10). It stores lobby state in memory, exposes the REST + WebSocket contract the launcher consumes, and can post/update/remove a live Discord invite embed via a webhook.
+
+```bash
+dotnet run --project "Among Backend/Among Backend.csproj"
+```
+
+- Point the launcher's **Server URL** setting at the backend (e.g. `https://yourserver.com/api`) and the **WebSocket** URL at `wss://yourserver.com/ws`.
+- Set `Discord:WebhookUrl` in `Among Backend/appsettings.json` to enable the invite embed; leave it empty to run without Discord.
+- `Lobby:HeartbeatGraceSeconds` (default 90) controls how long a host can stop heartbeating before the backend expires its lobby.
+
+Full REST + WebSocket contract: see [api.md](api.md).
+
 ## Tech Stack
 
 | Component | Technology |
@@ -88,6 +104,7 @@ The launcher communicates with the in-game AmongAPI plugin via named pipes. See 
 | Auth | Discord OAuth2 |
 | Mod Source | GitHub Releases API |
 | Plugin | BepInEx 6 IL2CPP (.NET 6) |
+| Backend | ASP.NET Core (.NET 10) |
 
 ## License
 
