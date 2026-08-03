@@ -7,6 +7,27 @@ public static class GameFinder
 
     public static string? FindAmongUs() => FindAmongUsWithStorefront().Path;
 
+    public static GameSearchResult FindAmongUsForStorefront(Storefront? storefront)
+    {
+        switch (storefront)
+        {
+            case Storefront.Steam:
+                var steam = FindAmongUsSteam();
+                return steam == null
+                    ? new GameSearchResult()
+                    : new GameSearchResult { Path = steam, Storefront = Storefront.Steam };
+
+            case Storefront.Epic:
+                return FindAmongUsEpic();
+
+            case Storefront.MicrosoftStore:
+                return FindAmongUsXbox();
+
+            default:
+                return FindAmongUsWithStorefront();
+        }
+    }
+
     public static GameSearchResult FindAmongUsWithStorefront()
     {
         var steam = FindAmongUsSteam();

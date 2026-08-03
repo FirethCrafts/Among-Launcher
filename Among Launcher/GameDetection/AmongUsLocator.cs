@@ -11,4 +11,9 @@ public class AmongUsLocator
     {
         return GameFinder.FindAmongUsWithStorefront();
     }
+
+    public GameSearchResult FindAmongUsForStorefront(Storefront? storefront)
+    {
+        return GameFinder.FindAmongUsForStorefront(storefront);
+    }
 }
