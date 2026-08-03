@@ -63,6 +63,33 @@
                 <GradientStop Color="#1AFFFFFF" Offset="1"/>
             </LinearGradientBrush>
 
+            <!-- Shared motion resources -->
+            <Storyboard x:Key="HoverEnterGlow">
+                <DoubleAnimation Storyboard.TargetName="Glow" Storyboard.TargetProperty="BlurRadius" To="18" Duration="0:0:0.18"/>
+                <DoubleAnimation Storyboard.TargetName="Glow" Storyboard.TargetProperty="Opacity" To="0.55" Duration="0:0:0.18"/>
+                <DoubleAnimation Storyboard.TargetName="Scale" Storyboard.TargetProperty="ScaleX" To="1.02" Duration="0:0:0.2"/>
+                <DoubleAnimation Storyboard.TargetName="Scale" Storyboard.TargetProperty="ScaleY" To="1.02" Duration="0:0:0.2"/>
+            </Storyboard>
+            <Storyboard x:Key="HoverExitGlow">
+                <DoubleAnimation Storyboard.TargetName="Glow" Storyboard.TargetProperty="BlurRadius" To="0" Duration="0:0:0.18"/>
+                <DoubleAnimation Storyboard.TargetName="Glow" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.18"/>
+                <DoubleAnimation Storyboard.TargetName="Scale" Storyboard.TargetProperty="ScaleX" To="1" Duration="0:0:0.2"/>
+                <DoubleAnimation Storyboard.TargetName="Scale" Storyboard.TargetProperty="ScaleY" To="1" Duration="0:0:0.2"/>
+            </Storyboard>
+            <Storyboard x:Key="PressScale">
+                <DoubleAnimation Storyboard.TargetName="Scale" Storyboard.TargetProperty="ScaleX" To="0.98" Duration="0:0:0.12"/>
+                <DoubleAnimation Storyboard.TargetName="Scale" Storyboard.TargetProperty="ScaleY" To="0.98" Duration="0:0:0.12"/>
+                <DoubleAnimation Storyboard.TargetName="Glow" Storyboard.TargetProperty="Opacity" To="0.25" Duration="0:0:0.12"/>
+            </Storyboard>
+            <Storyboard x:Key="ReleaseScale">
+                <DoubleAnimation Storyboard.TargetName="Scale" Storyboard.TargetProperty="ScaleX" To="1" Duration="0:0:0.16"/>
+                <DoubleAnimation Storyboard.TargetName="Scale" Storyboard.TargetProperty="ScaleY" To="1" Duration="0:0:0.16"/>
+            </Storyboard>
+            <Storyboard x:Key="FadeInUp">
+                <DoubleAnimation Storyboard.TargetProperty="Opacity" From="0" To="1" Duration="0:0:0.22"/>
+                <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.Y)" From="8" To="0" Duration="0:0:0.22"/>
+            </Storyboard>
+
             <!-- Page title -->
             <Style x:Key="PageTitle" TargetType="TextBlock">
                 <Setter Property="FontSize" Value="28"/>
@@ -80,37 +107,53 @@
             </Style>
 
             <!-- Surface card -->
-            <Style x:Key="SurfaceCard" TargetType="Border">
-                <Setter Property="Background" Value="{StaticResource SurfaceBrush}"/>
-                <Setter Property="BorderBrush" Value="{StaticResource BorderBrushKey}"/>
+            <Style x:Key="GlassCard" TargetType="Border">
+                <Setter Property="Background" Value="{StaticResource GlassSurface}"/>
+                <Setter Property="BorderBrush" Value="{StaticResource GlassEdgeBorder}"/>
                 <Setter Property="BorderThickness" Value="1"/>
-                <Setter Property="CornerRadius" Value="8"/>
+                <Setter Property="CornerRadius" Value="12"/>
                 <Setter Property="Padding" Value="20"/>
                 <Setter Property="Margin" Value="0,0,0,16"/>
+                <Setter Property="Opacity" Value="0.97"/>
+                <Setter Property="SnapsToDevicePixels" Value="True"/>
+                <Setter Property="UseLayoutRounding" Value="True"/>
+                <Setter Property="Effect">
+                    <Setter.Value>
+                        <DropShadowEffect Color="#000000" Opacity="0.35" BlurRadius="24" ShadowDepth="6"/>
+                    </Setter.Value>
+                </Setter>
             </Style>
+            <Style x:Key="SurfaceCard" TargetType="Border" BasedOn="{StaticResource GlassCard}"/>
 
             <!-- Input box -->
-            <Style x:Key="InputBox" TargetType="TextBox">
-                <Setter Property="Background" Value="#08080A"/>
-                <Setter Property="Foreground" Value="#FFFFFF"/>
-                <Setter Property="BorderBrush" Value="#242429"/>
+            <Style x:Key="GlassInput" TargetType="TextBox">
+                <Setter Property="Background" Value="{StaticResource GlassSurfaceWeak}"/>
+                <Setter Property="Foreground" Value="{StaticResource TextTitle}"/>
+                <Setter Property="BorderBrush" Value="{StaticResource GlassBorder}"/>
                 <Setter Property="BorderThickness" Value="1"/>
                 <Setter Property="Padding" Value="12"/>
                 <Setter Property="FontSize" Value="14"/>
-                <Setter Property="CaretBrush" Value="#FFFFFF"/>
+                <Setter Property="CaretBrush" Value="{StaticResource TextTitle}"/>
+                <Setter Property="SnapsToDevicePixels" Value="True"/>
                 <Setter Property="Template">
                     <Setter.Value>
                         <ControlTemplate TargetType="TextBox">
-                            <Border Background="{TemplateBinding Background}"
+                            <Border x:Name="Border" Background="{TemplateBinding Background}"
                                     BorderBrush="{TemplateBinding BorderBrush}"
                                     BorderThickness="{TemplateBinding BorderThickness}"
-                                    CornerRadius="6">
+                                    CornerRadius="8" SnapsToDevicePixels="True" UseLayoutRounding="True">
                                 <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}"/>
                             </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsKeyboardFocused" Value="True">
+                                    <Setter TargetName="Border" Property="BorderBrush" Value="#B35865F2"/>
+                                </Trigger>
+                            </ControlTemplate.Triggers>
                         </ControlTemplate>
                     </Setter.Value>
                 </Setter>
             </Style>
+            <Style x:Key="InputBox" TargetType="TextBox" BasedOn="{StaticResource GlassInput}"/>
 
             <!-- Play button (green) -->
             <Style x:Key="PlayButton" TargetType="Button">
@@ -125,16 +168,26 @@
                 <Setter Property="Template">
                     <Setter.Value>
                         <ControlTemplate TargetType="Button">
-                            <Border x:Name="B" Background="{TemplateBinding Background}" CornerRadius="6">
+                            <Border x:Name="B" Background="{TemplateBinding Background}" CornerRadius="8"
+                                    SnapsToDevicePixels="True" UseLayoutRounding="True">
+                                <Border.RenderTransform>
+                                    <ScaleTransform x:Name="Scale" ScaleX="1" ScaleY="1"/>
+                                </Border.RenderTransform>
+                                <Border.Effect>
+                                    <DropShadowEffect x:Name="Glow" Color="#10B981" BlurRadius="0" ShadowDepth="0" Opacity="0"/>
+                                </Border.Effect>
                                 <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
                                                   Margin="{TemplateBinding Padding}"/>
                             </Border>
                             <ControlTemplate.Triggers>
                                 <Trigger Property="IsMouseOver" Value="True">
-                                    <Setter TargetName="B" Property="Background" Value="#059669"/>
+                                    <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource HoverEnterGlow}"/></Trigger.EnterActions>
+                                    <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource HoverExitGlow}"/></Trigger.ExitActions>
                                 </Trigger>
                                 <Trigger Property="IsPressed" Value="True">
                                     <Setter TargetName="B" Property="Background" Value="#047857"/>
+                                    <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource PressScale}"/></Trigger.EnterActions>
+                                    <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource ReleaseScale}"/></Trigger.ExitActions>
                                 </Trigger>
                             </ControlTemplate.Triggers>
                         </ControlTemplate>
@@ -155,16 +208,26 @@
                 <Setter Property="Template">
                     <Setter.Value>
                         <ControlTemplate TargetType="Button">
-                            <Border x:Name="B" Background="{TemplateBinding Background}" CornerRadius="6">
+                            <Border x:Name="B" Background="{TemplateBinding Background}" CornerRadius="8"
+                                    SnapsToDevicePixels="True" UseLayoutRounding="True">
+                                <Border.RenderTransform>
+                                    <ScaleTransform x:Name="Scale" ScaleX="1" ScaleY="1"/>
+                                </Border.RenderTransform>
+                                <Border.Effect>
+                                    <DropShadowEffect x:Name="Glow" Color="#DC2626" BlurRadius="0" ShadowDepth="0" Opacity="0"/>
+                                </Border.Effect>
                                 <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
                                                   Margin="{TemplateBinding Padding}"/>
                             </Border>
                             <ControlTemplate.Triggers>
                                 <Trigger Property="IsMouseOver" Value="True">
-                                    <Setter TargetName="B" Property="Background" Value="#B91C1C"/>
+                                    <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource HoverEnterGlow}"/></Trigger.EnterActions>
+                                    <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource HoverExitGlow}"/></Trigger.ExitActions>
                                 </Trigger>
                                 <Trigger Property="IsPressed" Value="True">
                                     <Setter TargetName="B" Property="Background" Value="#991B1B"/>
+                                    <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource PressScale}"/></Trigger.EnterActions>
+                                    <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource ReleaseScale}"/></Trigger.ExitActions>
                                 </Trigger>
                             </ControlTemplate.Triggers>
                         </ControlTemplate>
@@ -185,13 +248,22 @@
                 <Setter Property="Template">
                     <Setter.Value>
                         <ControlTemplate TargetType="Button">
-                            <Border x:Name="B" Background="{TemplateBinding Background}" CornerRadius="6">
+                            <Border x:Name="B" Background="{TemplateBinding Background}" CornerRadius="8"
+                                    SnapsToDevicePixels="True" UseLayoutRounding="True">
+                                <Border.RenderTransform>
+                                    <ScaleTransform x:Name="Scale" ScaleX="1" ScaleY="1"/>
+                                </Border.RenderTransform>
+                                <Border.Effect>
+                                    <DropShadowEffect x:Name="Glow" Color="#E5E7EB" BlurRadius="0" ShadowDepth="0" Opacity="0"/>
+                                </Border.Effect>
                                 <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
                                                   Margin="{TemplateBinding Padding}"/>
                             </Border>
                             <ControlTemplate.Triggers>
                                 <Trigger Property="IsMouseOver" Value="True">
                                     <Setter TargetName="B" Property="Background" Value="#2E2E35"/>
+                                    <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource HoverEnterGlow}"/></Trigger.EnterActions>
+                                    <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource HoverExitGlow}"/></Trigger.ExitActions>
                                 </Trigger>
                             </ControlTemplate.Triggers>
                         </ControlTemplate>
@@ -212,13 +284,22 @@
                 <Setter Property="Template">
                     <Setter.Value>
                         <ControlTemplate TargetType="Button">
-                            <Border x:Name="B" Background="{TemplateBinding Background}" CornerRadius="6">
+                            <Border x:Name="B" Background="{TemplateBinding Background}" CornerRadius="8"
+                                    SnapsToDevicePixels="True" UseLayoutRounding="True">
+                                <Border.RenderTransform>
+                                    <ScaleTransform x:Name="Scale" ScaleX="1" ScaleY="1"/>
+                                </Border.RenderTransform>
+                                <Border.Effect>
+                                    <DropShadowEffect x:Name="Glow" Color="#10B981" BlurRadius="0" ShadowDepth="0" Opacity="0"/>
+                                </Border.Effect>
                                 <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
                                                   Margin="{TemplateBinding Padding}"/>
                             </Border>
                             <ControlTemplate.Triggers>
                                 <Trigger Property="IsMouseOver" Value="True">
                                     <Setter TargetName="B" Property="Background" Value="#059669"/>
+                                    <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource HoverEnterGlow}"/></Trigger.EnterActions>
+                                    <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource HoverExitGlow}"/></Trigger.ExitActions>
                                 </Trigger>
                             </ControlTemplate.Triggers>
                         </ControlTemplate>
@@ -237,6 +318,9 @@
                     <Setter.Value>
                         <ControlTemplate TargetType="Button">
                             <Border x:Name="Border" Background="Transparent" CornerRadius="8">
+                                <Border.RenderTransform>
+                                    <TranslateTransform/>
+                                </Border.RenderTransform>
                                 <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                 <Border.Effect>
                                     <DropShadowEffect x:Name="Glow" Color="#5865F2" BlurRadius="0"
@@ -255,6 +339,8 @@
                                                 <DoubleAnimation Storyboard.TargetName="Glow"
                                                                 Storyboard.TargetProperty="Opacity"
                                                                 To="0.6" Duration="0:0:0.2"/>
+                                                <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.Y)"
+                                                                To="-1" Duration="0:0:0.12"/>
                                             </Storyboard>
                                         </BeginStoryboard>
                                     </Trigger.EnterActions>
@@ -267,6 +353,8 @@
                                                 <DoubleAnimation Storyboard.TargetName="Glow"
                                                                 Storyboard.TargetProperty="Opacity"
                                                                 To="0" Duration="0:0:0.2"/>
+                                                <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.Y)"
+                                                                To="0" Duration="0:0:0.12"/>
                                             </Storyboard>
                                         </BeginStoryboard>
                                     </Trigger.ExitActions>
@@ -289,6 +377,9 @@
                     <Setter.Value>
                         <ControlTemplate TargetType="Button">
                             <Border x:Name="Border" Background="{TemplateBinding Background}" CornerRadius="10" Padding="10">
+                                <Border.RenderTransform>
+                                    <TranslateTransform/>
+                                </Border.RenderTransform>
                                 <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                 <Border.Effect>
                                     <DropShadowEffect x:Name="NavGlow" Color="#5865F2" BlurRadius="0"
@@ -307,6 +398,8 @@
                                                 <DoubleAnimation Storyboard.TargetName="NavGlow"
                                                                 Storyboard.TargetProperty="Opacity"
                                                                 To="0.5" Duration="0:0:0.2"/>
+                                                <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.Y)"
+                                                                To="-1" Duration="0:0:0.12"/>
                                             </Storyboard>
                                         </BeginStoryboard>
                                     </Trigger.EnterActions>
@@ -319,6 +412,8 @@
                                                 <DoubleAnimation Storyboard.TargetName="NavGlow"
                                                                 Storyboard.TargetProperty="Opacity"
                                                                 To="0" Duration="0:0:0.2"/>
+                                                <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.Y)"
+                                                                To="0" Duration="0:0:0.12"/>
                                             </Storyboard>
                                         </BeginStoryboard>
                                     </Trigger.ExitActions>
@@ -332,7 +427,7 @@
             <!-- Title bar button -->
             <Style x:Key="TitleBarButton" TargetType="Button">
                 <Setter Property="Background" Value="Transparent"/>
-                <Setter Property="Foreground" Value="#A1A1AA"/>
+                <Setter Property="Foreground" Value="{StaticResource TextMuted}"/>
                 <Setter Property="Width" Value="46"/>
                 <Setter Property="Height" Value="36"/>
                 <Setter Property="BorderThickness" Value="0"/>
@@ -345,8 +440,8 @@
                             </Border>
                             <ControlTemplate.Triggers>
                                 <Trigger Property="IsMouseOver" Value="True">
-                                    <Setter TargetName="B" Property="Background" Value="#242429"/>
-                                    <Setter Property="Foreground" Value="#FFFFFF"/>
+                                    <Setter TargetName="B" Property="Background" Value="{StaticResource GlassSurfaceWeak}"/>
+                                    <Setter Property="Foreground" Value="{StaticResource TextTitle}"/>
                                 </Trigger>
                             </ControlTemplate.Triggers>
                         </ControlTemplate>
@@ -382,6 +477,12 @@
                             <Border x:Name="Border" Background="{TemplateBinding Background}"
                                     CornerRadius="5" BorderThickness="0"
                                     SnapsToDevicePixels="True" UseLayoutRounding="True">
+                                <Border.RenderTransform>
+                                    <ScaleTransform x:Name="Scale" ScaleX="1" ScaleY="1"/>
+                                </Border.RenderTransform>
+                                <Border.Effect>
+                                    <DropShadowEffect x:Name="Glow" Color="#5865F2" BlurRadius="0" ShadowDepth="0" Opacity="0"/>
+                                </Border.Effect>
                                 <StackPanel Orientation="Horizontal"
                                             HorizontalAlignment="Center" VerticalAlignment="Center"
                                             Margin="{TemplateBinding Padding}">
@@ -398,6 +499,8 @@
                             <ControlTemplate.Triggers>
                                 <Trigger Property="IsMouseOver" Value="True">
                                     <Setter TargetName="Border" Property="Background" Value="#4752C4"/>
+                                    <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource HoverEnterGlow}"/></Trigger.EnterActions>
+                                    <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource HoverExitGlow}"/></Trigger.ExitActions>
                                 </Trigger>
                                 <Trigger Property="IsPressed" Value="True">
                                     <Setter TargetName="Border" Property="Background" Value="#3C45A5"/>
