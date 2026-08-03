@@ -133,7 +133,7 @@ public partial class MainView
 
     private async Task InstallAmongApiAsync()
     {
-        const string artifactUrl = "https://api.github.com/repos/FirethCrafts/Among-Launcher/actions/artifacts/8853080583/zip";
+        const string artifactId = "8853080583";
         var pluginsDir = Path.Combine(_moddedPath!, "BepInEx", "plugins");
         Directory.CreateDirectory(pluginsDir);
 
@@ -141,14 +141,25 @@ public partial class MainView
 
         try
         {
-            var response = await _httpClient.GetAsync(artifactUrl, HttpCompletionOption.ResponseHeadersRead);
-            response.EnsureSuccessStatusCode();
-
-            using (var stream = await response.Content.ReadAsStreamAsync())
-            using (var fileStream = new FileStream(tempZip, FileMode.Create, FileAccess.Write, FileShare.None))
+            // Use gh CLI which has auth stored from `gh auth login`
+            var startInfo = new System.Diagnostics.ProcessStartInfo
             {
-                await stream.CopyToAsync(fileStream);
-            }
+                FileName = "gh",
+                Arguments = $"api repos/FirethCrafts/Among-Launcher/actions/artifacts/{artifactId}/zip",
+                RedirectStandardOutput = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+
+            var process = System.Diagnostics.Process.Start(startInfo);
+            if (process == null) throw new Exception("Failed to start gh CLI");
+
+            using var fs = new FileStream(tempZip, FileMode.Create, FileAccess.Write, FileShare.None);
+            await process.StandardOutput.BaseStream.CopyToAsync(fs);
+            await process.WaitForExitAsync();
+
+            if (process.ExitCode != 0)
+                throw new Exception($"gh CLI failed with exit code {process.ExitCode}");
 
             using var archive = System.IO.Compression.ZipFile.OpenRead(tempZip);
             foreach (var entry in archive.Entries)
