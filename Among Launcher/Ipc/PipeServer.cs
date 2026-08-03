@@ -69,7 +69,9 @@ public class PipeServer : IDisposable
                     PipeTransmissionMode.Byte,
                     PipeOptions.Asynchronous);
 
+                LogDebug($"[PipeServer] Listening on pipe '{PipeName}'...");
                 await _server.WaitForConnectionAsync(ct);
+                LogDebug("[PipeServer] Client connected!");
                 ClientConnected?.Invoke(this, EventArgs.Empty);
 
                 await HandleConnectionAsync(_server, ct);

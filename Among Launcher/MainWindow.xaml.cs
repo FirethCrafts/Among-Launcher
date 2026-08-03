@@ -34,17 +34,25 @@ public partial class MainWindow
         _mainView.GameStateChanged += OnGameStateChanged;
         _welcomeView.LoginCompleted += OnLoginCompleted;
 
-        _pipeServer.ClientConnected += (_, _) => Dispatcher.Invoke(() =>
+        _pipeServer.ClientConnected += (_, _) =>
         {
-            if (ContentArea.Content is MainView mv)
-                mv.UpdateConnectionStatus(true);
-        });
+            LogDebug("[Launcher] AmongAPI client connected!");
+            Dispatcher.Invoke(() =>
+            {
+                if (ContentArea.Content is MainView mv)
+                    mv.UpdateConnectionStatus(true);
+            });
+        };
 
-        _pipeServer.ClientDisconnected += (_, _) => Dispatcher.Invoke(() =>
+        _pipeServer.ClientDisconnected += (_, _) =>
         {
-            if (ContentArea.Content is MainView mv)
-                mv.UpdateConnectionStatus(false);
-        });
+            LogDebug("[Launcher] AmongAPI client disconnected.");
+            Dispatcher.Invoke(() =>
+            {
+                if (ContentArea.Content is MainView mv)
+                    mv.UpdateConnectionStatus(false);
+            });
+        };
 
         // Handler: AmongAPI requests mod install (downloads anytime, regardless of game state)
         _pipeServer.RegisterHandler("install_mod", async element =>
@@ -145,6 +153,7 @@ public partial class MainWindow
         });
 
         _pipeServer.Start();
+        LogDebug("[Launcher] Pipe server started, listening for AmongAPI connections...");
 
         var empty = IsLauncherDirEmpty();
         ShowView(empty ? _welcomeView : _mainView, showSidebar: !empty);
