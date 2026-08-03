@@ -91,7 +91,10 @@ Dedicated popup content shown via the existing
     the install location in Epic Games Launcher, then retry.
 - A `Hyperlink` pinned at the bottom opening
   `https://github.com/FirethCrafts/Among-Launcher/blob/master/docs/adaptation-guide.md`
-  via the default browser (`Process.Start` with URL).
+  via the default browser. In modern .NET, `Process.Start` requires
+  `UseShellExecute = true` on the `ProcessStartInfo`, otherwise the URL is treated
+  as a local executable and throws `Win32Exception`. Wrap in try/catch and log via
+  `Debug.WriteLine` so a failure never crashes the UI thread.
 - Single OK/Close button → `mainWindow.ModalOverlayControl.Hide()`.
 
 ## Data Flow
