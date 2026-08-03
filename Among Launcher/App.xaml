@@ -7,7 +7,7 @@
         <ResourceDictionary>
 
             <!-- Icon geometries (24x24) -->
-            <Geometry x:Key="HomeIcon">M21 6h-2v9H6v2c0 .55.45 1 1 1h11l4 4V7c0-.55-.45-1-1-1zm-4 6V3c0-.55-.45-1-1-1H3c-.55 0-1 .45-1 1v14l4-4h10c.55 0 1-.45 1-1z</Geometry>
+            <Geometry x:Key="HomeIcon">M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z</Geometry>
             <Geometry x:Key="SettingsIcon">M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58z M12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z</Geometry>
             <Geometry x:Key="LogoutIcon">M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z</Geometry>
             <Geometry x:Key="CopyIcon">M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z</Geometry>
@@ -15,12 +15,13 @@
             <Geometry x:Key="TrashIcon">M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z</Geometry>
             <Geometry x:Key="DiscordIcon">M20.317 4.3698a19.7913 19.7913 0 0 0-4.8851-1.5152.0741.0741 0 0 0-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 0 0-.0785-.037 19.7363 19.7363 0 0 0-4.8852 1.515.0699.0699 0 0 0-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 0 0 .0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 0 0 .0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 0 0-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 0 1-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 0 1 .0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 0 1 .0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 0 1-.0066.1276 12.2986 12.2986 0 0 1-1.873.8914.0766.0766 0 0 0-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 0 0 .0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 0 0 .0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 0 0-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9460 2.4189-2.1568 2.4189Z</Geometry>
 
-            <!-- Matte Dark Palette -->
-            <Color x:Key="BgColor">#0B0B0E</Color>
-            <Color x:Key="SidebarColor">#08080A</Color>
-            <Color x:Key="SurfaceColor">#151518</Color>
-            <Color x:Key="SurfaceAltColor">#18181C</Color>
-            <Color x:Key="BorderColor">#242429</Color>
+            <!-- Glass Palette -->
+            <Color x:Key="GlassSurfaceColor">#C9151518</Color>
+            <Color x:Key="GlassSurfaceStrongColor">#E6151518</Color>
+            <Color x:Key="GlassSurfaceWeakColor">#A6151518</Color>
+            <Color x:Key="GlassHighlightColor">#33FFFFFF</Color>
+            <Color x:Key="GlassBorderColor">#2EFFFFFF</Color>
+            <Color x:Key="AmbientBgColor">#0B0B0E</Color>
             <Color x:Key="AccentColor">#5865F2</Color>
             <Color x:Key="AccentHoverColor">#4752C4</Color>
             <Color x:Key="AccentPressedColor">#3C45A5</Color>
@@ -29,16 +30,17 @@
             <Color x:Key="StopColor">#DC2626</Color>
             <Color x:Key="StopHoverColor">#B91C1C</Color>
             <Color x:Key="TextTitleColor">#FFFFFF</Color>
-            <Color x:Key="TextBodyColor">#A1A1AA</Color>
-            <Color x:Key="TextMutedColor">#6B6B76</Color>
+            <Color x:Key="TextBodyColor">#C9CBD6</Color>
+            <Color x:Key="TextMutedColor">#8A8D9A</Color>
             <Color x:Key="NavIconColor">#A1A1AA</Color>
             <Color x:Key="HeaderColor">#8B949E</Color>
 
-            <SolidColorBrush x:Key="AppBackground" Color="{StaticResource BgColor}"/>
-            <SolidColorBrush x:Key="SidebarBackground" Color="{StaticResource SidebarColor}"/>
-            <SolidColorBrush x:Key="SurfaceBrush" Color="{StaticResource SurfaceColor}"/>
-            <SolidColorBrush x:Key="SurfaceAltBrush" Color="{StaticResource SurfaceAltColor}"/>
-            <SolidColorBrush x:Key="BorderBrushKey" Color="{StaticResource BorderColor}"/>
+            <SolidColorBrush x:Key="AppBackground" Color="{StaticResource AmbientBgColor}"/>
+            <SolidColorBrush x:Key="GlassSurface" Color="{StaticResource GlassSurfaceColor}"/>
+            <SolidColorBrush x:Key="GlassSurfaceStrong" Color="{StaticResource GlassSurfaceStrongColor}"/>
+            <SolidColorBrush x:Key="GlassSurfaceWeak" Color="{StaticResource GlassSurfaceWeakColor}"/>
+            <SolidColorBrush x:Key="GlassHighlight" Color="{StaticResource GlassHighlightColor}"/>
+            <SolidColorBrush x:Key="GlassBorder" Color="{StaticResource GlassBorderColor}"/>
             <SolidColorBrush x:Key="AccentBrush" Color="{StaticResource AccentColor}"/>
             <SolidColorBrush x:Key="TextTitle" Color="{StaticResource TextTitleColor}"/>
             <SolidColorBrush x:Key="TextBody" Color="{StaticResource TextBodyColor}"/>
@@ -47,6 +49,19 @@
             <SolidColorBrush x:Key="HeaderBrush" Color="{StaticResource HeaderColor}"/>
             <SolidColorBrush x:Key="TextPrimary" Color="{StaticResource TextTitleColor}"/>
             <SolidColorBrush x:Key="TextSecondary" Color="{StaticResource TextMutedColor}"/>
+
+            <!-- Compat aliases removed by Task 9 sweep -->
+            <SolidColorBrush x:Key="SidebarBackground" Color="{StaticResource GlassSurfaceStrongColor}"/>
+            <SolidColorBrush x:Key="SurfaceBrush" Color="{StaticResource GlassSurfaceColor}"/>
+            <SolidColorBrush x:Key="SurfaceAltBrush" Color="{StaticResource GlassSurfaceStrongColor}"/>
+            <SolidColorBrush x:Key="BorderBrushKey" Color="{StaticResource GlassBorderColor}"/>
+
+            <!-- Glass edge: bright 1px top lip fading to subtle -->
+            <LinearGradientBrush x:Key="GlassEdgeBorder" StartPoint="0,0" EndPoint="0,1">
+                <GradientStop Color="#4DFFFFFF" Offset="0"/>
+                <GradientStop Color="#2EFFFFFF" Offset="0.08"/>
+                <GradientStop Color="#1AFFFFFF" Offset="1"/>
+            </LinearGradientBrush>
 
             <!-- Page title -->
             <Style x:Key="PageTitle" TargetType="TextBlock">
