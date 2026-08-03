@@ -334,7 +334,11 @@ public partial class MainWindow
     {
         try
         {
-            var logPath = Path.Combine(Path.GetTempPath(), "AmongLauncher_ipc.log");
+            var logDir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "AmongLauncher");
+            Directory.CreateDirectory(logDir);
+            var logPath = Path.Combine(logDir, "AmongLauncher_ipc.log");
             File.AppendAllText(logPath, $"[{DateTime.Now:HH:mm:ss}] {message}\n");
         }
         catch { }
