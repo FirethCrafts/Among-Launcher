@@ -8,12 +8,13 @@ public record PlayerInfo(string PlayerName, int PlayerCount);
 /// raises transition events. Region info is not reliably readable from here;
 /// the launcher owns region configuration, so Region fields are left empty.
 /// </summary>
-public class GameStateTracker
+public class GameStateTracker : IDisposable
 {
     private const int PollIntervalMs = 500;
 
     private readonly ManualLogSource _log;
     private readonly object _lock = new();
+    private CancellationTokenSource? _cts;
     private bool _wasInLobby;
     private int _lastPlayerCount = -1;
 
@@ -26,12 +27,26 @@ public class GameStateTracker
 
     public void Start()
     {
+        _cts = new CancellationTokenSource();
         _ = Task.Run(LoopAsync);
     }
 
+    public void Stop()
+    {
+        _cts?.Cancel();
+        _cts?.Dispose();
+        _cts = null;
+    }
+
+    public void Dispose() => Stop();
+
     private async Task LoopAsync()
     {
-        while (true)
+        var cts = _cts;
+        if (cts == null)
+            return;
+
+        while (!cts.IsCancellationRequested)
         {
             try
             {
@@ -41,7 +56,14 @@ public class GameStateTracker
             {
                 _log.LogWarning($"[GameStateTracker] Tick failed: {ex.Message}");
             }
-            await Task.Delay(PollIntervalMs);
+            try
+            {
+                await Task.Delay(PollIntervalMs, cts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
         }
     }
 
@@ -68,7 +90,7 @@ public class GameStateTracker
             if (inLobby && !_wasInLobby)
             {
                 _log.LogInfo($"[GameStateTracker] Lobby created (code {code}, players {count}).");
-                _lastPlayerCount = count;
+                _lastPlayerCount = count >= 0 ? count : -1;
                 LobbyCreated?.Invoke(this, new LobbyInfo(code, "", "", 0));
             }
             else if (!inLobby && _wasInLobby)
@@ -78,19 +100,26 @@ public class GameStateTracker
                 LobbyClosed?.Invoke(this, "");
             }
 
-            if (inLobby && _lastPlayerCount >= 0 && count != _lastPlayerCount)
+            if (inLobby && count >= 0)
             {
-                if (count > _lastPlayerCount)
+                if (_lastPlayerCount < 0)
                 {
-                    _log.LogInfo($"[GameStateTracker] Player joined (count {count}).");
-                    PlayerJoined?.Invoke(this, new PlayerInfo("<unknown>", count));
+                    _lastPlayerCount = count;
                 }
-                else
+                else if (count != _lastPlayerCount)
                 {
-                    _log.LogInfo($"[GameStateTracker] Player left (count {count}).");
-                    PlayerLeft?.Invoke(this, new PlayerInfo("<unknown>", count));
+                    if (count > _lastPlayerCount)
+                    {
+                        _log.LogInfo($"[GameStateTracker] Player joined (count {count}).");
+                        PlayerJoined?.Invoke(this, new PlayerInfo("<unknown>", count));
+                    }
+                    else
+                    {
+                        _log.LogInfo($"[GameStateTracker] Player left (count {count}).");
+                        PlayerLeft?.Invoke(this, new PlayerInfo("<unknown>", count));
+                    }
+                    _lastPlayerCount = count;
                 }
-                _lastPlayerCount = count;
             }
 
             _wasInLobby = inLobby;

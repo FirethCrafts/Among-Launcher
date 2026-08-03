@@ -67,6 +67,9 @@ public class Plugin : BasePlugin
             };
             tracker.Start();
 
+            // Stop polling if the launcher connection drops
+            pipe.Disconnected += (_, _) => tracker.Stop();
+
             // Keep connection alive - launcher may send commands later
             await Task.Delay(Timeout.Infinite);
         }
