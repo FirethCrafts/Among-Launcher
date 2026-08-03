@@ -25,7 +25,9 @@ public partial class MainWindow
 
     public ModalOverlay ModalOverlayControl => ModalOverlay;
 
-    public MainWindow()
+    public MainWindow() : this(null) { }
+
+    public MainWindow(string? deepLink)
     {
         InitializeComponent();
         _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("AmongUsLauncher");
@@ -166,17 +168,25 @@ public partial class MainWindow
 
         // Register custom URI protocol and check for a deep-link payload
         Services.DeepLinkHandler.RegisterProtocol();
+        App.DeepLinkReceived += link => Dispatcher.Invoke(() => HandleDeepLink(link));
         Loaded += async (_, _) =>
         {
             await _pipeServer.BroadcastMessageAsync("launcher_ready");
-            HandleDeepLink();
+            HandleDeepLink(deepLink);
         };
     }
 
-    private void HandleDeepLink()
+    public void HandleDeepLink(string? deepLink)
     {
-        var deepLink = Services.DeepLinkHandler.FindDeepLinkArgument();
+        deepLink ??= Services.DeepLinkHandler.FindDeepLinkArgument();
         if (deepLink == null) return;
+
+        var join = Services.DeepLinkHandler.TryParseJoin(deepLink);
+        if (join != null)
+        {
+            LogDebug($"[Launcher] Join request received: code={join.Code} (join flow not wired yet)");
+            return;
+        }
 
         var requests = Services.DeepLinkHandler.Parse(deepLink);
         if (requests.Count == 0) return;
