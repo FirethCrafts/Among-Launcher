@@ -50,12 +50,6 @@
             <SolidColorBrush x:Key="TextPrimary" Color="{StaticResource TextTitleColor}"/>
             <SolidColorBrush x:Key="TextSecondary" Color="{StaticResource TextMutedColor}"/>
 
-            <!-- Compat aliases removed by Task 9 sweep -->
-            <SolidColorBrush x:Key="SidebarBackground" Color="{StaticResource GlassSurfaceStrongColor}"/>
-            <SolidColorBrush x:Key="SurfaceBrush" Color="{StaticResource GlassSurfaceColor}"/>
-            <SolidColorBrush x:Key="SurfaceAltBrush" Color="{StaticResource GlassSurfaceStrongColor}"/>
-            <SolidColorBrush x:Key="BorderBrushKey" Color="{StaticResource GlassBorderColor}"/>
-
             <!-- Glass edge: bright 1px top lip fading to subtle -->
             <LinearGradientBrush x:Key="GlassEdgeBorder" StartPoint="0,0" EndPoint="0,1">
                 <GradientStop Color="#4DFFFFFF" Offset="0"/>
@@ -123,7 +117,6 @@
                     </Setter.Value>
                 </Setter>
             </Style>
-            <Style x:Key="SurfaceCard" TargetType="Border" BasedOn="{StaticResource GlassCard}"/>
 
             <!-- Input box -->
             <Style x:Key="GlassInput" TargetType="TextBox">
@@ -153,7 +146,6 @@
                     </Setter.Value>
                 </Setter>
             </Style>
-            <Style x:Key="InputBox" TargetType="TextBox" BasedOn="{StaticResource GlassInput}"/>
 
             <!-- Play button (green) -->
             <Style x:Key="PlayButton" TargetType="Button">

@@ -7,7 +7,7 @@
         Background="{StaticResource AppBackground}"
         WindowStartupLocation="CenterScreen"
         WindowStyle="None" ResizeMode="CanResize"
-        BorderThickness="1" BorderBrush="#242429">
+        BorderThickness="1" BorderBrush="{StaticResource GlassBorder}">
     <shell:WindowChrome.WindowChrome>
         <shell:WindowChrome GlassFrameThickness="0" CaptionHeight="36"
                             ResizeBorderThickness="6" UseAeroCaptionButtons="False"/>
