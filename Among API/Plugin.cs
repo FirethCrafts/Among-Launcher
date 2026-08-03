@@ -4,10 +4,12 @@ namespace AmongApi;
 public class Plugin : BasePlugin
 {
     internal static new ManualLogSource Log = null!;
+    private LobbyInfo? _lastLobby;
 
     public override void Load()
     {
         Log = base.Log;
+        GameAssembly.Log = Log;
         FileLogger.Init();
         FileLogger.Info($"Plugin v{MyPluginInfo.PLUGIN_VERSION} loading...");
         Log.LogInfo($"[{MyPluginInfo.PLUGIN_NAME}] Loading...");
@@ -38,6 +40,32 @@ public class Plugin : BasePlugin
             // Tell launcher the game is ready
             await pipe.SendMessageAsync("game_ready");
             FileLogger.Info("Game ready signal sent to launcher.");
+
+            // Report lobby / player state transitions to the launcher
+            var tracker = new GameStateTracker(Log);
+            tracker.LobbyCreated += (_, info) =>
+            {
+                _lastLobby = info;
+                FileLogger.Info($"Lobby created: {info.Code}");
+                _ = pipe.SendMessageAsync("lobby_created", info);
+            };
+            tracker.LobbyClosed += (_, reason) =>
+            {
+                FileLogger.Info($"Lobby closed: {_lastLobby?.Code ?? ""}");
+                _ = pipe.SendMessageAsync("lobby_closed", new { code = _lastLobby?.Code ?? "", reason });
+                _lastLobby = null;
+            };
+            tracker.PlayerJoined += (_, p) =>
+            {
+                FileLogger.Info($"Player joined: count {p.PlayerCount}");
+                _ = pipe.SendMessageAsync("player_joined", p);
+            };
+            tracker.PlayerLeft += (_, p) =>
+            {
+                FileLogger.Info($"Player left: count {p.PlayerCount}");
+                _ = pipe.SendMessageAsync("player_left", p);
+            };
+            tracker.Start();
 
             // Keep connection alive - launcher may send commands later
             await Task.Delay(Timeout.Infinite);
