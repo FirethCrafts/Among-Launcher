@@ -8,7 +8,7 @@ public class GameProcessManager
 
     public event EventHandler? GameExited;
 
-    public void LaunchGame(string exePath)
+    public void LaunchGame(string exePath, string? arguments = null)
     {
         if (!File.Exists(exePath))
             throw new FileNotFoundException("Among Us.exe not found", exePath);
@@ -19,6 +19,9 @@ public class GameProcessManager
             WorkingDirectory = Path.GetDirectoryName(exePath),
             UseShellExecute = true
         };
+
+        if (!string.IsNullOrEmpty(arguments))
+            startInfo.Arguments = arguments;
 
         _gameProcess = Process.Start(startInfo);
 

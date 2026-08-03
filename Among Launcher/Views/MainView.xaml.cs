@@ -20,6 +20,7 @@ public partial class MainView
     private readonly GameProcessManager _gameManager = new();
     private string? _moddedPath;
     private readonly HttpClient _httpClient = new();
+    private Storefront? _storefront;
 
     public event EventHandler? RequestShowWelcome;
     public event EventHandler<bool>? GameStateChanged;
@@ -86,13 +87,15 @@ public partial class MainView
     private async void InstallButton_Click(object sender, RoutedEventArgs e)
     {
         var locator = new AmongUsLocator();
-        var sourcePath = locator.FindAmongUs();
+        var (sourcePath, storefront) = locator.FindAmongUsWithStorefront();
 
         if (sourcePath == null)
         {
             MessageBox.Show("Among Us installation not found.", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
             return;
         }
+
+        _storefront = storefront ?? Storefront.Steam;
 
         _moddedPath = System.IO.Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -111,16 +114,19 @@ public partial class MainView
             ShowProgress("Downloading BepInEx...");
 
             var bepinExInstaller = new BepInExInstaller();
-            await bepinExInstaller.InstallAsync(_moddedPath, new Progress<int>(percent =>
+            await bepinExInstaller.InstallAsync(_moddedPath, _storefront, new Progress<int>(percent =>
             {
                 Dispatcher.Invoke(() => ProgressText.Text = $"Downloading BepInEx... {percent}%");
             }));
 
-            // Ensure steam_appid.txt exists for Among Us
-            var steamAppIdPath = Path.Combine(_moddedPath, "steam_appid.txt");
-            if (!File.Exists(steamAppIdPath))
+            // Only Steam needs steam_appid.txt; Epic/MS Store builds don't.
+            if (_storefront == Storefront.Steam)
             {
-                File.WriteAllText(steamAppIdPath, "945360");
+                var steamAppIdPath = Path.Combine(_moddedPath, "steam_appid.txt");
+                if (!File.Exists(steamAppIdPath))
+                {
+                    File.WriteAllText(steamAppIdPath, "945360");
+                }
             }
 
             ShowProgress("Installing AmongAPI...");
@@ -175,7 +181,7 @@ public partial class MainView
             return;
         }
 
-        _gameManager.LaunchGame(exePath);
+        _gameManager.LaunchGame(exePath, GetLaunchArguments());
         SetPlayButtonRunning(true);
         ModStatusText.Text = "Game launched. AmongAPI.dll will load via BepInEx.";
     }
@@ -198,9 +204,18 @@ public partial class MainView
         var exePath = System.IO.Path.Combine(_moddedPath, "Among Us.exe");
         if (!System.IO.File.Exists(exePath)) return;
 
-        _gameManager.LaunchGame(exePath);
+        _gameManager.LaunchGame(exePath, GetLaunchArguments());
         SetPlayButtonRunning(true);
         ModStatusText.Text = "Game launched. AmongAPI.dll will load via BepInEx.";
+    }
+
+    private string? GetLaunchArguments()
+    {
+        return _storefront switch
+        {
+            Storefront.Epic => "-EpicPortal",
+            _ => null
+        };
     }
 
     private void BrowseFilesButton_Click(object sender, RoutedEventArgs e)

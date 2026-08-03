@@ -6,4 +6,9 @@ public class AmongUsLocator
     {
         return GameFinder.FindAmongUs();
     }
+
+    public (string? Path, Storefront? Storefront) FindAmongUsWithStorefront()
+    {
+        return GameFinder.FindAmongUsWithStorefront();
+    }
 }

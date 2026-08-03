@@ -5,11 +5,20 @@ public static class GameFinder
     private const string AmongUsExe = "Among Us.exe";
     private const string AmongUsFolder = "Among Us";
 
-    public static string? FindAmongUs()
+    public static string? FindAmongUs() => FindAmongUsWithStorefront().Path;
+
+    public static (string? Path, Storefront? Storefront) FindAmongUsWithStorefront()
     {
-        return FindAmongUsSteam()
-            ?? FindAmongUsEpic()
-            ?? FindAmongUsXbox();
+        var steam = FindAmongUsSteam();
+        if (steam != null) return (steam, Storefront.Steam);
+
+        var epic = FindAmongUsEpic();
+        if (epic != null) return (epic, Storefront.Epic);
+
+        var xbox = FindAmongUsXbox();
+        if (xbox != null) return (xbox, Storefront.MicrosoftStore);
+
+        return (null, null);
     }
 
     private static string? FindAmongUsSteam()
