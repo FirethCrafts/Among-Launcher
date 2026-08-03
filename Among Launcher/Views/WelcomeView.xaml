@@ -7,9 +7,9 @@
              UseLayoutRounding="True" SnapsToDevicePixels="True"
              d:DesignHeight="560" d:DesignWidth="880">
     <Grid UseLayoutRounding="True" SnapsToDevicePixels="True">
-        <!-- Ambient radial glow: strong accent center fading to transparent at the edges -->
-        <Ellipse Width="620" Height="460" VerticalAlignment="Center" HorizontalAlignment="Center"
-                 UseLayoutRounding="True" SnapsToDevicePixels="True">
+        <!-- Ambient centered bloom -->
+        <Ellipse x:Name="Bloom" Width="620" Height="460" VerticalAlignment="Center" HorizontalAlignment="Center"
+                 Opacity="0.35" UseLayoutRounding="True" SnapsToDevicePixels="True">
             <Ellipse.Fill>
                 <RadialGradientBrush Center="0.5,0.5" RadiusX="0.5" RadiusY="0.5">
                     <GradientStop Color="#665865F2" Offset="0" />
@@ -17,25 +17,35 @@
                     <GradientStop Color="#005865F2" Offset="1" />
                 </RadialGradientBrush>
             </Ellipse.Fill>
-            <Ellipse.Opacity>0.32</Ellipse.Opacity>
         </Ellipse>
 
         <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Width="420">
-            <TextBlock Text="Among Launcher"
-                       FontSize="46" FontWeight="Bold" Foreground="{StaticResource TextPrimary}"
+            <TextBlock x:Name="TitleText" Text="Among Launcher"
+                       FontSize="46" FontWeight="Bold" Foreground="{StaticResource TextTitle}"
                        HorizontalAlignment="Center" UseLayoutRounding="True" SnapsToDevicePixels="True">
+                <TextBlock.RenderTransform>
+                    <ScaleTransform x:Name="TitleScale" ScaleX="0.94" ScaleY="0.94"/>
+                </TextBlock.RenderTransform>
                 <TextBlock.Effect>
-                    <DropShadowEffect Color="#6366f1" BlurRadius="14" ShadowDepth="0" Opacity="0.35"/>
+                    <DropShadowEffect x:Name="TitleGlow" Color="#5865F2" BlurRadius="14" ShadowDepth="0" Opacity="0.35"/>
                 </TextBlock.Effect>
             </TextBlock>
-            <TextBlock Text="Your modded Among Us, managed."
+            <TextBlock x:Name="SubtitleText" Text="Your modded Among Us, managed."
                        FontSize="17" Foreground="{StaticResource TextSecondary}"
-                       Margin="0,12,0,0" HorizontalAlignment="Center"/>
+                       Margin="0,12,0,0" HorizontalAlignment="Center" Opacity="0">
+                <TextBlock.RenderTransform>
+                    <TranslateTransform x:Name="SubtitleTransform" Y="8"/>
+                </TextBlock.RenderTransform>
+            </TextBlock>
 
-            <Button Click="DiscordLogin_Click"
+            <Button x:Name="LoginButton" Click="DiscordLogin_Click"
                     Style="{StaticResource DiscordButton}"
                     Height="48" Margin="0,32,0,0"
-                    HorizontalAlignment="Stretch"/>
+                    HorizontalAlignment="Stretch" Opacity="0">
+                <Button.RenderTransform>
+                    <TranslateTransform x:Name="LoginTransform" Y="8"/>
+                </Button.RenderTransform>
+            </Button>
         </StackPanel>
     </Grid>
 </UserControl>
