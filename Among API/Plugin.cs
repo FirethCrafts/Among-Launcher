@@ -27,36 +27,20 @@ public class Plugin : BasePlugin
 
             if (!connected)
             {
-                FileLogger.Warn("Launcher not running. Waiting for reconnection...");
+                FileLogger.Warn("Launcher not running. Mods will load from BepInEx/plugins/.");
                 Log.LogWarning($"[{MyPluginInfo.PLUGIN_NAME}] Launcher not running.");
                 return;
             }
 
-            FileLogger.Info("Connected to launcher. Sending game_ready...");
+            FileLogger.Info("Connected to launcher.");
             Log.LogInfo($"[{MyPluginInfo.PLUGIN_NAME}] Connected to launcher.");
 
-            // Tell launcher the game is ready - launcher handles mod installation
-            var response = await pipe.SendMessageAsync("game_ready");
-            if (response.HasValue)
-            {
-                var restart = response.Value.TryGetProperty("restart", out var r) && r.GetBoolean();
-                FileLogger.Info($"Launcher response: restart={restart}");
+            // Tell launcher the game is ready
+            await pipe.SendMessageAsync("game_ready");
+            FileLogger.Info("Game ready signal sent to launcher.");
 
-                if (restart)
-                {
-                    FileLogger.Info("New mods installed. Waiting for restart command...");
-                    Log.LogInfo($"[{MyPluginInfo.PLUGIN_NAME}] New mods installed. Waiting for restart...");
-                    // The launcher will send a "restart" broadcast - just wait
-                    await Task.Delay(Timeout.Infinite);
-                }
-                else
-                {
-                    FileLogger.Info("All mods installed. Plugin ready.");
-                    Log.LogInfo($"[{MyPluginInfo.PLUGIN_NAME}] All mods installed. Plugin ready.");
-                    // Keep connection alive
-                    await Task.Delay(Timeout.Infinite);
-                }
-            }
+            // Keep connection alive - launcher may send commands later
+            await Task.Delay(Timeout.Infinite);
         }
         catch (Exception ex)
         {

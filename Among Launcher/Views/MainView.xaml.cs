@@ -154,7 +154,7 @@ public partial class MainView
         await stream.CopyToAsync(fileStream);
     }
 
-    private void PlayButton_Click(object sender, RoutedEventArgs e)
+    private async void PlayButton_Click(object sender, RoutedEventArgs e)
     {
         if (_gameManager.IsGameRunning())
         {
@@ -171,9 +171,103 @@ public partial class MainView
             return;
         }
 
+        // Check and install mods before launching
+        PlayButton.IsEnabled = false;
+        try
+        {
+            var installed = await CheckAndInstallModsAsync();
+            if (installed > 0)
+            {
+                ModStatusText.Text = $"Installed {installed} mod(s). Launching...";
+            }
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Failed to install mods:\n{ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            PlayButton.IsEnabled = true;
+            return;
+        }
+
         _gameManager.LaunchGame(exePath);
         SetPlayButtonRunning(true);
         ModStatusText.Text = "Game launched. AmongAPI.dll will load via BepInEx.";
+    }
+
+    private async Task<int> CheckAndInstallModsAsync()
+    {
+        var manifest = LoadManifest();
+        if (manifest == null || manifest.Mods.Count == 0) return 0;
+
+        var pluginsDir = Path.Combine(_moddedPath!, "BepInEx", "plugins");
+        Directory.CreateDirectory(pluginsDir);
+
+        var installed = 0;
+        foreach (var mod in manifest.Mods)
+        {
+            var destPath = Path.Combine(pluginsDir, mod.FileName);
+            if (File.Exists(destPath) && new FileInfo(destPath).Length > 0)
+            {
+                Dispatcher.Invoke(() => ModStatusText.Text = $"✓ {mod.FileName} already installed");
+                continue;
+            }
+
+            Dispatcher.Invoke(() => ModStatusText.Text = $"Installing {mod.FileName}...");
+            ShowProgress($"Installing {mod.FileName}...");
+
+            await DownloadModAsync(mod.Id, mod.Url, destPath);
+            installed++;
+
+            Dispatcher.Invoke(() => ModStatusText.Text = $"✓ {mod.FileName} installed");
+        }
+
+        HideProgress();
+
+        if (installed > 0)
+            RefreshModsList();
+
+        return installed;
+    }
+
+    private static Models.ModManifest? LoadManifest()
+    {
+        try
+        {
+            var assembly = System.Reflection.Assembly.GetExecutingAssembly();
+            var stream = assembly.GetManifestResourceStream("manifest.json");
+            if (stream == null) return null;
+
+            using var reader = new StreamReader(stream);
+            var json = reader.ReadToEnd();
+            return JsonSerializer.Deserialize<Models.ModManifest>(json);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private async Task DownloadModAsync(string modId, string url, string destPath)
+    {
+        if (File.Exists(destPath) && new FileInfo(destPath).Length > 0)
+            return;
+
+        for (int attempt = 1; attempt <= 3; attempt++)
+        {
+            try
+            {
+                var response = await _httpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
+                response.EnsureSuccessStatusCode();
+
+                using var stream = await response.Content.ReadAsStreamAsync();
+                using var fileStream = new FileStream(destPath, FileMode.Create, FileAccess.Write, FileShare.None);
+                await stream.CopyToAsync(fileStream);
+                return;
+            }
+            catch (IOException) when (attempt < 3)
+            {
+                await Task.Delay(2000);
+            }
+        }
     }
 
     public void StopGame()
