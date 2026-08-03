@@ -323,15 +323,20 @@ public partial class MainWindow
                     mv.UpdateModStatusText($"Joining lobby {code}...");
             });
 
+            if (!Services.Lobby.LobbyBackendClient.IsConfigured(_config))
+            {
+                LogDebug("[Launcher] Join aborted: backend not configured");
+                Dispatcher.Invoke(() => ShowJoinError(
+                    "No lobby server is configured.\n\nSet the server URL in Settings, then try the link again."));
+                return;
+            }
+
             var lobby = await _backend.GetLobbyAsync(code, CancellationToken.None);
             if (lobby == null)
             {
                 LogDebug("[Launcher] Join failed: lobby not found");
-                Dispatcher.Invoke(() =>
-                {
-                    if (ContentArea.Content is MainView mv)
-                        mv.UpdateModStatusText("Lobby not found");
-                });
+                Dispatcher.Invoke(() => ShowJoinError(
+                    $"Lobby '{code}' was not found on the server.\n\nIt may have closed, or the host hasn't created it yet."));
                 return;
             }
 
@@ -344,16 +349,24 @@ public partial class MainWindow
         catch (Exception ex)
         {
             LogDebug($"[Launcher] Join failed with exception: {ex}");
-            Dispatcher.Invoke(() =>
-            {
-                if (ContentArea.Content is MainView mv)
-                    mv.UpdateModStatusText($"Join failed: {ex.Message}");
-            });
+            Dispatcher.Invoke(() => ShowJoinError($"Could not reach the lobby server: {ex.Message}"));
         }
         finally
         {
             _joining = false;
         }
+    }
+
+    private void ShowJoinError(string message)
+    {
+        if (ContentArea.Content is MainView mv)
+            mv.UpdateModStatusText(message);
+
+        var modal = new ConfirmationModal();
+        modal.Configure(message, "OK");
+        modal.Confirmed += (_, _) => ModalOverlay.Hide();
+        modal.Cancelled += (_, _) => ModalOverlay.Hide();
+        ModalOverlay.Show("Join Lobby Failed", modal);
     }
 
     private async Task<bool> JoinPipelineAsync(LobbyInfo lobby)
