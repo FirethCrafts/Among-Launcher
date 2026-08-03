@@ -1,6 +1,7 @@
 using System.IO;
 using System.IO.Compression;
 using System.Net.Http;
+using System.Text.Json;
 using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
@@ -51,7 +52,7 @@ public partial class MainView
         {
             GameStatusText.Text = "Among Us not found. Please install Among Us via Steam, Epic Games, or Xbox Game Pass.";
             PlayButton.IsEnabled = false;
-            CopyPathButton.IsEnabled = false;
+            BrowseFilesButton.IsEnabled = false;
             AddModButton.IsEnabled = false;
             return;
         }
@@ -67,7 +68,7 @@ public partial class MainView
         {
             GameStatusText.Text = $"Among Us ready!\nLocation: {_moddedPath}";
             PlayButton.IsEnabled = true;
-            CopyPathButton.IsEnabled = true;
+            BrowseFilesButton.IsEnabled = true;
             AddModButton.IsEnabled = true;
             InstallButton.Content = "Reinstall BepInEx";
         }
@@ -75,7 +76,7 @@ public partial class MainView
         {
             GameStatusText.Text = $"Among Us found at:\n{gamePath}\n\nClick 'Install BepInEx' to set up the modded copy.";
             PlayButton.IsEnabled = false;
-            CopyPathButton.IsEnabled = false;
+            BrowseFilesButton.IsEnabled = false;
             AddModButton.IsEnabled = false;
         }
 
@@ -129,7 +130,7 @@ public partial class MainView
             HideProgress();
             GameStatusText.Text = $"Modded Among Us ready!\nLocation: {_moddedPath}";
             PlayButton.IsEnabled = true;
-            CopyPathButton.IsEnabled = true;
+            BrowseFilesButton.IsEnabled = true;
             AddModButton.IsEnabled = true;
             InstallButton.Content = "Reinstall BepInEx";
             RefreshModsList();
@@ -202,26 +203,24 @@ public partial class MainView
         ModStatusText.Text = "Game launched. AmongAPI.dll will load via BepInEx.";
     }
 
-    private void CopyPathButton_Click(object sender, RoutedEventArgs e)
+    private void BrowseFilesButton_Click(object sender, RoutedEventArgs e)
     {
         if (string.IsNullOrEmpty(_moddedPath)) return;
 
         try
         {
-            Clipboard.SetText(_moddedPath);
-            var originalContent = CopyPathButton.Content;
-            CopyPathButton.Content = "✓ COPIED!";
-            Dispatcher.BeginInvoke(new Action(() =>
+            if (!Directory.Exists(_moddedPath))
+                Directory.CreateDirectory(_moddedPath);
+
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
             {
-                System.Threading.Tasks.Task.Delay(2000).ContinueWith(_ =>
-                {
-                    Dispatcher.Invoke(() => CopyPathButton.Content = originalContent);
-                });
-            }), System.Windows.Threading.DispatcherPriority.Background);
+                FileName = _moddedPath,
+                UseShellExecute = true
+            });
         }
-        catch
+        catch (Exception ex)
         {
-            MessageBox.Show("Failed to copy path to clipboard.", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show($"Failed to open folder:\n{ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
@@ -244,6 +243,27 @@ public partial class MainView
     private void AddModButton_Click(object sender, RoutedEventArgs e)
     {
         AddModPopup.IsOpen = true;
+
+        // Grow + fade entrance (skipped under reduce-motion)
+        if (!App.ReduceMotion)
+        {
+            AddModPopupContent.BeginAnimation(OpacityProperty,
+                new System.Windows.Media.Animation.DoubleAnimation(0, 1, new Duration(TimeSpan.FromMilliseconds(160))));
+            AddModPopupScale.BeginAnimation(System.Windows.Media.ScaleTransform.ScaleXProperty,
+                new System.Windows.Media.Animation.DoubleAnimation(0.95, 1, new Duration(TimeSpan.FromMilliseconds(160)))
+                {
+                    EasingFunction = new System.Windows.Media.Animation.CubicEase { EasingMode = System.Windows.Media.Animation.EasingMode.EaseOut }
+                });
+            AddModPopupScale.BeginAnimation(System.Windows.Media.ScaleTransform.ScaleYProperty,
+                new System.Windows.Media.Animation.DoubleAnimation(0.95, 1, new Duration(TimeSpan.FromMilliseconds(160)))
+                {
+                    EasingFunction = new System.Windows.Media.Animation.CubicEase { EasingMode = System.Windows.Media.Animation.EasingMode.EaseOut }
+                });
+        }
+        else
+        {
+            AddModPopupContent.Opacity = 1;
+        }
     }
 
     // Import Local Mod
@@ -296,6 +316,106 @@ public partial class MainView
             {
                 MessageBox.Show($"Failed to import mod:\n{ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
             }
+        }
+    }
+
+    // Install Preset Mod - Show preset library modal
+    private void InstallPresetMod_Click(object sender, RoutedEventArgs e)
+    {
+        AddModPopup.IsOpen = false;
+
+        var mainWindow = Window.GetWindow(this) as MainWindow;
+        if (mainWindow == null) return;
+
+        var presetLibrary = new PresetModLibraryModal();
+        presetLibrary.InstallRequested += async (_, args) =>
+        {
+            var (preset, button) = args;
+            button.IsEnabled = false;
+            button.Content = "Installing...";
+
+            var success = await DownloadModFromGitHub(preset);
+            button.Content = success ? "Installed" : "Install";
+            button.IsEnabled = true;
+        };
+
+        mainWindow.ModalOverlayControl.Show("Preset Mod Library", presetLibrary);
+    }
+
+    // Download latest release DLL from a GitHub repo into BepInEx/plugins/
+    private async Task<bool> DownloadModFromGitHub(PresetMod preset)
+    {
+        if (string.IsNullOrEmpty(_moddedPath))
+        {
+            MessageBox.Show("Please install BepInEx first.", "Error", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return false;
+        }
+
+        try
+        {
+            var response = await _httpClient.GetAsync($"https://api.github.com/repos/{preset.Repo}/releases/latest");
+            response.EnsureSuccessStatusCode();
+
+            var json = await response.Content.ReadAsStringAsync();
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+
+            string? downloadUrl = null;
+            if (root.TryGetProperty("assets", out var assets))
+            {
+                // First pass: prefer the preset's preferred asset name
+                foreach (var asset in assets.EnumerateArray())
+                {
+                    var name = asset.TryGetProperty("name", out var n) ? n.GetString() : "";
+                    if (name.EndsWith(".dll", StringComparison.OrdinalIgnoreCase) &&
+                        (preset.PreferredAsset == null ||
+                         string.Equals(name, preset.PreferredAsset, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        downloadUrl = asset.TryGetProperty("browser_download_url", out var u) ? u.GetString() : null;
+                        break;
+                    }
+                }
+
+                // Fallback: first .dll asset
+                if (downloadUrl == null)
+                {
+                    foreach (var asset in assets.EnumerateArray())
+                    {
+                        var name = asset.TryGetProperty("name", out var n) ? n.GetString() : "";
+                        if (name.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
+                        {
+                            downloadUrl = asset.TryGetProperty("browser_download_url", out var u) ? u.GetString() : null;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (downloadUrl == null)
+                throw new Exception("No DLL file found in release assets.");
+
+            var fileName = Path.GetFileName(new Uri(downloadUrl).LocalPath);
+            if (string.IsNullOrEmpty(fileName))
+                fileName = $"{preset.Name.Replace(" ", "")}.dll";
+
+            var pluginsDir = Path.Combine(_moddedPath, "BepInEx", "plugins");
+            Directory.CreateDirectory(pluginsDir);
+            var destPath = Path.Combine(pluginsDir, fileName);
+
+            var dllResponse = await _httpClient.GetAsync(downloadUrl);
+            dllResponse.EnsureSuccessStatusCode();
+
+            await using var stream = await dllResponse.Content.ReadAsStreamAsync();
+            await using var fileStream = new FileStream(destPath, FileMode.Create, FileAccess.Write, FileShare.None);
+            await stream.CopyToAsync(fileStream);
+
+            RefreshModsList();
+            return true;
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Failed to install {preset.Name}:\n{ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            return false;
         }
     }
 
