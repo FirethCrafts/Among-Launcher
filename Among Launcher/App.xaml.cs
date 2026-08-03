@@ -1,25 +1,9 @@
-using System.Windows;
-using AmongLauncher.Services;
-
 namespace AmongLauncher;
 
-public partial class App : Application
+public partial class App
 {
-    public static event Action<string>? DeepLinkReceived;
+    public static bool ReduceMotion { get; set; }
 
-    protected override void OnStartup(StartupEventArgs e)
-    {
-        base.OnStartup(e);
-        var deepLink = DeepLinkHandler.FindDeepLinkArgument();
-
-        if (!SingleInstance.TryBecomePrimary(out _))
-        {
-            if (deepLink != null)
-                SingleInstance.ForwardDeepLink(deepLink);
-            Shutdown();
-            return;
-        }
-
-        SingleInstance.StartRedirectServer(link => DeepLinkReceived?.Invoke(link));
-    }
+    /// <summary>Raised when a deep link arrives (used for single-instance protocol re-dispatch).</summary>
+    public static event Action<string?>? DeepLinkReceived;
 }
