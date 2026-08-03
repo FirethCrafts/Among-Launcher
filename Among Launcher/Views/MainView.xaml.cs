@@ -112,6 +112,13 @@ public partial class MainView
                 Dispatcher.Invoke(() => ProgressText.Text = $"Downloading BepInEx... {percent}%");
             }));
 
+            // Ensure steam_appid.txt exists for Among Us
+            var steamAppIdPath = Path.Combine(_moddedPath, "steam_appid.txt");
+            if (!File.Exists(steamAppIdPath))
+            {
+                File.WriteAllText(steamAppIdPath, "945360");
+            }
+
             ShowProgress("Installing AmongAPI...");
 
             await InstallAmongApiAsync();
