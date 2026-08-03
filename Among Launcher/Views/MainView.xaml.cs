@@ -1,4 +1,5 @@
 using System.IO;
+using System.IO.Compression;
 using System.Net.Http;
 using System.Text.Json;
 using System.Windows;
@@ -111,6 +112,10 @@ public partial class MainView
                 Dispatcher.Invoke(() => ProgressText.Text = $"Downloading BepInEx... {percent}%");
             }));
 
+            ShowProgress("Installing AmongAPI...");
+
+            await InstallAmongApiAsync();
+
             HideProgress();
             GameStatusText.Text = $"Modded Among Us ready!\nLocation: {_moddedPath}";
             PlayButton.IsEnabled = true;
@@ -123,6 +128,43 @@ public partial class MainView
         {
             HideProgress();
             MessageBox.Show($"Installation failed:\n{ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private async Task InstallAmongApiAsync()
+    {
+        const string artifactUrl = "https://api.github.com/repos/FirethCrafts/Among-Launcher/actions/artifacts/8853080583/zip";
+        var pluginsDir = Path.Combine(_moddedPath!, "BepInEx", "plugins");
+        Directory.CreateDirectory(pluginsDir);
+
+        var tempZip = Path.Combine(Path.GetTempPath(), "AmongApi.zip");
+
+        try
+        {
+            var response = await _httpClient.GetAsync(artifactUrl, HttpCompletionOption.ResponseHeadersRead);
+            response.EnsureSuccessStatusCode();
+
+            using (var stream = await response.Content.ReadAsStreamAsync())
+            using (var fileStream = new FileStream(tempZip, FileMode.Create, FileAccess.Write, FileShare.None))
+            {
+                await stream.CopyToAsync(fileStream);
+            }
+
+            using var archive = System.IO.Compression.ZipFile.OpenRead(tempZip);
+            foreach (var entry in archive.Entries)
+            {
+                if (entry.Name.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
+                {
+                    var destPath = Path.Combine(pluginsDir, entry.Name);
+                    entry.ExtractToFile(destPath, overwrite: true);
+                    break;
+                }
+            }
+        }
+        finally
+        {
+            if (File.Exists(tempZip))
+                File.Delete(tempZip);
         }
     }
 
