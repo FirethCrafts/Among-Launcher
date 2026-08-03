@@ -154,13 +154,18 @@ public partial class MainView
             var process = System.Diagnostics.Process.Start(startInfo);
             if (process == null) throw new Exception("Failed to start gh CLI");
 
-            using var fs = new FileStream(tempZip, FileMode.Create, FileAccess.Write, FileShare.None);
-            await process.StandardOutput.BaseStream.CopyToAsync(fs);
+            // Write to temp file, then dispose before reading
+            await using (var fs = new FileStream(tempZip, FileMode.Create, FileAccess.Write, FileShare.None))
+            {
+                await process.StandardOutput.BaseStream.CopyToAsync(fs);
+            }
+
             await process.WaitForExitAsync();
 
             if (process.ExitCode != 0)
                 throw new Exception($"gh CLI failed with exit code {process.ExitCode}");
 
+            // Now the file is fully written and closed - safe to open
             using var archive = System.IO.Compression.ZipFile.OpenRead(tempZip);
             foreach (var entry in archive.Entries)
             {
@@ -175,7 +180,9 @@ public partial class MainView
         finally
         {
             if (File.Exists(tempZip))
-                File.Delete(tempZip);
+            {
+                try { File.Delete(tempZip); } catch { }
+            }
         }
     }
 
