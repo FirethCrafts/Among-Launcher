@@ -23,7 +23,7 @@ Every message on the pipe is a single **frame**:
 
 ## JSON Message Envelope
 
-Every message (request or response) must have this top-level structure:
+Every message (request or broadcast) sent by either side has this top-level structure:
 
 ```json
 {
@@ -41,86 +41,79 @@ Every message (request or response) must have this top-level structure:
 | `timestamp` | `long`   | Unix epoch in milliseconds                               |
 | `payload`   | `object` | Message-specific data (optional for some types)          |
 
+**Responses** differ slightly by side:
+
+- **AmongAPI (PipeClient)** echoes the request `id` and adds a `timestamp` to its `<type>_ack` responses.
+- **AmongLauncher (PipeServer)** serializes the handler's returned object directly (e.g. `{"type":"game_ready_ack","restart":false}`) and does **not** echo `id`/`timestamp`. Because of this, the plugin's `SendMessageAsync` cannot correlate launcher responses and simply returns `null` after its 10-second timeout; the plugin ignores the result of every send it makes.
+
 ## Connection Lifecycle
 
 1. **AmongLauncher** starts a `PipeServer` listening on `AmongLauncher.IPC` when the app launches.
 2. **AmongAPI** (inside Among Us) starts a `PipeClient` on plugin load, connecting to `AmongLauncher.IPC`.
 3. Both sides keep the connection alive and exchange messages.
 4. If Among Us closes, the client disconnects and the server detects it — ready for the next connection.
+5. The launcher broadcasts `launcher_ready` after the main window finishes loading; the plugin broadcasts `game_ready` once the game reaches the main menu.
 
 ## Message Types
 
-### Launcher → AmongAPI (Requests)
+Legend: ✅ implemented & sent, 🔶 handled but no live sender/receiver today, ❌ removed / never implemented.
 
-#### `uninstall_mod`
-Tell the mod to remove an installed mod.
+### Launcher → AmongAPI
+
+#### `launcher_ready` ✅ (broadcast)
+Sent once when the launcher window finishes loading, as a handshake with the plugin.
+
+```json
+{ "type": "launcher_ready", "id": "a1b2c3d4", "timestamp": 1735689600000 }
+```
+
+No payload. **Response:** none.
+
+#### `join_lobby` ✅ (broadcast)
+Asks the plugin to join a lobby directly in-game. Sent during a deep-link join or a WebSocket-triggered rejoin.
 
 ```json
 {
-  "type": "uninstall_mod",
+  "type": "join_lobby",
   "id": "e5f6g7h8",
+  "timestamp": 1735689600000,
   "payload": {
-    "modId": "aunlocker",
-    "fileName": "AUnlocker.dll"
+    "code": "ABCDEF",
+    "region": "NA",
+    "regionIp": "127.0.0.1",
+    "regionPort": 22023
   }
 }
 ```
 
-**Response:** `mod_uninstalled_ack`
+The plugin responds with `join_lobby_ack` (echoed id) and also broadcasts the result as `join_lobby_result`.
 
-#### `get_mod_status`
-Request the current mod status from AmongAPI.
+**Response:** `join_lobby_ack` with `{ "success": true, "error": null }`
 
-```json
-{
-  "type": "get_mod_status",
-  "id": "i9j0k1l2"
-}
-```
-
-**Response:** `mod_status_response`
-
-#### `restart_game`
-Tell AmongAPI the launcher is about to restart the game.
+#### `kick` 🔶
+Tells the plugin that a player was kicked. The plugin raises its `KickRequested` event (no handler is registered, so no ack is sent).
 
 ```json
 {
-  "type": "restart_game",
-  "id": "m3n4o5p6",
-  "payload": {
-    "reason": "New mod installed, restart required"
-  }
+  "type": "kick",
+  "id": "i9j0k1l2",
+  "timestamp": 1735689600000,
+  "payload": { "reason": "Vote kicked" }
 }
 ```
 
-**Response:** `restart_ack`
+`reason` is optional. The launcher currently routes host kicks through the self-hosted backend / WebSocket path; the IPC `kick` handler exists on the plugin side but is not yet sent by the launcher.
 
----
+**Response:** none.
 
-### AmongAPI → Launcher (Requests)
+#### `mod_installed` ✅ (broadcast)
+Announces that a mod DLL finished (or failed) downloading. The launcher sends this after processing an `install_mod` request.
 
-#### `install_mod`
-Tell the launcher to download and install a mod DLL. Works regardless of game state — the launcher downloads to `BepInEx/plugins/` immediately.
-
-```json
-{
-  "type": "install_mod",
-  "id": "a1b2c3d4",
-  "payload": {
-    "modId": "aunlocker",
-    "downloadUrl": "https://github.com/astra1dev/AUnlocker/releases/latest/download/AUnlocker.dll",
-    "fileName": "AUnlocker.dll"
-  }
-}
-```
-
-**Response:** `install_mod_ack`
-
-The launcher will also broadcast `mod_installed` when the download completes:
 ```json
 {
   "type": "mod_installed",
-  "id": "x1y2z3w4",
+  "id": "m3n4o5p6",
+  "timestamp": 1735689600000,
   "payload": {
     "modId": "aunlocker",
     "fileName": "AUnlocker.dll",
@@ -129,47 +122,180 @@ The launcher will also broadcast `mod_installed` when the download completes:
 }
 ```
 
-#### `restart_after_install`
-Tell the launcher to kill the game, wait for all pending mod installs to finish, then restart Among Us.
+On failure `success` is `false` and an `error` string is included.
+
+**Response:** none.
+
+#### `restart` 🔶
+Special-case message. On receipt the plugin's `PipeClient` stops its read loop and disconnects — the launcher is about to kill the game. No payload. The launcher does not currently send this (it kills and relaunches the game itself after `restart_after_install`).
+
+**Response:** none.
+
+---
+
+### AmongAPI → Launcher
+
+#### `game_ready` ✅
+Sent once after the plugin connects and the game is at the main menu. Currently sent with **no payload**.
 
 ```json
-{
-  "type": "restart_after_install",
-  "id": "r5s6t7u8"
-}
+{ "type": "game_ready", "id": "q7r8s9t0", "timestamp": 1735689600000 }
 ```
 
-**Response:** `restart_ack`
+**Response:** `game_ready_ack` with `{ "restart": false }`
 
-The launcher will:
-1. Kill the Among Us process immediately
-2. Wait for all pending `install_mod` downloads to complete
-3. Automatically relaunch Among Us when all installs are done
-
-#### `mod_status`
-Report the current loaded mod status to the launcher.
+#### `lobby_created` ✅
+The host entered or created a lobby in-game. The launcher mirrors the lobby to the backend, starts the heartbeat, opens the WebSocket, and shows the host control panel. Also re-sent by the plugin's `/repost` chat command.
 
 ```json
 {
-  "type": "mod_status",
-  "id": "q7r8s9t0",
+  "type": "lobby_created",
+  "id": "u1v2w3x4",
+  "timestamp": 1735689600000,
   "payload": {
-    "loaded": true,
-    "modName": "AUnlocker",
-    "modVersion": "1.3.1"
+    "code": "ABCDEF",
+    "region": "NA",
+    "regionIp": "127.0.0.1",
+    "regionPort": 22023
   }
 }
 ```
 
-**Response:** `mod_status_ack`
+Note: the current `GameStateTracker` cannot read region info, so it sends `region`/`regionIp` empty and `regionPort` `0`; the launcher falls back to port `22023` when `regionPort` is absent.
 
-#### `download_progress`
-Report mod download progress to the launcher UI.
+**Response:** `lobby_created_ack`
+
+#### `lobby_closed` ✅
+The host left or the lobby was disbanded. The launcher disbands it on the backend and tears down the heartbeat/WebSocket/host panel.
+
+```json
+{
+  "type": "lobby_closed",
+  "id": "y5z6a7b8",
+  "timestamp": 1735689600000,
+  "payload": { "code": "ABCDEF", "reason": "disband" }
+}
+```
+
+`reason` is `""` for a normal leave and `"disband"` for the `/disband` chat command.
+
+**Response:** `lobby_closed_ack`
+
+#### `player_joined` ✅
+A player joined the lobby.
+
+```json
+{
+  "type": "player_joined",
+  "id": "c9d0e1f2",
+  "timestamp": 1735689600000,
+  "payload": { "playerName": "<unknown>", "playerCount": 4 }
+}
+```
+
+The current tracker cannot read player names, so `playerName` is `"<unknown>"`; the launcher uses `playerCount` for its live player list.
+
+**Response:** none.
+
+#### `player_left` ✅
+A player left the lobby. Same payload shape as `player_joined`.
+
+**Response:** none.
+
+#### `join_lobby_result` ✅
+Result of a `join_lobby` request, surfaced to the launcher UI on failure.
+
+```json
+{
+  "type": "join_lobby_result",
+  "id": "g3h4i5j6",
+  "timestamp": 1735689600000,
+  "payload": { "success": true, "error": null }
+}
+```
+
+`error` is present only when `success` is `false`.
+
+**Response:** none.
+
+#### `install_mod` 🔶
+Requests the launcher to download and install a mod DLL. Works regardless of game state — the launcher downloads to `BepInEx/plugins/` immediately.
+
+```json
+{
+  "type": "install_mod",
+  "id": "a1b2c3d4",
+  "timestamp": 1735689600000,
+  "payload": {
+    "modId": "aunlocker",
+    "downloadUrl": "https://github.com/astra1dev/AUnlocker/releases/latest/download/AUnlocker.dll",
+    "fileName": "AUnlocker.dll"
+  }
+}
+```
+
+**Response:** `install_mod_ack` with `{ "modId": "aunlocker", "status": "downloading" }`
+
+The launcher broadcasts `mod_installed` (with `success`/`error`) when the download completes. The handler is fully implemented in the launcher, but the plugin does not currently send this.
+
+#### `restart_after_install` 🔶
+Asks the launcher to kill the game, wait for all pending mod installs to finish, then restart Among Us.
+
+```json
+{ "type": "restart_after_install", "id": "r5s6t7u8", "timestamp": 1735689600000 }
+```
+
+**Response:** `restart_ack` with `{ "status": "waiting_for_installs" }`
+
+The launcher:
+1. Kills the Among Us process immediately
+2. Waits for all pending `install_mod` downloads to complete
+3. Automatically relaunches Among Us when all installs are done
+
+The handler is implemented in the launcher, but the plugin does not currently send this.
+
+#### `mod_status` 🔶
+Requests the launcher's currently installed mod list.
+
+```json
+{ "type": "mod_status", "id": "k7l8m9n0", "timestamp": 1735689600000 }
+```
+
+**Response:** `mod_status_response` with `{ "mods": [{ "Name": "AUnlocker.dll", "FilePath": "..." }] }`
+
+The launcher treats this as a request and replies with the installed mods (name + file path). The plugin does not currently send this.
+
+#### `heartbeat` 🔶
+Keep-alive ping. Handler registered in the launcher; the plugin does not currently send it.
+
+```json
+{ "type": "heartbeat", "id": "o1p2q3r4", "timestamp": 1735689600000 }
+```
+
+**Response:** `heartbeat_ack`
+
+#### `error` 🔶
+Reports an error to the launcher, which logs it.
+
+```json
+{
+  "type": "error",
+  "id": "s9t0u1v2",
+  "timestamp": 1735689600000,
+  "payload": { "message": "Failed to load mod: AUnlocker.dll" }
+}
+```
+
+Only `message` is consumed; an optional `code` is ignored. **Response:** none.
+
+#### `download_progress` 🔶 (no-op)
+The launcher has a no-op handler (returns no response) but the plugin never sends this type. Reserved.
 
 ```json
 {
   "type": "download_progress",
-  "id": "u1v2w3x4",
+  "id": "w3x4y5z6",
+  "timestamp": 1735689600000,
   "payload": {
     "modId": "aunlocker",
     "percent": 65,
@@ -179,168 +305,116 @@ Report mod download progress to the launcher UI.
 }
 ```
 
-**Response:** `download_progress_ack` (or no response)
+**Response:** none.
 
-#### `mod_installed`
-Confirm a mod was installed successfully.
+#### `mod_uninstalled` 🔶 (no sender)
+The launcher's base handler responds `mod_uninstalled_ack` with `{ "status": "ok" }`, but no sender exists and the launcher has no uninstall flow. Reserved.
 
-```json
-{
-  "type": "mod_installed",
-  "id": "y5z6a7b8",
-  "payload": {
-    "modId": "aunlocker",
-    "fileName": "AUnlocker.dll"
-  }
-}
-```
+**Response:** `mod_uninstalled_ack` with `{ "status": "ok" }`
 
-**Response:** `mod_installed_ack`
+---
 
-#### `mod_uninstalled`
-Confirm a mod was removed.
+### Removed / never implemented
 
-```json
-{
-  "type": "mod_uninstalled",
-  "id": "c9d0e1f2",
-  "payload": {
-    "modId": "aunlocker",
-    "fileName": "AUnlocker.dll"
-  }
-}
-```
+The following types appear in earlier drafts of this protocol but were never implemented and are removed:
 
-**Response:** `mod_uninstalled_ack`
-
-#### `game_ready`
-The game has finished loading and is at the main menu.
-
-```json
-{
-  "type": "game_ready",
-  "id": "g3h4i5j6",
-  "payload": {
-    "gameVersion": "2026.6.5",
-    "amongApiVersion": "1.0.0"
-  }
-}
-```
-
-**Response:** `game_ready_ack`
-
-#### `error`
-Report an error to the launcher.
-
-```json
-{
-  "type": "error",
-  "id": "k7l8m9n0",
-  "payload": {
-    "message": "Failed to load mod: AUnlocker.dll",
-    "code": "MOD_LOAD_FAILED"
-  }
-}
-```
-
-**Response:** none
-
-#### `heartbeat`
-Keep-alive ping.
-
-```json
-{
-  "type": "heartbeat",
-  "id": "o1p2q3r4"
-}
-```
-
-**Response:** `heartbeat_ack`
+| Type         | Direction      | Status                          |
+|--------------|----------------|---------------------------------|
+| `uninstall_mod` | Launcher → AmongAPI | ❌ Removed — never implemented |
+| `get_mod_status` | Launcher → AmongAPI | ❌ Removed — never implemented |
+| `restart_game`   | Launcher → AmongAPI | ❌ Removed — never implemented |
 
 ---
 
 ### Response Types
 
-| Response Type       | Sent By    | Description                        |
-|---------------------|------------|------------------------------------|
-| `heartbeat_ack`     | Launcher   | Heartbeat acknowledged             |
-| `mod_status_ack`    | Launcher   | Mod status received                |
-| `mod_installed_ack` | Launcher   | Mod installation confirmed         |
-| `mod_uninstalled_ack` | Launcher | Mod uninstall confirmed            |
-| `game_ready_ack`    | Launcher   | Game ready notification received   |
-| `mod_status_response` | Launcher | Full mod status with installed list |
-| `download_progress_ack` | AmongAPI | Download progress received         |
-| `restart_ack`       | AmongAPI   | Restart request acknowledged       |
-
-## Error Codes
-
-| Code              | Description                        |
-|-------------------|------------------------------------|
-| `MOD_LOAD_FAILED` | A mod DLL failed to load           |
-| `MOD_NOT_FOUND`   | Requested mod was not found        |
-| `NETWORK_ERROR`   | Network request failed             |
-| `DISK_ERROR`      | File write/read error              |
-| `API_RATE_LIMIT`  | GitHub API rate limit exceeded     |
-| `API_NOT_FOUND`   | GitHub API returned 404            |
+| Response Type        | Sent By    | Description                                                            |
+|----------------------|------------|------------------------------------------------------------------------|
+| `game_ready_ack`     | Launcher   | `{ restart: false }`                                                   |
+| `install_mod_ack`    | Launcher   | `{ modId, status: "downloading" }`                                     |
+| `restart_ack`        | Launcher   | `{ status: "waiting_for_installs" }` reply to `restart_after_install`  |
+| `mod_status_response`| Launcher   | `{ mods: [{ Name, FilePath }] }` reply to `mod_status`                 |
+| `heartbeat_ack`      | Launcher   | Heartbeat acknowledged                                                 |
+| `lobby_created_ack`  | Launcher   | Lobby mirrored to backend                                              |
+| `lobby_closed_ack`   | Launcher   | Lobby disbanded on backend                                             |
+| `mod_installed_ack`  | Launcher   | `{ status: "ok" }` base handler; no sender today                       |
+| `mod_uninstalled_ack`| Launcher   | `{ status: "ok" }` base handler; no sender today                       |
+| `join_lobby_ack`     | AmongAPI   | `{ success, error }` reply to `join_lobby`, echoes the request id      |
 
 ## Launcher-side Implementation
 
 The launcher runs `PipeServer` on the main window. Key integration points:
 
-- **On client connect:** Update the mod status text to "AmongAPI connected"
-- **On client disconnect:** Update the mod status text to "No mod loaded"
-- **On `install_mod`:** Download mod DLL from `downloadUrl` to `BepInEx/plugins/`, broadcast `mod_installed` on completion
-- **On `restart_after_install`:** Kill game process, wait for all pending installs, then relaunch
-- **On `mod_status`:** Return the list of installed mods from `BepInEx/plugins/`
-- **On `game_ready`:** Update the mod status text to "Game loaded — AmongAPI active"
-- **On `download_progress`:** Update the progress bar in the UI
-- **On `error`:** Show error in the mod status text
-
-The pipe server is started in `MainWindow` constructor and broadcasts `launcher_ready` on window load.
+- **On client connect/disconnect:** Update the "AmongAPI connected" connection status
+- **On `launcher_ready`:** Broadcast once the window loads
+- **On `install_mod`:** Download mod DLL from `downloadUrl` to `BepInEx/plugins/`, broadcast `mod_installed` on completion, respond `install_mod_ack`
+- **On `restart_after_install`:** Kill game process, wait for all pending installs, then relaunch; respond `restart_ack`
+- **On `mod_status`:** Return the installed mod list from `BepInEx/plugins/` as `mod_status_response`
+- **On `game_ready`:** Update status text to "Game loaded — AmongAPI active", respond `game_ready_ack`
+- **On `lobby_created`:** Mirror the lobby to the backend, start heartbeat, open WebSocket, show host panel; respond `lobby_created_ack`
+- **On `lobby_closed`:** Disband the lobby on the backend, stop heartbeat/WebSocket; respond `lobby_closed_ack`
+- **On `player_joined`/`player_left`:** Update the live player list (local only)
+- **On `join_lobby_result`:** Surface join errors to the UI
+- **On `error`:** Log the error
+- **On `download_progress`:** No-op
 
 ## AmongAPI-side Implementation
 
 The mod runs `PipeClient` in its `Plugin.Load()`:
 
 ```csharp
-var client = new PipeClient();
+var client = new PipeClient(Log);
 await client.ConnectAsync();
 
-// Request the launcher to install a mod
-await client.SendMessageAsync("install_mod", new {
-    modId = "aunlocker",
-    downloadUrl = "https://github.com/astra1dev/AUnlocker/releases/latest/download/AUnlocker.dll",
-    fileName = "AUnlocker.dll"
-});
-
-// Request game restart after installs complete
-await client.SendMessageAsync("restart_after_install");
-
 // Report game ready when loaded
-await client.SendMessageAsync("game_ready", new { gameVersion = "2026.6.5" });
+await client.SendMessageAsync("game_ready");
+
+// Report lobby / player state transitions to the launcher
+var tracker = new GameStateTracker(Log);
+tracker.LobbyCreated += (_, info) => _ = pipe.SendMessageAsync("lobby_created", info);
+tracker.LobbyClosed += (_, reason) => _ = pipe.SendMessageAsync("lobby_closed", new { code, reason });
+tracker.PlayerJoined += (_, p) => _ = pipe.SendMessageAsync("player_joined", p);
+tracker.PlayerLeft += (_, p) => _ = pipe.SendMessageAsync("player_left", p);
+tracker.Start();
+
+// Handle direct lobby joins from the launcher
+pipe.RegisterHandler("join_lobby", async element =>
+{
+    var result = await joiner.JoinAsync(code, region, regionIp, regionPort);
+    _ = pipe.SendMessageAsync("join_lobby_result", new { success = result.Success, error = result.Error });
+    return new { success = result.Success, error = result.Error };
+});
 ```
+
+## Example Flow: Join Lobby via Deep Link
+
+1. User opens `amonglauncher://join?code=ABCDEF` (a second instance forwards it to the running one via the redirect pipe).
+2. Launcher fetches the lobby from the backend (code, region, region IP/port, mod set).
+3. Launcher syncs the lobby's mod set into `BepInEx/plugins/` (downloading any missing DLLs with retry).
+4. Launcher kills any running game, launches Among Us, and waits for the plugin's `game_ready`.
+5. Launcher broadcasts `join_lobby { code, region, regionIp, regionPort }`.
+6. Plugin joins in-game and broadcasts `join_lobby_result { success, error }`.
+7. Launcher connects the lobby WebSocket and shows the live status.
+
+## Example Flow: Host Lobby Mirroring
+
+1. Host enters a lobby in-game; the plugin broadcasts `lobby_created { code, region, regionIp, regionPort }`.
+2. Launcher creates the lobby on the backend, starts the heartbeat, opens the WebSocket, and shows the host control panel.
+3. Player joins/leaves are reflected via `player_joined`/`player_left`.
+4. The host can repost or disband from the panel (or use `/repost` / `/disband` chat commands); disband sends `lobby_closed`.
+5. The launcher disbands the lobby on the backend and tears everything down.
 
 ## Example Flow: API-Driven Mod Install
 
 1. AmongAPI sends `install_mod` to the launcher with `downloadUrl` and `fileName`.
-2. Launcher downloads the DLL to `BepInEx/plugins/` (works even if game is running).
-3. Launcher broadcasts `mod_installed` when download completes.
+2. Launcher responds `install_mod_ack { status: "downloading" }` and downloads the DLL to `BepInEx/plugins/`.
+3. Launcher broadcasts `mod_installed` when the download completes.
 4. Launcher refreshes the mod list in the UI.
-5. AmongAPI receives `mod_installed` and loads the new DLL.
 
 ## Example Flow: Restart After Install
 
 1. AmongAPI sends `restart_after_install` to the launcher.
-2. Launcher kills the Among Us process immediately.
+2. Launcher responds `restart_ack { status: "waiting_for_installs" }` and kills the Among Us process immediately.
 3. Launcher waits for all pending `install_mod` downloads to finish.
 4. Once all installs complete, launcher automatically relaunches Among Us.
-5. AmongAPI reconnects on the new game instance.
-6. AmongAPI sends `game_ready` when the game loads.
-7. Launcher updates the status badge to "Running" and shows "Game loaded — AmongAPI active".
-
-## Example Flow: Launcher-Initiated Install
-
-1. User clicks "Install" on a preset mod in the launcher UI.
-2. Launcher downloads the mod DLL from GitHub.
-3. Launcher writes the DLL to `BepInEx/plugins/`.
-4. Launcher updates the mod list in the UI.
+5. AmongAPI reconnects on the new game instance and sends `game_ready`.

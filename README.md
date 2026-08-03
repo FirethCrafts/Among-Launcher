@@ -9,6 +9,11 @@ A modern Among Us mod launcher built with WPF (.NET 10), featuring Discord OAuth
 - **Discord OAuth** — Log in with your Discord account, profile avatar displayed in sidebar
 - **Game Management** — Launch/stop Among Us with running status indicator
 - **Mod Management** — Import local DLLs or install preset mods from GitHub repositories
+- **Mod Profiles** — Save and load named mod sets as reusable presets
+- **Deep-Link Lobby Join** — `amonglauncher://join?code=ABCDEF` links sync the lobby's mod set, launch the game, and join in-game automatically
+- **Single-Instance Routing** — Deep links sent to an already-running instance are forwarded to it instead of launching a second copy
+- **Host Control Panel** — Live player list with repost, kick, and disband controls while hosting
+- **Self-Hosted Backend** — Optional lobby backend integration: create/fetch/repost/kick/disband and heartbeat, plus WebSocket-driven kick and rejoin
 - **Custom Modals** — Dark-themed overlay system for confirmations and preset mod library
 - **AmongAPI IPC** — Named pipe communication between the launcher and the in-game mod
 - **Dark Matte Theme** — Premium UI with glow effects, animated buttons, and status pill
@@ -22,9 +27,11 @@ AmongLauncher/          WPF application
 ├── Game/               Game process management (launch/stop)
 ├── Installer/          BepInEx, game copy, plugin installer
 ├── Ipc/                Named pipe server/client for AmongAPI
-├── Models/             Data models (ModInfo, DiscordUserProfile)
+├── Models/             Data models (ModInfo, ModSetEntry, ModProfile, LobbyInfo, DiscordUserProfile)
+├── Services/           Deep links, single-instance routing, mod downloads
+│   └── Lobby/          Lobby backend client, WebSocket, join pipeline, heartbeat, mod profiles
 ├── Steam/              Steam library detection
-└── Views/              UI views (MainView, SettingsView, WelcomeView, modals)
+└── Views/              UI views (MainView, SettingsView, WelcomeView, HostControlPanelView, modals)
 
 Among API/              BepInEx IL2CPP plugin (runs inside Among Us)
 ├── Services/           Mod sync, file management, mod loader
