@@ -168,6 +168,17 @@ public partial class MainView
             modal);
     }
 
+    private bool TryShowUnavailableInstall()
+    {
+        if (!string.IsNullOrEmpty(_moddedPath)) return false;
+
+        var result = new AmongUsLocator().FindAmongUsWithStorefront();
+        if (!result.DetectedButUnavailable) return false;
+
+        ShowMsStoreAccessModal(result.Storefront);
+        return true;
+    }
+
     private async Task InstallAmongApiAsync()
     {
         const string downloadUrl = "https://github.com/FirethCrafts/Among-Launcher/releases/latest/download/AmongApi.dll";
@@ -191,7 +202,11 @@ public partial class MainView
             return;
         }
 
-        if (string.IsNullOrEmpty(_moddedPath)) return;
+        if (string.IsNullOrEmpty(_moddedPath))
+        {
+            if (TryShowUnavailableInstall()) return;
+            return;
+        }
 
         var exePath = System.IO.Path.Combine(_moddedPath, "Among Us.exe");
         if (!System.IO.File.Exists(exePath))
@@ -218,7 +233,11 @@ public partial class MainView
     public void LaunchGame()
     {
         if (_gameManager.IsGameRunning()) return;
-        if (string.IsNullOrEmpty(_moddedPath)) return;
+        if (string.IsNullOrEmpty(_moddedPath))
+        {
+            if (TryShowUnavailableInstall()) return;
+            return;
+        }
 
         var exePath = System.IO.Path.Combine(_moddedPath, "Among Us.exe");
         if (!System.IO.File.Exists(exePath)) return;
