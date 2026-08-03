@@ -47,7 +47,8 @@ public partial class MainView
         GameStatusText.Text = "Searching for Among Us installation...";
 
         var locator = new AmongUsLocator();
-        var gamePath = locator.FindAmongUs();
+        var storefront = Config.LauncherConfig.Load().Storefront;
+        var gamePath = locator.FindAmongUsForStorefront(storefront).Path;
 
         if (gamePath == null)
         {
@@ -87,7 +88,8 @@ public partial class MainView
     private async void InstallButton_Click(object sender, RoutedEventArgs e)
     {
         var locator = new AmongUsLocator();
-        var result = locator.FindAmongUsWithStorefront();
+        var savedStorefront = Config.LauncherConfig.Load().Storefront;
+        var result = locator.FindAmongUsForStorefront(savedStorefront);
 
         if (result.DetectedButUnavailable)
         {
