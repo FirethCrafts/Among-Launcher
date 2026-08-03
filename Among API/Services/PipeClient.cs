@@ -22,6 +22,11 @@ public class PipeClient : IDisposable
     public bool IsConnected => _connected;
     public event EventHandler? Connected;
     public event EventHandler? Disconnected;
+    public event EventHandler<JsonElement>? MessageReceived;
+    public event EventHandler? JoinLobbyRequested;
+    public event EventHandler<KickRequestedEventArgs>? KickRequested;
+
+    public class KickRequestedEventArgs : EventArgs { public string Reason { get; init; } = ""; }
 
     public PipeClient(ManualLogSource log)
     {
@@ -94,14 +99,10 @@ public class PipeClient : IDisposable
         }
 
         var json = JsonSerializer.Serialize(message);
-        var data = Encoding.UTF8.GetBytes(json);
-        var header = BitConverter.GetBytes(data.Length);
 
         try
         {
-            await _client.WriteAsync(header, ct);
-            await _client.WriteAsync(data, ct);
-            await _client.FlushAsync(ct);
+            await WriteFrameAsync(json, ct);
         }
         catch
         {
@@ -119,6 +120,20 @@ public class PipeClient : IDisposable
             lock (_lock) { _pending.Remove(id); }
             return null;
         }
+    }
+
+    private async Task WriteFrameAsync(string json, CancellationToken ct)
+    {
+        var data = Encoding.UTF8.GetBytes(json);
+        var header = BitConverter.GetBytes(data.Length);
+        await _client!.WriteAsync(header, ct);
+        await _client.WriteAsync(data, ct);
+        await _client.FlushAsync(ct);
+    }
+
+    private async Task SendRawAsync(string json)
+    {
+        await WriteFrameAsync(json, CancellationToken.None);
     }
 
     private async Task ListenAsync(CancellationToken ct)
@@ -170,6 +185,46 @@ public class PipeClient : IDisposable
                         _log.LogInfo("[Pipe] Received restart command from launcher.");
                         // The game will be killed by the launcher, so we just exit
                         break;
+                    }
+
+                    if (_handlers.TryGetValue(msgType, out var handler))
+                    {
+                        try
+                        {
+                            var result = await handler(doc.RootElement);
+                            if (result != null)
+                            {
+                                var respId = doc.RootElement.TryGetProperty("id", out var idP) ? idP.GetString() : "";
+                                var resp = new Dictionary<string, object>
+                                {
+                                    ["type"] = msgType + "_ack",
+                                    ["id"] = respId ?? "",
+                                    ["timestamp"] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                                };
+                                if (result is not string) resp["payload"] = result;
+                                await SendRawAsync(JsonSerializer.Serialize(resp));
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _log.LogError($"[Pipe] Handler {msgType} failed: {ex.Message}");
+                        }
+                    }
+
+                    MessageReceived?.Invoke(this, doc.RootElement);
+                    if (msgType == "join_lobby")
+                    {
+                        JoinLobbyRequested?.Invoke(this, EventArgs.Empty);
+                    }
+                    else if (msgType == "kick")
+                    {
+                        var reason = "";
+                        if (doc.RootElement.TryGetProperty("payload", out var payloadProp) &&
+                            payloadProp.TryGetProperty("reason", out var reasonProp))
+                        {
+                            reason = reasonProp.GetString() ?? "";
+                        }
+                        KickRequested?.Invoke(this, new KickRequestedEventArgs { Reason = reason });
                     }
                 }
             }
