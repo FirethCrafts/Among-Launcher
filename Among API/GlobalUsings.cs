@@ -13,7 +13,4 @@ global using System.Threading.Tasks;
 global using BepInEx;
 global using BepInEx.Logging;
 global using BepInEx.Unity.IL2CPP;
-global using AmongApi.Contracts;
-global using AmongApi.Models;
 global using AmongApi.Services;
-global using AmongApi.Config;

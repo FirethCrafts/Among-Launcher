@@ -1,7 +1,6 @@
 using System.IO;
 using System.IO.Compression;
 using System.Net.Http;
-using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
 using Microsoft.Win32;
@@ -154,7 +153,7 @@ public partial class MainView
         await stream.CopyToAsync(fileStream);
     }
 
-    private async void PlayButton_Click(object sender, RoutedEventArgs e)
+    private void PlayButton_Click(object sender, RoutedEventArgs e)
     {
         if (_gameManager.IsGameRunning())
         {
@@ -171,119 +170,9 @@ public partial class MainView
             return;
         }
 
-        // Check and install mods before launching
-        PlayButton.IsEnabled = false;
-        try
-        {
-            var installed = await CheckAndInstallModsAsync();
-            if (installed > 0)
-            {
-                ModStatusText.Text = $"Installed {installed} mod(s). Launching...";
-            }
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show($"Failed to install mods:\n{ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
-            PlayButton.IsEnabled = true;
-            return;
-        }
-
         _gameManager.LaunchGame(exePath);
         SetPlayButtonRunning(true);
         ModStatusText.Text = "Game launched. AmongAPI.dll will load via BepInEx.";
-    }
-
-    private async Task<int> CheckAndInstallModsAsync()
-    {
-        var manifest = LoadManifest();
-        if (manifest == null || manifest.Mods.Count == 0) return 0;
-
-        var pluginsDir = Path.Combine(_moddedPath!, "BepInEx", "plugins");
-        Directory.CreateDirectory(pluginsDir);
-
-        var installed = 0;
-
-        Dispatcher.Invoke(() =>
-        {
-            ModStatusText.Text = "Checking for mods...";
-            ShowProgress("Checking for mods...");
-        });
-
-        // Small delay so user can see the status
-        await Task.Delay(500);
-
-        foreach (var mod in manifest.Mods)
-        {
-            var destPath = Path.Combine(pluginsDir, mod.FileName);
-
-            Dispatcher.Invoke(() => ModStatusText.Text = $"Checking {mod.FileName}...");
-            await Task.Delay(300);
-
-            if (File.Exists(destPath) && new FileInfo(destPath).Length > 0)
-            {
-                Dispatcher.Invoke(() => ModStatusText.Text = $"✓ {mod.FileName} ready");
-                await Task.Delay(200);
-                continue;
-            }
-
-            Dispatcher.Invoke(() => ModStatusText.Text = $"Installing {mod.FileName}...");
-            ShowProgress($"Installing {mod.FileName}...");
-
-            await DownloadModAsync(mod.Id, mod.Url, destPath);
-            installed++;
-
-            Dispatcher.Invoke(() => ModStatusText.Text = $"✓ {mod.FileName} installed");
-            await Task.Delay(200);
-        }
-
-        HideProgress();
-
-        if (installed > 0)
-            RefreshModsList();
-
-        return installed;
-    }
-
-    private static Models.ModManifest? LoadManifest()
-    {
-        try
-        {
-            var assembly = System.Reflection.Assembly.GetExecutingAssembly();
-            var stream = assembly.GetManifestResourceStream("manifest.json");
-            if (stream == null) return null;
-
-            using var reader = new StreamReader(stream);
-            var json = reader.ReadToEnd();
-            return JsonSerializer.Deserialize<Models.ModManifest>(json);
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    private async Task DownloadModAsync(string modId, string url, string destPath)
-    {
-        if (File.Exists(destPath) && new FileInfo(destPath).Length > 0)
-            return;
-
-        for (int attempt = 1; attempt <= 3; attempt++)
-        {
-            try
-            {
-                var response = await _httpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
-                response.EnsureSuccessStatusCode();
-
-                using var stream = await response.Content.ReadAsStreamAsync();
-                using var fileStream = new FileStream(destPath, FileMode.Create, FileAccess.Write, FileShare.None);
-                await stream.CopyToAsync(fileStream);
-                return;
-            }
-            catch (IOException) when (attempt < 3)
-            {
-                await Task.Delay(2000);
-            }
-        }
     }
 
     public void StopGame()
@@ -403,140 +292,6 @@ public partial class MainView
             {
                 MessageBox.Show($"Failed to import mod:\n{ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
             }
-        }
-    }
-
-    // Install Preset Mod - Show modal
-    private void InstallPresetMod_Click(object sender, RoutedEventArgs e)
-    {
-        AddModPopup.IsOpen = false;
-
-        var mainWindow = Window.GetWindow(this) as MainWindow;
-        if (mainWindow == null) return;
-
-        // Map mod names to their actual GitHub repositories
-        var modRepositories = new Dictionary<string, string>
-        {
-            { "aunlocker", "astra1dev/AUnlocker" },
-            { "better-among-us", "NotHunter101/ExtraRolesAmongUs" },
-            { "town-of-us", "Town-Of-Us/TownOfUs-Reactor" },
-            { "the-other-roles", "NotHunter101/ExtraRolesAmongUs" }
-        };
-
-        var presetLibrary = new PresetModLibraryModal();
-        presetLibrary.InstallModRequested += async (_, args) =>
-        {
-            var (modName, button) = args;
-            button.IsEnabled = false;
-            button.Content = "Installing...";
-
-            // Get the actual repository path
-            if (!modRepositories.TryGetValue(modName, out var repoPath))
-            {
-                button.Content = "Install";
-                button.IsEnabled = true;
-                MessageBox.Show($"Repository not found for '{modName}'", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
-                return;
-            }
-
-            var success = await DownloadModFromGitHub(repoPath, button);
-
-            if (success)
-            {
-                button.Content = "Installed";
-            }
-            else
-            {
-                button.Content = "Install";
-                button.IsEnabled = true;
-            }
-        };
-
-        mainWindow.ModalOverlayControl.Show("Preset Mod Library", presetLibrary);
-    }
-
-    // GitHub API Download Helper
-    private async Task<bool> DownloadModFromGitHub(string repoPath, Button installButton)
-    {
-        if (string.IsNullOrEmpty(_moddedPath))
-        {
-            MessageBox.Show("Please install BepInEx first.", "Error", MessageBoxButton.OK, MessageBoxImage.Warning);
-            return false;
-        }
-
-        var originalContent = installButton.Content;
-        installButton.Content = "Installing...";
-        installButton.IsEnabled = false;
-
-        try
-        {
-            var response = await _httpClient.GetAsync($"https://api.github.com/repos/{repoPath}/releases/latest");
-
-            if (!response.IsSuccessStatusCode)
-            {
-                if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
-                {
-                    throw new Exception($"Repository '{repoPath}' not found.");
-                }
-                throw new Exception($"GitHub API returned {response.StatusCode}");
-            }
-
-            var json = await response.Content.ReadAsStringAsync();
-            using var doc = JsonDocument.Parse(json);
-            var root = doc.RootElement;
-
-            if (!root.TryGetProperty("assets", out var assets))
-            {
-                throw new Exception("No assets found in release");
-            }
-
-            // Find first .dll asset
-            string? downloadUrl = null;
-            foreach (var asset in assets.EnumerateArray())
-            {
-                if (asset.TryGetProperty("name", out var nameElement) &&
-                    nameElement.GetString()?.EndsWith(".dll") == true)
-                {
-                    if (asset.TryGetProperty("browser_download_url", out var urlElement))
-                    {
-                        downloadUrl = urlElement.GetString();
-                        break;
-                    }
-                }
-            }
-
-            if (downloadUrl == null)
-            {
-                throw new Exception("No DLL file found in release assets");
-            }
-
-            // Download the DLL
-            var dllResponse = await _httpClient.GetAsync(downloadUrl);
-            dllResponse.EnsureSuccessStatusCode();
-
-            var pluginsDir = Path.Combine(_moddedPath, "BepInEx", "plugins");
-            if (!Directory.Exists(pluginsDir))
-                Directory.CreateDirectory(pluginsDir);
-
-            var fileName = Path.GetFileName(downloadUrl);
-            var destPath = Path.Combine(pluginsDir, fileName);
-
-            using (var stream = await dllResponse.Content.ReadAsStreamAsync())
-            using (var fileStream = new FileStream(destPath, FileMode.Create, FileAccess.Write))
-            {
-                await stream.CopyToAsync(fileStream);
-            }
-
-            installButton.Content = "Installed";
-            RefreshModsList();
-            return true;
-        }
-        catch (Exception ex)
-        {
-            installButton.Content = originalContent;
-            installButton.IsEnabled = true;
-            MessageBox.Show($"Failed to install mod:\n{ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
-            return false;
         }
     }
 

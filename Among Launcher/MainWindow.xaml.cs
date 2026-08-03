@@ -144,44 +144,15 @@ public partial class MainWindow
             return new { type = "mod_status_response", mods = mods.Select(m => new { m.Name, m.FilePath }).ToArray() };
         });
 
-        // Handler: game_ready - launcher checks mods and downloads missing ones
-        _pipeServer.RegisterHandler("game_ready", async element =>
+        // Handler: game_ready - AmongAPI loaded and connected
+        _pipeServer.RegisterHandler("game_ready", _ =>
         {
             Dispatcher.Invoke(() =>
             {
                 if (ContentArea.Content is MainView mv)
-                    mv.UpdateModStatusText("Game loaded — checking mods...");
+                    mv.UpdateModStatusText("Game loaded — AmongAPI active");
             });
-
-            try
-            {
-                var modsInstalled = await CheckAndInstallModsAsync();
-                if (modsInstalled > 0)
-                {
-                    LogDebug($"[Launcher] {modsInstalled} mods installed, requesting restart...");
-                    Dispatcher.Invoke(() =>
-                    {
-                        if (ContentArea.Content is MainView mv)
-                            mv.UpdateModStatusText($"Installed {modsInstalled} mods — restarting...");
-                    });
-                    await _pipeServer.BroadcastMessageAsync("restart");
-                    return new { type = "game_ready_ack", restart = true, modsInstalled };
-                }
-                else
-                {
-                    Dispatcher.Invoke(() =>
-                    {
-                        if (ContentArea.Content is MainView mv)
-                            mv.UpdateModStatusText("All mods installed — AmongAPI active");
-                    });
-                    return new { type = "game_ready_ack", restart = false, modsInstalled = 0 };
-                }
-            }
-            catch (Exception ex)
-            {
-                LogDebug($"[Launcher] Error checking mods: {ex.Message}");
-                return new { type = "game_ready_ack", restart = false, error = ex.Message };
-            }
+            return Task.FromResult<object?>(new { type = "game_ready_ack", restart = false });
         });
 
         _pipeServer.Start();
@@ -193,7 +164,80 @@ public partial class MainWindow
         if (!empty)
             LoadSavedAvatar();
 
-        Loaded += async (_, _) => await _pipeServer.BroadcastMessageAsync("launcher_ready");
+        // Register custom URI protocol and check for a deep-link payload
+        Services.DeepLinkHandler.RegisterProtocol();
+        Loaded += async (_, _) =>
+        {
+            await _pipeServer.BroadcastMessageAsync("launcher_ready");
+            HandleDeepLink();
+        };
+    }
+
+    private void HandleDeepLink()
+    {
+        var deepLink = Services.DeepLinkHandler.FindDeepLinkArgument();
+        if (deepLink == null) return;
+
+        var requests = Services.DeepLinkHandler.Parse(deepLink);
+        if (requests.Count == 0) return;
+
+        LogDebug($"[Launcher] Deep link detected with {requests.Count} mods.");
+
+        var moddedPath = Dispatcher.Invoke(() => GetModdedPath());
+        if (string.IsNullOrEmpty(moddedPath))
+        {
+            var missingModal = new ConfirmationModal();
+            missingModal.Configure(
+                "Modded Among Us is not installed yet.\n\nPlease install BepInEx first, then retry the link.",
+                "OK");
+            missingModal.Confirmed += (_, _) => ModalOverlay.Hide();
+            ModalOverlay.Show("Downloading Required Mods", missingModal);
+            return;
+        }
+
+        ShowDownloadModsModal(moddedPath, requests);
+    }
+
+    private void ShowDownloadModsModal(string moddedPath, List<Services.ModDownloadRequest> requests)
+    {
+        var downloadModal = new DownloadModsModal(moddedPath, requests);
+
+        downloadModal.AllComplete += (_, success) => Dispatcher.Invoke(() =>
+            HandleDownloadResult(success, moddedPath, requests));
+
+        ModalOverlay.Show("Downloading Required Mods", downloadModal);
+        _ = downloadModal.StartAsync();
+    }
+
+    private void HandleDownloadResult(bool success, string moddedPath, List<Services.ModDownloadRequest> requests)
+    {
+        if (success)
+        {
+            ModalOverlay.Hide();
+            _mainView.LaunchGame();
+            return;
+        }
+
+        // Pause auto-launch and offer Retry / Launch Anyway
+        var retryModal = new ConfirmationModal();
+        retryModal.Configure(
+            "One or more mods failed to download.\n\nYou can retry the download or launch the game anyway.",
+            "Launch Anyway",
+            isDanger: false);
+
+        retryModal.Confirmed += (_, _) =>
+        {
+            ModalOverlay.Hide();
+            _mainView.LaunchGame();
+        };
+
+        retryModal.Cancelled += (_, _) =>
+        {
+            ModalOverlay.Hide();
+            ShowDownloadModsModal(moddedPath, requests);
+        };
+
+        ModalOverlay.Show("Download Failed", retryModal);
     }
 
     private string? GetModdedPath()
@@ -257,79 +301,6 @@ public partial class MainWindow
                     mv.LaunchGame();
             });
         }
-    }
-
-    private ModManifest? LoadManifest()
-    {
-        try
-        {
-            var assembly = System.Reflection.Assembly.GetExecutingAssembly();
-            var stream = assembly.GetManifestResourceStream("manifest.json");
-            if (stream == null) return null;
-
-            using var reader = new StreamReader(stream);
-            var json = reader.ReadToEnd();
-            return JsonSerializer.Deserialize<ModManifest>(json);
-        }
-        catch (Exception ex)
-        {
-            LogDebug($"[Launcher] Failed to load manifest: {ex.Message}");
-            return null;
-        }
-    }
-
-    private async Task<int> CheckAndInstallModsAsync()
-    {
-        var manifest = LoadManifest();
-        if (manifest == null || manifest.Mods.Count == 0)
-        {
-            LogDebug("[Launcher] No manifest or no mods defined.");
-            return 0;
-        }
-
-        var moddedPath = Dispatcher.Invoke(() => GetModdedPath());
-        if (string.IsNullOrEmpty(moddedPath))
-        {
-            LogDebug("[Launcher] Modded Among Us not installed.");
-            return 0;
-        }
-
-        var pluginsDir = Path.Combine(moddedPath, "BepInEx", "plugins");
-        Directory.CreateDirectory(pluginsDir);
-
-        var installed = 0;
-        foreach (var mod in manifest.Mods)
-        {
-            var destPath = Path.Combine(pluginsDir, mod.FileName);
-            if (File.Exists(destPath) && new FileInfo(destPath).Length > 0)
-            {
-                LogDebug($"[Launcher] {mod.FileName} already installed, skipping.");
-                continue;
-            }
-
-            LogDebug($"[Launcher] Installing {mod.FileName} from {mod.Url}");
-            try
-            {
-                await DownloadModAsync(mod.Id, mod.Url, destPath);
-                installed++;
-                LogDebug($"[Launcher] Installed: {mod.FileName}");
-            }
-            catch (Exception ex)
-            {
-                LogDebug($"[Launcher] Failed to install {mod.FileName}: {ex.Message}");
-            }
-        }
-
-        if (installed > 0)
-        {
-            Dispatcher.Invoke(() =>
-            {
-                if (ContentArea.Content is MainView mv)
-                    mv.RefreshModsList();
-            });
-        }
-
-        return installed;
     }
 
     private void NavButton_Click(object sender, RoutedEventArgs e)

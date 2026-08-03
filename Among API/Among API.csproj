@@ -21,8 +21,4 @@
     <PackageReference Include="BepInEx.PluginInfoProps" Version="2.*" />
   </ItemGroup>
 
-  <ItemGroup>
-    <EmbeddedResource Include="Data\manifest.json" LogicalName="manifest.json" />
-  </ItemGroup>
-
 </Project>

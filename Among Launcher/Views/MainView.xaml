@@ -122,10 +122,6 @@
                             <Button x:Name="ImportLocalModButton" Content="Import Local Mod (.dll)"
                                     Click="ImportLocalMod_Click"
                                     Style="{StaticResource SecondaryButton}"
-                                    Height="36" HorizontalAlignment="Stretch" Margin="0,0,0,4"/>
-                            <Button x:Name="InstallPresetModButton" Content="Install Preset Mod"
-                                    Click="InstallPresetMod_Click"
-                                    Style="{StaticResource SecondaryButton}"
                                     Height="36" HorizontalAlignment="Stretch"/>
                         </StackPanel>
                     </Border>
