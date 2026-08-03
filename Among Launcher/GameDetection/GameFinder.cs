@@ -58,28 +58,100 @@ public static class GameFinder
     {
         try
         {
+            var manifestsDir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+                "Epic", "EpicGamesLauncher", "Data", "Manifests");
+
+            if (Directory.Exists(manifestsDir))
+            {
+                var manifestFound = false;
+                foreach (var manifestFile in Directory.GetFiles(manifestsDir, "*.item"))
+                {
+                    try
+                    {
+                        var json = File.ReadAllText(manifestFile);
+                        var item = System.Text.Json.JsonDocument.Parse(json).RootElement;
+
+                        var displayName = GetString(item, "DisplayName");
+                        var installLocation = GetString(item, "InstallLocation");
+
+                        var matchesName = displayName != null &&
+                            displayName.Equals("Among Us", StringComparison.OrdinalIgnoreCase);
+                        var matchesPath = installLocation != null &&
+                            installLocation.EndsWith("Among Us", StringComparison.OrdinalIgnoreCase);
+
+                        if (matchesName || matchesPath)
+                        {
+                            manifestFound = true;
+                            if (installLocation != null)
+                            {
+                                var direct = Path.Combine(installLocation, AmongUsExe);
+                                if (File.Exists(direct))
+                                {
+                                    return new GameSearchResult
+                                    {
+                                        Path = installLocation,
+                                        Storefront = Storefront.Epic
+                                    };
+                                }
+
+                                var nested = Path.Combine(installLocation, AmongUsFolder, AmongUsExe);
+                                if (File.Exists(nested))
+                                {
+                                    return new GameSearchResult
+                                    {
+                                        Path = Path.Combine(installLocation, AmongUsFolder),
+                                        Storefront = Storefront.Epic
+                                    };
+                                }
+                            }
+                        }
+                    }
+                    catch
+                    {
+                        // Corrupted .item file — skip and continue.
+                    }
+                }
+
+                if (manifestFound)
+                {
+                    return new GameSearchResult { Storefront = Storefront.Epic, DetectedButUnavailable = true };
+                }
+            }
+        }
+        catch
+        {
+            // Manifests dir unreadable — fall through to secondary checks.
+        }
+
+        // Existing secondary checks: GameUserSettings.ini DefaultInstallLocation, then fallback paths.
+        try
+        {
             var configPath = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "Epic", "EpicGamesLauncher", "Saved", "Config", "Windows", "GameUserSettings.ini");
 
-            if (!File.Exists(configPath)) return new GameSearchResult();
-
-            var lines = File.ReadAllLines(configPath);
-            foreach (var line in lines)
+            if (File.Exists(configPath))
             {
-                if (!line.StartsWith("DefaultInstallLocation=", StringComparison.OrdinalIgnoreCase))
-                    continue;
+                var lines = File.ReadAllLines(configPath);
+                foreach (var line in lines)
+                {
+                    if (!line.StartsWith("DefaultInstallLocation=", StringComparison.OrdinalIgnoreCase))
+                        continue;
 
-                var installDir = line.Substring("DefaultInstallLocation=".Length).Trim().Trim('"');
-                if (string.IsNullOrEmpty(installDir)) continue;
+                    var installDir = line.Substring("DefaultInstallLocation=".Length).Trim().Trim('"');
+                    if (string.IsNullOrEmpty(installDir)) continue;
 
-                var gamePath = Path.Combine(installDir, AmongUsFolder, AmongUsExe);
-                if (File.Exists(gamePath))
-                    return new GameSearchResult
+                    var gamePath = Path.Combine(installDir, AmongUsFolder, AmongUsExe);
+                    if (File.Exists(gamePath))
                     {
-                        Path = Path.GetDirectoryName(gamePath),
-                        Storefront = Storefront.Epic
-                    };
+                        return new GameSearchResult
+                        {
+                            Path = Path.Combine(installDir, AmongUsFolder),
+                            Storefront = Storefront.Epic
+                        };
+                    }
+                }
             }
         }
         catch { }
@@ -94,10 +166,19 @@ public static class GameFinder
         foreach (var path in epicFallback)
         {
             if (File.Exists(Path.Combine(path, AmongUsExe)))
+            {
                 return new GameSearchResult { Path = path, Storefront = Storefront.Epic };
+            }
         }
 
         return new GameSearchResult();
+    }
+
+    private static string? GetString(System.Text.Json.JsonElement element, string propertyName)
+    {
+        if (element.TryGetProperty(propertyName, out var value) && value.ValueKind == System.Text.Json.JsonValueKind.String)
+            return value.GetString();
+        return null;
     }
 
     private static GameSearchResult FindAmongUsXbox()
