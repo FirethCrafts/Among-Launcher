@@ -1,41 +1,75 @@
 using System.IO.Compression;
-using System.Reflection;
 
 namespace AmongLauncher.Installer;
 
 public class BepInExInstaller
 {
+    private const string BepInExDownloadUrl =
+        "https://github.com/BepInEx/BepInEx/releases/download/v6.0.0-pre.2/BepInEx-Unity.IL2CPP-win-x64-6.0.0-pre.2.zip";
+
     public async Task InstallAsync(string gamePath, IProgress<int>? progress = null)
     {
-        progress?.Report(0);
-
-        // Extract BepInEx from embedded resource
-        var assembly = Assembly.GetExecutingAssembly();
-        var resourceName = "AmongLauncher.Resources.BepInEx.zip";
-
-        using var stream = assembly.GetManifestResourceStream(resourceName);
-        if (stream == null)
-            throw new FileNotFoundException("BepInEx resource not found in assembly.");
-
         var tempZip = Path.Combine(Path.GetTempPath(), "BepInEx.zip");
 
         try
         {
-            // Write stream to temp file
-            await using (var fileStream = new FileStream(tempZip, FileMode.Create, FileAccess.Write, FileShare.None))
+            // Download BepInEx
+            using (var httpClient = new HttpClient())
             {
-                await stream.CopyToAsync(fileStream);
+                httpClient.Timeout = TimeSpan.FromMinutes(5);
+
+                var response = await httpClient.GetAsync(BepInExDownloadUrl,
+                    HttpCompletionOption.ResponseHeadersRead);
+
+                response.EnsureSuccessStatusCode();
+
+                var totalBytes = response.Content.Headers.ContentLength ?? -1L;
+                var canReportProgress = totalBytes != -1;
+
+                using (var contentStream = await response.Content.ReadAsStreamAsync())
+                using (var fileStream = new FileStream(tempZip, FileMode.Create, FileAccess.Write, FileShare.None))
+                {
+                    var buffer = new byte[8192];
+                    long totalRead = 0;
+                    int bytesRead;
+
+                    while ((bytesRead = await contentStream.ReadAsync(buffer)) > 0)
+                    {
+                        await fileStream.WriteAsync(buffer.AsMemory(0, bytesRead));
+                        totalRead += bytesRead;
+
+                        if (canReportProgress)
+                        {
+                            var percent = (int)((double)totalRead / totalBytes * 100);
+                            progress?.Report(percent);
+                        }
+                    }
+                }
             }
 
-            progress?.Report(50);
+            progress?.Report(100);
 
-            // Extract to game folder
+            // Extract each entry individually for reliability
             await Task.Run(() =>
             {
-                ZipFile.ExtractToDirectory(tempZip, gamePath, overwriteFiles: true);
-            });
+                using var archive = ZipFile.OpenRead(tempZip);
+                foreach (var entry in archive.Entries)
+                {
+                    if (string.IsNullOrEmpty(entry.Name))
+                        continue; // Skip directories
 
-            progress?.Report(100);
+                    var destPath = Path.Combine(gamePath, entry.FullName);
+                    var destDir = Path.GetDirectoryName(destPath);
+
+                    if (destDir != null && !Directory.Exists(destDir))
+                        Directory.CreateDirectory(destDir);
+
+                    if (File.Exists(destPath))
+                        File.Delete(destPath);
+
+                    entry.ExtractToFile(destPath);
+                }
+            });
         }
         finally
         {
