@@ -23,6 +23,9 @@ public partial class MainWindow
     private bool _restartRequested;
     private string? _moddedPath;
     private readonly Services.Lobby.LobbyBackendClient _backend;
+    private readonly Services.Lobby.LobbyWebSocketClient _ws;
+    private readonly Services.Lobby.LobbyCommandService _commands;
+    private Services.Lobby.LobbyHeartbeatService? _heartbeat;
     private string _userId = "";
     private LobbyInfo? _activeLobby;
     private TaskCompletionSource<bool>? _gameReadyTcs;
@@ -37,6 +40,18 @@ public partial class MainWindow
         InitializeComponent();
         _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("AmongUsLauncher");
         _backend = new Services.Lobby.LobbyBackendClient(_httpClient, Config.LauncherConfig.Load());
+        _ws = new Services.Lobby.LobbyWebSocketClient(Config.LauncherConfig.Load());
+        _commands = new Services.Lobby.LobbyCommandService(_ws,
+            killGame: () =>
+            {
+                Dispatcher.Invoke(() =>
+                {
+                    _mainView.StopGame();
+                    _mainView.UpdateModStatusText("Kicked from lobby");
+                });
+                return Task.CompletedTask;
+            },
+            rejoin: cmd => RejoinAsync(cmd));
 
         _mainView.RequestShowWelcome += (_, _) => ShowView(_welcomeView, showSidebar: false);
         _mainView.GameStateChanged += OnGameStateChanged;
@@ -179,6 +194,7 @@ public partial class MainWindow
             _activeLobby = info;
             await _backend.CreateLobbyAsync(new CreateLobbyRequest(info.Code, info.Region, info.RegionIp, info.RegionPort, info.ModSet, _userId), CancellationToken.None);
             StartHeartbeat(info.Code);
+            _ = _ws.ConnectAsync(info.Code, CancellationToken.None);
             return new { type = "lobby_created_ack" };
         });
 
@@ -188,6 +204,7 @@ public partial class MainWindow
             var code = element.GetProperty("payload").GetProperty("code").GetString() ?? "";
             if (_activeLobby != null) await _backend.DisbandAsync(code, CancellationToken.None);
             StopHeartbeat();
+            _ws.Disconnect();
             _activeLobby = null;
             return new { type = "lobby_closed_ack" };
         });
@@ -282,70 +299,22 @@ public partial class MainWindow
                     mv.UpdateModStatusText($"Joining lobby {code}...");
             });
 
-            var moddedPath = GetModdedPath();
-            if (string.IsNullOrEmpty(moddedPath) ||
-                !File.Exists(Path.Combine(moddedPath, "winhttp.dll")))
+            var lobby = await _backend.GetLobbyAsync(code, CancellationToken.None);
+            if (lobby == null)
             {
-                LogDebug("[Launcher] Join aborted: modded Among Us not installed");
+                LogDebug("[Launcher] Join failed: lobby not found");
                 Dispatcher.Invoke(() =>
                 {
                     if (ContentArea.Content is MainView mv)
-                        mv.UpdateModStatusText("Modded Among Us is not installed. Run one-click setup first.");
+                        mv.UpdateModStatusText("Lobby not found");
                 });
                 return;
             }
 
-            var modSetSync = new Services.Lobby.ModSetSync(
-                Path.Combine(moddedPath, "BepInEx", "plugins"),
-                (modId, url, dest) => DownloadModWithRetryAsync(modId, url, dest));
-
-            var joinService = new Services.Lobby.LobbyJoinService(
-                getLobby: (lobbyCode, ct) => _backend.GetLobbyAsync(lobbyCode, ct),
-                ensureSetup: _ => Task.FromResult(
-                    GetModdedPath() != null &&
-                    File.Exists(Path.Combine(GetModdedPath()!, "winhttp.dll"))),
-                killGame: async () =>
-                {
-                    Dispatcher.Invoke(() =>
-                    {
-                        if (ContentArea.Content is MainView mv)
-                            mv.StopGame();
-                    });
-                    var waited = 0;
-                    while (IsAmongUsRunning() && waited < 30)
-                    {
-                        await Task.Delay(500);
-                        waited++;
-                    }
-                },
-                launchGame: () =>
-                {
-                    _gameReadyTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-                    Dispatcher.Invoke(() =>
-                    {
-                        if (ContentArea.Content is MainView mv)
-                            mv.LaunchGame();
-                    });
-                    return Task.CompletedTask;
-                },
-                waitForGameReady: () => WaitForGameReadyAsync(),
-                sendJoinLobby: lobby => _pipeServer.BroadcastMessageAsync("join_lobby",
-                    new { lobby.Code, lobby.Region, lobby.RegionIp, lobby.RegionPort }),
-                modSetSync);
-
-            var outcome = await joinService.JoinLobbyAsync(code, CancellationToken.None);
-            if (!outcome.Started)
-            {
-                LogDebug($"[Launcher] Join failed: {outcome.Error}");
-                Dispatcher.Invoke(() =>
-                {
-                    if (ContentArea.Content is MainView mv)
-                        mv.UpdateModStatusText(outcome.Error ?? "Join failed");
-                });
-            }
-            else
+            if (await JoinPipelineAsync(lobby))
             {
                 LogDebug($"[Launcher] Join succeeded for lobby {code}");
+                _ = _ws.ConnectAsync(code, CancellationToken.None);
             }
         }
         catch (Exception ex)
@@ -361,6 +330,106 @@ public partial class MainWindow
         {
             _joining = false;
         }
+    }
+
+    private async Task<bool> JoinPipelineAsync(LobbyInfo lobby)
+    {
+        var moddedPath = GetModdedPath();
+        if (string.IsNullOrEmpty(moddedPath) ||
+            !File.Exists(Path.Combine(moddedPath, "winhttp.dll")))
+        {
+            LogDebug("[Launcher] Join aborted: modded Among Us not installed");
+            Dispatcher.Invoke(() =>
+            {
+                if (ContentArea.Content is MainView mv)
+                    mv.UpdateModStatusText("Modded Among Us is not installed. Run one-click setup first.");
+            });
+            return false;
+        }
+
+        var modSetSync = new Services.Lobby.ModSetSync(
+            Path.Combine(moddedPath, "BepInEx", "plugins"),
+            (modId, url, dest) => DownloadModWithRetryAsync(modId, url, dest));
+
+        var joinService = new Services.Lobby.LobbyJoinService(
+            getLobby: (_, _) => Task.FromResult<LobbyInfo?>(lobby),
+            ensureSetup: _ => Task.FromResult(
+                GetModdedPath() != null &&
+                File.Exists(Path.Combine(GetModdedPath()!, "winhttp.dll"))),
+            killGame: async () =>
+            {
+                Dispatcher.Invoke(() =>
+                {
+                    if (ContentArea.Content is MainView mv)
+                        mv.StopGame();
+                });
+                var waited = 0;
+                while (IsAmongUsRunning() && waited < 30)
+                {
+                    await Task.Delay(500);
+                    waited++;
+                }
+            },
+            launchGame: () =>
+            {
+                _gameReadyTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                Dispatcher.Invoke(() =>
+                {
+                    if (ContentArea.Content is MainView mv)
+                        mv.LaunchGame();
+                });
+                return Task.CompletedTask;
+            },
+            waitForGameReady: () => WaitForGameReadyAsync(),
+            sendJoinLobby: l => _pipeServer.BroadcastMessageAsync("join_lobby",
+                new { l.Code, l.Region, l.RegionIp, l.RegionPort }),
+            modSetSync);
+
+        var outcome = await joinService.JoinLobbyAsync(lobby.Code, CancellationToken.None);
+        if (!outcome.Started)
+        {
+            LogDebug($"[Launcher] Join failed: {outcome.Error}");
+            Dispatcher.Invoke(() =>
+            {
+                if (ContentArea.Content is MainView mv)
+                    mv.UpdateModStatusText(outcome.Error ?? "Join failed");
+            });
+        }
+        return outcome.Started;
+    }
+
+    private async Task RejoinAsync(Services.Lobby.RejoinCommand cmd)
+    {
+        LogDebug($"[Launcher] Rejoin command received for lobby {cmd.LobbyCode}");
+
+        Dispatcher.Invoke(() =>
+        {
+            if (ContentArea.Content is MainView mv)
+                mv.StopGame();
+        });
+        var waited = 0;
+        while (IsAmongUsRunning() && waited < 30)
+        {
+            await Task.Delay(500);
+            waited++;
+        }
+
+        Dispatcher.Invoke(() =>
+        {
+            if (ContentArea.Content is MainView mv)
+                mv.UpdateModStatusText($"Rejoining lobby {cmd.LobbyCode}...");
+        });
+
+        var lobby = new LobbyInfo
+        {
+            Code = cmd.LobbyCode,
+            Region = cmd.Region,
+            RegionIp = cmd.RegionIp,
+            RegionPort = cmd.RegionPort,
+            ModSet = cmd.ModSet
+        };
+
+        await JoinPipelineAsync(lobby);
     }
 
     private async Task<bool> WaitForGameReadyAsync()
@@ -401,9 +470,13 @@ public partial class MainWindow
         return Task.FromResult<object?>(null);
     }
 
-    private void StartHeartbeat(string code) => LogDebug($"[Launcher] Heartbeat started for {code} (wired in later task)");
+    private void StartHeartbeat(string code)
+    {
+        _heartbeat ??= new Services.Lobby.LobbyHeartbeatService(_backend.HeartbeatAsync);
+        _heartbeat.Start(code, _userId);
+    }
 
-    private void StopHeartbeat() => LogDebug("[Launcher] Heartbeat stopped");
+    private void StopHeartbeat() => _heartbeat?.Stop();
 
     private void ShowDownloadModsModal(string moddedPath, List<Services.ModDownloadRequest> requests)
     {
