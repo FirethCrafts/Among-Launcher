@@ -22,7 +22,6 @@ public partial class MainWindow
     private readonly object _pendingLock = new();
     private bool _restartRequested;
     private string? _moddedPath;
-    private readonly AmongLauncher.Game.GameProcessManager _gameManager = new();
     private readonly Services.Lobby.LobbyBackendClient _backend;
     private string _userId = "";
     private LobbyInfo? _activeLobby;
@@ -313,7 +312,7 @@ public partial class MainWindow
                             mv.StopGame();
                     });
                     var waited = 0;
-                    while (_gameManager.IsGameRunning() && waited < 30)
+                    while (IsAmongUsRunning() && waited < 30)
                     {
                         await Task.Delay(500);
                         waited++;
@@ -349,6 +348,15 @@ public partial class MainWindow
                 LogDebug($"[Launcher] Join succeeded for lobby {code}");
             }
         }
+        catch (Exception ex)
+        {
+            LogDebug($"[Launcher] Join failed with exception: {ex}");
+            Dispatcher.Invoke(() =>
+            {
+                if (ContentArea.Content is MainView mv)
+                    mv.UpdateModStatusText($"Join failed: {ex.Message}");
+            });
+        }
         finally
         {
             _joining = false;
@@ -363,15 +371,15 @@ public partial class MainWindow
         var readyTask = _gameReadyTcs.Task;
         var timeout = Task.Delay(90_000);
         // Crash guard: fire if the game process is observed running and then dies.
-        // MainWindow's manager only tracks processes it started itself; the game is
-        // launched via MainView, so we bound the poll and only treat a running-then-
-        // exited transition as a crash.
+        // The game is launched via MainView's own manager, so we poll the process
+        // table and only treat a running-then-exited transition as a crash. If the
+        // game never starts, the 90s timeout still catches it.
         var exited = Task.Run(async () =>
         {
             var seenRunning = false;
             for (var i = 0; i < 180; i++)
             {
-                if (_gameManager.IsGameRunning()) seenRunning = true;
+                if (IsAmongUsRunning()) seenRunning = true;
                 else if (seenRunning) return true;
                 await Task.Delay(500);
             }
@@ -690,6 +698,9 @@ public partial class MainWindow
         return Directory.GetFiles(dir).Length == 0 &&
                Directory.GetDirectories(dir).Length == 0;
     }
+
+    private static bool IsAmongUsRunning() =>
+        System.Diagnostics.Process.GetProcessesByName("Among Us").Length > 0;
 
     private static void LogDebug(string message)
     {
