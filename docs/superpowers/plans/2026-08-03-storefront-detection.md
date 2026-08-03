@@ -129,7 +129,7 @@ var storefront = result.Storefront;
 _storefront = storefront ?? Storefront.Steam;
 ```
 
-Add the placeholder modal method (Task 5 replaces the body with the real modal):
+Add the placeholder modal method (Task 4 replaces the body with the real modal):
 
 ```csharp
 private void ShowMsStoreAccessModal(Storefront? storefront)
@@ -144,17 +144,63 @@ private void ShowMsStoreAccessModal(Storefront? storefront)
 }
 ```
 
-`MsStoreAccessModal` does not exist yet, so the build is expected to fail at this step. That's OK — Task 5 creates it.
+Create a minimal stub `MsStoreAccessModal` so the build stays green (Task 4 replaces it with the real implementation):
 
-- [ ] **Step 5: Verify the refactor compiles except for the missing modal**
+`Among Launcher/Views/MsStoreAccessModal.xaml`:
+```xml
+<UserControl x:Class="AmongLauncher.Views.MsStoreAccessModal"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             mc:Ignorable="d"
+             d:DesignHeight="200" d:DesignWidth="460">
+    <StackPanel>
+        <TextBlock x:Name="ExplanationText" TextWrapping="Wrap" Margin="0,0,0,16"/>
+        <TextBlock x:Name="AnswerText" TextWrapping="Wrap" Margin="0,0,0,24"/>
+        <Button x:Name="OkButton" Content="OK" Click="OkButton_Click"
+                HorizontalAlignment="Right" Height="36" Padding="24,8"/>
+    </StackPanel>
+</UserControl>
+```
 
-Run: `dotnet build "C:\Users\meowfire\RiderProjects\Among Launcher\Among Launcher\Among Launcher.csproj"` (after killing running processes)
-Expected: errors only for `MsStoreAccessModal` / `Configure` (namespace `AmongLauncher.Views`); no other errors.
+`Among Launcher/Views/MsStoreAccessModal.xaml.cs`:
+```csharp
+using System.Windows;
+using System.Windows.Controls;
+using AmongLauncher.GameDetection;
+
+namespace AmongLauncher.Views;
+
+public partial class MsStoreAccessModal : UserControl
+{
+    public MsStoreAccessModal()
+    {
+        InitializeComponent();
+    }
+
+    public void Configure(Storefront? storefront)
+    {
+        // Stub — Task 4 fills in the real text.
+    }
+
+    private void OkButton_Click(object sender, RoutedEventArgs e)
+    {
+        var mainWindow = Window.GetWindow(this) as MainWindow;
+        mainWindow?.ModalOverlayControl.Hide();
+    }
+}
+```
+
+- [ ] **Step 5: Verify the refactor compiles**
+
+Run: `dotnet build "C:\Users\meowfire\RiderProjects\Among Launcher\Among Launcher\Among Launcher.csproj"`
+Expected: 0 errors.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add "Among Launcher/GameDetection/GameSearchResult.cs" "Among Launcher/GameDetection/GameFinder.cs" "Among Launcher/GameDetection/AmongUsLocator.cs" "Among Launcher/Views/MainView.xaml.cs"
+git add "Among Launcher/GameDetection/GameSearchResult.cs" "Among Launcher/GameDetection/GameFinder.cs" "Among Launcher/GameDetection/AmongUsLocator.cs" "Among Launcher/Views/MainView.xaml.cs" "Among Launcher/Views/MsStoreAccessModal.xaml" "Among Launcher/Views/MsStoreAccessModal.xaml.cs"
 git commit -m "refactor: GameSearchResult record replaces storefront tuple"
 ```
 
@@ -451,8 +497,8 @@ git commit -m "feat: detect Xbox/MS Store Among Us across all fixed drives"
 ### Task 4: `MsStoreAccessModal` UserControl
 
 **Files:**
-- Create: `Among Launcher/Views/MsStoreAccessModal.xaml`
-- Create: `Among Launcher/Views/MsStoreAccessModal.xaml.cs`
+- Create: `Among Launcher/Views/MsStoreAccessModal.xaml` (replace Task 1 stub)
+- Create: `Among Launcher/Views/MsStoreAccessModal.xaml.cs` (replace Task 1 stub)
 
 **Interfaces:**
 - Consumes: `Storefront` enum; existing `TextBody` brush and `StopButton`/`SecondaryButton` styles from `App.xaml`.
@@ -562,7 +608,7 @@ public partial class MsStoreAccessModal : UserControl
 - [ ] **Step 3: Verify build passes**
 
 Run: `dotnet build "C:\Users\meowfire\RiderProjects\Among Launcher\Among Launcher\Among Launcher.csproj"`
-Expected: 0 errors — this also resolves Task 1's missing-modal errors.
+Expected: 0 errors — this replaces the Task 1 stub with the real modal.
 
 - [ ] **Step 4: Smoke test**
 
