@@ -22,6 +22,12 @@ public partial class MainWindow
     private readonly object _pendingLock = new();
     private bool _restartRequested;
     private string? _moddedPath;
+    private readonly AmongLauncher.Game.GameProcessManager _gameManager = new();
+    private readonly Services.Lobby.LobbyBackendClient _backend;
+    private string _userId = "";
+    private LobbyInfo? _activeLobby;
+    private TaskCompletionSource<bool>? _gameReadyTcs;
+    private bool _joining;
 
     public ModalOverlay ModalOverlayControl => ModalOverlay;
 
@@ -31,6 +37,7 @@ public partial class MainWindow
     {
         InitializeComponent();
         _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("AmongUsLauncher");
+        _backend = new Services.Lobby.LobbyBackendClient(_httpClient, Config.LauncherConfig.Load());
 
         _mainView.RequestShowWelcome += (_, _) => ShowView(_welcomeView, showSidebar: false);
         _mainView.GameStateChanged += OnGameStateChanged;
@@ -149,12 +156,61 @@ public partial class MainWindow
         // Handler: game_ready - AmongAPI loaded and connected
         _pipeServer.RegisterHandler("game_ready", _ =>
         {
+            _gameReadyTcs?.TrySetResult(true);
             Dispatcher.Invoke(() =>
             {
                 if (ContentArea.Content is MainView mv)
                     mv.UpdateModStatusText("Game loaded — AmongAPI active");
             });
             return Task.FromResult<object?>(new { type = "game_ready_ack", restart = false });
+        });
+
+        // Handler: AmongAPI created a lobby in-game - mirror it to the backend
+        _pipeServer.RegisterHandler("lobby_created", async element =>
+        {
+            var p = element.GetProperty("payload");
+            var info = new LobbyInfo
+            {
+                Code = p.GetProperty("code").GetString() ?? "",
+                Region = p.GetProperty("region").GetString() ?? "",
+                RegionIp = p.GetProperty("regionIp").GetString() ?? "",
+                RegionPort = p.TryGetProperty("regionPort", out var rp) ? rp.GetInt32() : 22023,
+                ModSet = GetInstalledModSet()
+            };
+            _activeLobby = info;
+            await _backend.CreateLobbyAsync(new CreateLobbyRequest(info.Code, info.Region, info.RegionIp, info.RegionPort, info.ModSet, _userId), CancellationToken.None);
+            StartHeartbeat(info.Code);
+            return new { type = "lobby_created_ack" };
+        });
+
+        // Handler: AmongAPI closed a lobby - disband it on the backend
+        _pipeServer.RegisterHandler("lobby_closed", async element =>
+        {
+            var code = element.GetProperty("payload").GetProperty("code").GetString() ?? "";
+            if (_activeLobby != null) await _backend.DisbandAsync(code, CancellationToken.None);
+            StopHeartbeat();
+            _activeLobby = null;
+            return new { type = "lobby_closed_ack" };
+        });
+
+        _pipeServer.RegisterHandler("player_joined", ForwardPlayerChange);
+        _pipeServer.RegisterHandler("player_left", ForwardPlayerChange);
+
+        // Handler: result of a join_lobby broadcast (surfaces errors to the UI)
+        _pipeServer.RegisterHandler("join_lobby_result", async element =>
+        {
+            var p = element.GetProperty("payload");
+            var ok = p.GetProperty("success").GetBoolean();
+            if (!ok)
+            {
+                var error = p.TryGetProperty("error", out var e) ? e.GetString() : "unknown error";
+                Dispatcher.Invoke(() =>
+                {
+                    if (ContentArea.Content is MainView mv)
+                        mv.UpdateModStatusText($"Join failed: {error}");
+                });
+            }
+            return null;
         });
 
         _pipeServer.Start();
@@ -184,7 +240,8 @@ public partial class MainWindow
         var join = Services.DeepLinkHandler.TryParseJoin(deepLink);
         if (join != null)
         {
-            LogDebug($"[Launcher] Join request received: code={join.Code} (join flow not wired yet)");
+            LogDebug($"[Launcher] Join request received: code={join.Code}");
+            _ = HandleJoinLinkAsync(join.Code);
             return;
         }
 
@@ -207,6 +264,138 @@ public partial class MainWindow
 
         ShowDownloadModsModal(moddedPath, requests);
     }
+
+    public async Task HandleJoinLinkAsync(string code)
+    {
+        if (_joining)
+        {
+            LogDebug("[Launcher] Join already in progress, ignoring duplicate request");
+            return;
+        }
+        _joining = true;
+
+        try
+        {
+            LogDebug($"[Launcher] Joining lobby {code}...");
+            Dispatcher.Invoke(() =>
+            {
+                if (ContentArea.Content is MainView mv)
+                    mv.UpdateModStatusText($"Joining lobby {code}...");
+            });
+
+            var moddedPath = GetModdedPath();
+            if (string.IsNullOrEmpty(moddedPath) ||
+                !File.Exists(Path.Combine(moddedPath, "winhttp.dll")))
+            {
+                LogDebug("[Launcher] Join aborted: modded Among Us not installed");
+                Dispatcher.Invoke(() =>
+                {
+                    if (ContentArea.Content is MainView mv)
+                        mv.UpdateModStatusText("Modded Among Us is not installed. Run one-click setup first.");
+                });
+                return;
+            }
+
+            var modSetSync = new Services.Lobby.ModSetSync(
+                Path.Combine(moddedPath, "BepInEx", "plugins"),
+                (modId, url, dest) => DownloadModWithRetryAsync(modId, url, dest));
+
+            var joinService = new Services.Lobby.LobbyJoinService(
+                getLobby: (lobbyCode, ct) => _backend.GetLobbyAsync(lobbyCode, ct),
+                ensureSetup: _ => Task.FromResult(
+                    GetModdedPath() != null &&
+                    File.Exists(Path.Combine(GetModdedPath()!, "winhttp.dll"))),
+                killGame: async () =>
+                {
+                    Dispatcher.Invoke(() =>
+                    {
+                        if (ContentArea.Content is MainView mv)
+                            mv.StopGame();
+                    });
+                    var waited = 0;
+                    while (_gameManager.IsGameRunning() && waited < 30)
+                    {
+                        await Task.Delay(500);
+                        waited++;
+                    }
+                },
+                launchGame: () =>
+                {
+                    _gameReadyTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                    Dispatcher.Invoke(() =>
+                    {
+                        if (ContentArea.Content is MainView mv)
+                            mv.LaunchGame();
+                    });
+                    return Task.CompletedTask;
+                },
+                waitForGameReady: () => WaitForGameReadyAsync(),
+                sendJoinLobby: lobby => _pipeServer.BroadcastMessageAsync("join_lobby",
+                    new { lobby.Code, lobby.Region, lobby.RegionIp, lobby.RegionPort }),
+                modSetSync);
+
+            var outcome = await joinService.JoinLobbyAsync(code, CancellationToken.None);
+            if (!outcome.Started)
+            {
+                LogDebug($"[Launcher] Join failed: {outcome.Error}");
+                Dispatcher.Invoke(() =>
+                {
+                    if (ContentArea.Content is MainView mv)
+                        mv.UpdateModStatusText(outcome.Error ?? "Join failed");
+                });
+            }
+            else
+            {
+                LogDebug($"[Launcher] Join succeeded for lobby {code}");
+            }
+        }
+        finally
+        {
+            _joining = false;
+        }
+    }
+
+    private async Task<bool> WaitForGameReadyAsync()
+    {
+        if (_gameReadyTcs == null)
+            return false;
+
+        var readyTask = _gameReadyTcs.Task;
+        var timeout = Task.Delay(90_000);
+        // Crash guard: fire if the game process is observed running and then dies.
+        // MainWindow's manager only tracks processes it started itself; the game is
+        // launched via MainView, so we bound the poll and only treat a running-then-
+        // exited transition as a crash.
+        var exited = Task.Run(async () =>
+        {
+            var seenRunning = false;
+            for (var i = 0; i < 180; i++)
+            {
+                if (_gameManager.IsGameRunning()) seenRunning = true;
+                else if (seenRunning) return true;
+                await Task.Delay(500);
+            }
+            return false;
+        });
+
+        var done = await Task.WhenAny(readyTask, timeout, exited);
+        return done == readyTask && await readyTask;
+    }
+
+    private Task<object?> ForwardPlayerChange(JsonElement element)
+    {
+        var p = element.GetProperty("payload");
+        var playerName = p.TryGetProperty("playerName", out var name) ? name.GetString() : null;
+        var playerCount = p.TryGetProperty("playerCount", out var count) ? count.GetInt32() : -1;
+        LogDebug($"[Launcher] Player event: playerName={playerName}, playerCount={playerCount} (local only until a backend player endpoint exists)");
+        if (_activeLobby != null && playerCount >= 0)
+            _activeLobby.PlayerCount = playerCount;
+        return Task.FromResult<object?>(null);
+    }
+
+    private void StartHeartbeat(string code) => LogDebug($"[Launcher] Heartbeat started for {code} (wired in later task)");
+
+    private void StopHeartbeat() => LogDebug("[Launcher] Heartbeat stopped");
 
     private void ShowDownloadModsModal(string moddedPath, List<Services.ModDownloadRequest> requests)
     {
@@ -260,6 +449,37 @@ public partial class MainWindow
             "AmongLauncher", "ModdedAmongUs");
 
         return Directory.Exists(_moddedPath) ? _moddedPath : null;
+    }
+
+    private List<ModSetEntry> GetInstalledModSet()
+    {
+        var moddedPath = GetModdedPath();
+        if (string.IsNullOrEmpty(moddedPath)) return new List<ModSetEntry>();
+
+        var pluginsDir = Path.Combine(moddedPath, "BepInEx", "plugins");
+        if (!Directory.Exists(pluginsDir)) return new List<ModSetEntry>();
+
+        return Directory.GetFiles(pluginsDir, "*.dll")
+            .Select(f => new ModSetEntry { FileName = Path.GetFileName(f) })
+            .ToList();
+    }
+
+    private async Task DownloadModWithRetryAsync(string modId, string url, string destPath)
+    {
+        var delays = new[] { 250, 500, 1000, 2000, 4000 };
+        for (var i = 0; i < delays.Length; i++)
+        {
+            try
+            {
+                await DownloadModAsync(modId, url, destPath);
+                return;
+            }
+            catch (IOException) when (i < delays.Length - 1)
+            {
+                LogDebug($"[Launcher] File locked, retry {i + 1}/{delays.Length} for {destPath}");
+                await Task.Delay(delays[i]);
+            }
+        }
     }
 
     private async Task DownloadModAsync(string modId, string url, string destPath)
@@ -376,6 +596,8 @@ public partial class MainWindow
 
     private void OnLoginCompleted(object? sender, DiscordUserProfile profile)
     {
+        _userId = profile.Id;
+
         // Save avatar to config for reload on next launch
         var config = Config.LauncherConfig.Load();
         config.AvatarUrl = profile.AvatarUrl;
