@@ -133,57 +133,18 @@ public partial class MainView
 
     private async Task InstallAmongApiAsync()
     {
-        const string artifactId = "8853663758";
+        const string downloadUrl = "https://github.com/FirethCrafts/Among-Launcher/releases/latest/download/AmongApi.dll";
         var pluginsDir = Path.Combine(_moddedPath!, "BepInEx", "plugins");
         Directory.CreateDirectory(pluginsDir);
 
-        var tempZip = Path.Combine(Path.GetTempPath(), "AmongApi.zip");
+        var destPath = Path.Combine(pluginsDir, "AmongApi.dll");
 
-        try
-        {
-            // Use gh CLI which has auth stored from `gh auth login`
-            var startInfo = new System.Diagnostics.ProcessStartInfo
-            {
-                FileName = "gh",
-                Arguments = $"api repos/FirethCrafts/Among-Launcher/actions/artifacts/{artifactId}/zip",
-                RedirectStandardOutput = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            };
+        var response = await _httpClient.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead);
+        response.EnsureSuccessStatusCode();
 
-            var process = System.Diagnostics.Process.Start(startInfo);
-            if (process == null) throw new Exception("Failed to start gh CLI");
-
-            // Write to temp file, then dispose before reading
-            await using (var fs = new FileStream(tempZip, FileMode.Create, FileAccess.Write, FileShare.None))
-            {
-                await process.StandardOutput.BaseStream.CopyToAsync(fs);
-            }
-
-            await process.WaitForExitAsync();
-
-            if (process.ExitCode != 0)
-                throw new Exception($"gh CLI failed with exit code {process.ExitCode}");
-
-            // Now the file is fully written and closed - safe to open
-            using var archive = System.IO.Compression.ZipFile.OpenRead(tempZip);
-            foreach (var entry in archive.Entries)
-            {
-                if (entry.Name.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
-                {
-                    var destPath = Path.Combine(pluginsDir, entry.Name);
-                    entry.ExtractToFile(destPath, overwrite: true);
-                    break;
-                }
-            }
-        }
-        finally
-        {
-            if (File.Exists(tempZip))
-            {
-                try { File.Delete(tempZip); } catch { }
-            }
-        }
+        using var stream = await response.Content.ReadAsStreamAsync();
+        using var fileStream = new FileStream(destPath, FileMode.Create, FileAccess.Write, FileShare.None);
+        await stream.CopyToAsync(fileStream);
     }
 
     private void PlayButton_Click(object sender, RoutedEventArgs e)
@@ -252,6 +213,15 @@ public partial class MainView
         {
             MessageBox.Show("Failed to copy path to clipboard.", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
         }
+    }
+
+    private void LogsButton_Click(object sender, RoutedEventArgs e)
+    {
+        var mainWindow = Window.GetWindow(this) as MainWindow;
+        if (mainWindow == null) return;
+
+        var logViewer = new LogViewerModal();
+        mainWindow.ModalOverlayControl.Show("IPC Logs", logViewer);
     }
 
     private void SaveLaunchOptions_Click(object sender, RoutedEventArgs e)

@@ -55,6 +55,10 @@
                             Margin="0,0,12,0"/>
                     <Button x:Name="CopyPathButton" Content="COPY PATH"
                             Click="CopyPathButton_Click"
+                            Style="{StaticResource SecondaryButton}"
+                            Margin="0,0,12,0"/>
+                    <Button x:Name="LogsButton" Content="LOGS"
+                            Click="LogsButton_Click"
                             Style="{StaticResource SecondaryButton}"/>
                 </StackPanel>
             </StackPanel>
