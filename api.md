@@ -106,30 +106,11 @@ Tells the plugin that a player was kicked. The plugin raises its `KickRequested`
 
 **Response:** none.
 
-#### `mod_installed` ✅ (broadcast)
-Announces that a mod DLL finished (or failed) downloading. The launcher sends this after processing an `install_mod` request.
+#### `mod_installed` ❌ (removed)
+Announced that a mod DLL finished downloading. Removed — it was the completion notice for the removed `install_mod` flow; the launcher no longer broadcasts it.
 
-```json
-{
-  "type": "mod_installed",
-  "id": "m3n4o5p6",
-  "timestamp": 1735689600000,
-  "payload": {
-    "modId": "aunlocker",
-    "fileName": "AUnlocker.dll",
-    "success": true
-  }
-}
-```
-
-On failure `success` is `false` and an `error` string is included.
-
-**Response:** none.
-
-#### `restart` 🔶
-Special-case message. On receipt the plugin's `PipeClient` stops its read loop and disconnects — the launcher is about to kill the game. No payload. The launcher does not currently send this (it kills and relaunches the game itself after `restart_after_install`).
-
-**Response:** none.
+#### `restart` ❌ (removed)
+Special-case message that made the plugin's `PipeClient` stop its read loop. Removed — the launcher never sent it and the plugin's read loop no longer special-cases it.
 
 ---
 
@@ -218,99 +199,26 @@ Result of a `join_lobby` request, surfaced to the launcher UI on failure.
 
 **Response:** none.
 
-#### `install_mod` 🔶
-Requests the launcher to download and install a mod DLL. Works regardless of game state — the launcher downloads to `BepInEx/plugins/` immediately.
+#### `install_mod` ❌ (removed)
+Historically asked the launcher to download a mod DLL to `BepInEx/plugins/`. The plugin no longer sends this and the launcher no longer registers a handler — mod installs now flow through the launcher's join/mod-set pipeline.
 
-```json
-{
-  "type": "install_mod",
-  "id": "a1b2c3d4",
-  "timestamp": 1735689600000,
-  "payload": {
-    "modId": "aunlocker",
-    "downloadUrl": "https://github.com/astra1dev/AUnlocker/releases/latest/download/AUnlocker.dll",
-    "fileName": "AUnlocker.dll"
-  }
-}
-```
+#### `restart_after_install` ❌ (removed)
+Historically asked the launcher to kill the game and relaunch after installs. Removed — no sender, no handler.
 
-**Response:** `install_mod_ack` with `{ "modId": "aunlocker", "status": "downloading" }`
+#### `mod_status` ❌ (removed)
+Historically requested the launcher's installed mod list. Removed — no sender, no handler.
 
-The launcher broadcasts `mod_installed` (with `success`/`error`) when the download completes. The handler is fully implemented in the launcher, but the plugin does not currently send this.
+#### `heartbeat` ❌ (removed)
+Keep-alive ping. Removed — the plugin never sent it and the launcher no longer registers a handler.
 
-#### `restart_after_install` 🔶
-Asks the launcher to kill the game, wait for all pending mod installs to finish, then restart Among Us.
+#### `error` ❌ (removed)
+Historically reported an error to the launcher. Removed — the plugin never sends it and the launcher no longer registers a handler.
 
-```json
-{ "type": "restart_after_install", "id": "r5s6t7u8", "timestamp": 1735689600000 }
-```
+#### `download_progress` ❌ (removed)
+Progress reporting for `install_mod`. Removed along with `install_mod`.
 
-**Response:** `restart_ack` with `{ "status": "waiting_for_installs" }`
-
-The launcher:
-1. Kills the Among Us process immediately
-2. Waits for all pending `install_mod` downloads to complete
-3. Automatically relaunches Among Us when all installs are done
-
-The handler is implemented in the launcher, but the plugin does not currently send this.
-
-#### `mod_status` 🔶
-Requests the launcher's currently installed mod list.
-
-```json
-{ "type": "mod_status", "id": "k7l8m9n0", "timestamp": 1735689600000 }
-```
-
-**Response:** `mod_status_response` with `{ "mods": [{ "Name": "AUnlocker.dll", "FilePath": "..." }] }`
-
-The launcher treats this as a request and replies with the installed mods (name + file path). The plugin does not currently send this.
-
-#### `heartbeat` 🔶
-Keep-alive ping. Handler registered in the launcher; the plugin does not currently send it.
-
-```json
-{ "type": "heartbeat", "id": "o1p2q3r4", "timestamp": 1735689600000 }
-```
-
-**Response:** `heartbeat_ack`
-
-#### `error` 🔶
-Reports an error to the launcher, which logs it.
-
-```json
-{
-  "type": "error",
-  "id": "s9t0u1v2",
-  "timestamp": 1735689600000,
-  "payload": { "message": "Failed to load mod: AUnlocker.dll" }
-}
-```
-
-Only `message` is consumed; an optional `code` is ignored. **Response:** none.
-
-#### `download_progress` 🔶 (no-op)
-The launcher has a no-op handler (returns no response) but the plugin never sends this type. Reserved.
-
-```json
-{
-  "type": "download_progress",
-  "id": "w3x4y5z6",
-  "timestamp": 1735689600000,
-  "payload": {
-    "modId": "aunlocker",
-    "percent": 65,
-    "bytesDownloaded": 131072,
-    "totalBytes": 201472
-  }
-}
-```
-
-**Response:** none.
-
-#### `mod_uninstalled` 🔶 (no sender)
-The launcher's base handler responds `mod_uninstalled_ack` with `{ "status": "ok" }`, but no sender exists and the launcher has no uninstall flow. Reserved.
-
-**Response:** `mod_uninstalled_ack` with `{ "status": "ok" }`
+#### `mod_uninstalled` ❌ (removed)
+Historically confirmed a mod removal. Removed — no sender, no launcher uninstall flow.
 
 ---
 
@@ -323,6 +231,13 @@ The following types appear in earlier drafts of this protocol but were never imp
 | `uninstall_mod` | Launcher → AmongAPI | ❌ Removed — never implemented |
 | `get_mod_status` | Launcher → AmongAPI | ❌ Removed — never implemented |
 | `restart_game`   | Launcher → AmongAPI | ❌ Removed — never implemented |
+| `install_mod`    | AmongAPI → Launcher | ❌ Removed — no sender, no handler |
+| `restart_after_install` | AmongAPI → Launcher | ❌ Removed — no sender, no handler |
+| `mod_status`     | AmongAPI → Launcher | ❌ Removed — no sender, no handler |
+| `heartbeat`      | AmongAPI → Launcher | ❌ Removed — no sender, no handler |
+| `error`          | AmongAPI → Launcher | ❌ Removed — no sender, no handler |
+| `download_progress` | AmongAPI → Launcher | ❌ Removed — no sender, no handler |
+| `mod_uninstalled` | AmongAPI → Launcher | ❌ Removed — no sender, no handler |
 
 ---
 
@@ -331,14 +246,8 @@ The following types appear in earlier drafts of this protocol but were never imp
 | Response Type        | Sent By    | Description                                                            |
 |----------------------|------------|------------------------------------------------------------------------|
 | `game_ready_ack`     | Launcher   | `{ restart: false }`                                                   |
-| `install_mod_ack`    | Launcher   | `{ modId, status: "downloading" }`                                     |
-| `restart_ack`        | Launcher   | `{ status: "waiting_for_installs" }` reply to `restart_after_install`  |
-| `mod_status_response`| Launcher   | `{ mods: [{ Name, FilePath }] }` reply to `mod_status`                 |
-| `heartbeat_ack`      | Launcher   | Heartbeat acknowledged                                                 |
 | `lobby_created_ack`  | Launcher   | Lobby mirrored to backend                                              |
 | `lobby_closed_ack`   | Launcher   | Lobby disbanded on backend                                             |
-| `mod_installed_ack`  | Launcher   | `{ status: "ok" }` base handler; no sender today                       |
-| `mod_uninstalled_ack`| Launcher   | `{ status: "ok" }` base handler; no sender today                       |
 | `join_lobby_ack`     | AmongAPI   | `{ success, error }` reply to `join_lobby`, echoes the request id      |
 
 ## Launcher-side Implementation
@@ -347,16 +256,11 @@ The launcher runs `PipeServer` on the main window. Key integration points:
 
 - **On client connect/disconnect:** Update the "AmongAPI connected" connection status
 - **On `launcher_ready`:** Broadcast once the window loads
-- **On `install_mod`:** Download mod DLL from `downloadUrl` to `BepInEx/plugins/`, broadcast `mod_installed` on completion, respond `install_mod_ack`
-- **On `restart_after_install`:** Kill game process, wait for all pending installs, then relaunch; respond `restart_ack`
-- **On `mod_status`:** Return the installed mod list from `BepInEx/plugins/` as `mod_status_response`
 - **On `game_ready`:** Update status text to "Game loaded — AmongAPI active", respond `game_ready_ack`
 - **On `lobby_created`:** Mirror the lobby to the backend, start heartbeat, open WebSocket, show host panel; respond `lobby_created_ack`
 - **On `lobby_closed`:** Disband the lobby on the backend, stop heartbeat/WebSocket; respond `lobby_closed_ack`
 - **On `player_joined`/`player_left`:** Update the live player list (local only)
 - **On `join_lobby_result`:** Surface join errors to the UI
-- **On `error`:** Log the error
-- **On `download_progress`:** No-op
 
 ## AmongAPI-side Implementation
 
@@ -404,20 +308,12 @@ pipe.RegisterHandler("join_lobby", async element =>
 4. The host can repost or disband from the panel (or use `/repost` / `/disband` chat commands); disband sends `lobby_closed`.
 5. The launcher disbands the lobby on the backend and tears everything down.
 
-## Example Flow: API-Driven Mod Install
+## Example Flow: Mod-Set Sync During Join
 
-1. AmongAPI sends `install_mod` to the launcher with `downloadUrl` and `fileName`.
-2. Launcher responds `install_mod_ack { status: "downloading" }` and downloads the DLL to `BepInEx/plugins/`.
-3. Launcher broadcasts `mod_installed` when the download completes.
-4. Launcher refreshes the mod list in the UI.
-
-## Example Flow: Restart After Install
-
-1. AmongAPI sends `restart_after_install` to the launcher.
-2. Launcher responds `restart_ack { status: "waiting_for_installs" }` and kills the Among Us process immediately.
-3. Launcher waits for all pending `install_mod` downloads to finish.
-4. Once all installs complete, launcher automatically relaunches Among Us.
-5. AmongAPI reconnects on the new game instance and sends `game_ready`.
+1. The launcher fetches the lobby's `modSet` from the backend.
+2. `ModSetSync` diffs the target set against `BepInEx/plugins/` and downloads any missing DLLs (with file-lock retry).
+3. The launcher launches Among Us and waits for the plugin's `game_ready`.
+4. Mod installs now flow entirely through this join/mod-set pipeline — there is no separate `install_mod` request type.
 
 
 ---
