@@ -28,6 +28,8 @@ public partial class MainWindow
     private Services.Lobby.LobbyHeartbeatService? _heartbeat;
     private string _userId = "";
     private LobbyInfo? _activeLobby;
+    private Views.HostControlPanelView? _hostPanel;
+    private readonly List<string> _lobbyPlayerNames = new();
     private TaskCompletionSource<bool>? _gameReadyTcs;
     private bool _joining;
 
@@ -192,9 +194,14 @@ public partial class MainWindow
                 ModSet = GetInstalledModSet()
             };
             _activeLobby = info;
+            _lobbyPlayerNames.Clear();
             await _backend.CreateLobbyAsync(new CreateLobbyRequest(info.Code, info.Region, info.RegionIp, info.RegionPort, info.ModSet, _userId), CancellationToken.None);
             StartHeartbeat(info.Code);
             _ = _ws.ConnectAsync(info.Code, CancellationToken.None);
+            if (_userId == info.HostUserId || string.IsNullOrEmpty(_userId))
+            {
+                Dispatcher.Invoke(() => ShowHostPanel(info));
+            }
             return new { type = "lobby_created_ack" };
         });
 
@@ -206,11 +213,12 @@ public partial class MainWindow
             StopHeartbeat();
             _ws.Disconnect();
             _activeLobby = null;
+            _hostPanel = null;
             return new { type = "lobby_closed_ack" };
         });
 
-        _pipeServer.RegisterHandler("player_joined", ForwardPlayerChange);
-        _pipeServer.RegisterHandler("player_left", ForwardPlayerChange);
+        _pipeServer.RegisterHandler("player_joined", element => ForwardPlayerChange(element, joined: true));
+        _pipeServer.RegisterHandler("player_left", element => ForwardPlayerChange(element, joined: false));
 
         // Handler: result of a join_lobby broadcast (surfaces errors to the UI)
         _pipeServer.RegisterHandler("join_lobby_result", async element =>
@@ -471,7 +479,7 @@ public partial class MainWindow
         return done == readyTask && await readyTask;
     }
 
-    private Task<object?> ForwardPlayerChange(JsonElement element)
+    private Task<object?> ForwardPlayerChange(JsonElement element, bool joined)
     {
         var p = element.GetProperty("payload");
         var playerName = p.TryGetProperty("playerName", out var name) ? name.GetString() : null;
@@ -479,7 +487,57 @@ public partial class MainWindow
         LogDebug($"[Launcher] Player event: playerName={playerName}, playerCount={playerCount} (local only until a backend player endpoint exists)");
         if (_activeLobby != null && playerCount >= 0)
             _activeLobby.PlayerCount = playerCount;
+
+        if (!string.IsNullOrEmpty(playerName))
+        {
+            if (joined && !_lobbyPlayerNames.Contains(playerName))
+                _lobbyPlayerNames.Add(playerName);
+            else if (!joined)
+                _lobbyPlayerNames.Remove(playerName);
+        }
+
+        if (_hostPanel != null)
+            Dispatcher.Invoke(() => _hostPanel.UpdatePlayers(BuildPlayerList()));
         return Task.FromResult<object?>(null);
+    }
+
+    private List<LobbyPlayer> BuildPlayerList() =>
+        _lobbyPlayerNames.Select(n => new LobbyPlayer("", n, false)).ToList();
+
+    private void ShowHostPanel(LobbyInfo info)
+    {
+        var panel = new Views.HostControlPanelView(info);
+        panel.RePostRequested += async (_, _) =>
+            await _backend.RepostAsync(info.Code, CancellationToken.None);
+        panel.DisbandRequested += (_, _) => _ = ConfirmDisbandAsync(info.Code);
+        panel.KickRequested += async (_, targetUserId) =>
+            await _backend.KickAsync(info.Code, targetUserId, CancellationToken.None);
+        panel.UpdatePlayers(BuildPlayerList());
+        _hostPanel = panel;
+        ShowView(panel, showSidebar: true);
+    }
+
+    private async Task ConfirmDisbandAsync(string code)
+    {
+        var confirmModal = new ConfirmationModal();
+        confirmModal.Configure(
+            $"Disband lobby {code}?\n\nAll players will be removed from the lobby.",
+            "Disband",
+            isDanger: true);
+
+        confirmModal.Confirmed += async (_, _) =>
+        {
+            ModalOverlay.Hide();
+            await _backend.DisbandAsync(code, CancellationToken.None);
+            _ws.Disconnect();
+            StopHeartbeat();
+            _activeLobby = null;
+            _hostPanel = null;
+            Dispatcher.Invoke(() => _mainView.StopGame());
+        };
+        confirmModal.Cancelled += (_, _) => ModalOverlay.Hide();
+
+        ModalOverlay.Show("Disband Lobby", confirmModal);
     }
 
     private void StartHeartbeat(string code)
