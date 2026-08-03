@@ -400,36 +400,48 @@ public partial class MainWindow
 
     private async Task RejoinAsync(Services.Lobby.RejoinCommand cmd)
     {
-        LogDebug($"[Launcher] Rejoin command received for lobby {cmd.LobbyCode}");
+        try
+        {
+            LogDebug($"[Launcher] Rejoin command received for lobby {cmd.LobbyCode}");
 
-        Dispatcher.Invoke(() =>
-        {
-            if (ContentArea.Content is MainView mv)
-                mv.StopGame();
-        });
-        var waited = 0;
-        while (IsAmongUsRunning() && waited < 30)
-        {
-            await Task.Delay(500);
-            waited++;
+            Dispatcher.Invoke(() =>
+            {
+                if (ContentArea.Content is MainView mv)
+                    mv.StopGame();
+            });
+            var waited = 0;
+            while (IsAmongUsRunning() && waited < 30)
+            {
+                await Task.Delay(500);
+                waited++;
+            }
+
+            Dispatcher.Invoke(() =>
+            {
+                if (ContentArea.Content is MainView mv)
+                    mv.UpdateModStatusText($"Rejoining lobby {cmd.LobbyCode}...");
+            });
+
+            var lobby = new LobbyInfo
+            {
+                Code = cmd.LobbyCode,
+                Region = cmd.Region,
+                RegionIp = cmd.RegionIp,
+                RegionPort = cmd.RegionPort,
+                ModSet = cmd.ModSet
+            };
+
+            await JoinPipelineAsync(lobby);
         }
-
-        Dispatcher.Invoke(() =>
+        catch (Exception ex)
         {
-            if (ContentArea.Content is MainView mv)
-                mv.UpdateModStatusText($"Rejoining lobby {cmd.LobbyCode}...");
-        });
-
-        var lobby = new LobbyInfo
-        {
-            Code = cmd.LobbyCode,
-            Region = cmd.Region,
-            RegionIp = cmd.RegionIp,
-            RegionPort = cmd.RegionPort,
-            ModSet = cmd.ModSet
-        };
-
-        await JoinPipelineAsync(lobby);
+            LogDebug($"[Launcher] Rejoin failed with exception: {ex}");
+            Dispatcher.Invoke(() =>
+            {
+                if (ContentArea.Content is MainView mv)
+                    mv.UpdateModStatusText($"Join failed: {ex.Message}");
+            });
+        }
     }
 
     private async Task<bool> WaitForGameReadyAsync()

@@ -17,7 +17,8 @@ public class LobbyHeartbeatService
         {
             while (!_cts.IsCancellationRequested)
             {
-                await Task.Delay(TimeSpan.FromSeconds(30), _cts.Token);
+                try { await Task.Delay(TimeSpan.FromSeconds(30), _cts.Token); }
+                catch { return; }
                 try { await _heartbeat(code, hostUserId, _cts.Token); } catch { }
             }
         });
