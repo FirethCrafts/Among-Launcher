@@ -65,7 +65,7 @@ public partial class SettingsView
 
     private Storefront? SelectedStorefront()
     {
-        return StorefrontCombo.SelectedItem as string switch
+        return (StorefrontCombo.SelectedItem as string) switch
         {
             "Steam" => Storefront.Steam,
             "Epic" => Storefront.Epic,

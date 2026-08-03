@@ -13,7 +13,6 @@ public class PipeClient : IDisposable
     private NamedPipeClientStream? _client;
     private CancellationTokenSource? _cts;
     private Task? _listenTask;
-    private bool _connected;
     private bool _disposed;
     private readonly Dictionary<string, Func<JsonElement, Task<object?>>> _handlers = new();
     private readonly object _lock = new();
@@ -49,7 +48,6 @@ public class PipeClient : IDisposable
                     PipeOptions.Asynchronous);
 
                 await _client.ConnectAsync(10000, ct);
-                _connected = true;
                 _cts = new CancellationTokenSource();
                 _listenTask = ListenAsync(_cts.Token);
                 _log.LogInfo("[Pipe] Connected to launcher!");
@@ -173,7 +171,6 @@ public class PipeClient : IDisposable
             catch { break; }
         }
 
-        _connected = false;
         Disconnected?.Invoke(this, EventArgs.Empty);
         _log.LogInfo("[Pipe] Disconnected from launcher.");
     }
@@ -182,7 +179,6 @@ public class PipeClient : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
-        _connected = false;
         _cts?.Cancel();
         try { _client?.Dispose(); } catch { }
         _cts?.Dispose();

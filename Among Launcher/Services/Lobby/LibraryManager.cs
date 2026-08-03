@@ -31,7 +31,7 @@ public class LibraryManager
         return _config.Library;
     }
 
-    public bool IsInLibrary(string fileName)
+    private bool IsInLibrary(string fileName)
     {
         var path = Path.Combine(_libraryDir, fileName);
         return File.Exists(path) && new FileInfo(path).Length > 0;
