@@ -175,9 +175,15 @@
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
 
-                <!-- Profile Switcher -->
+                <!-- Profile Switcher (WIP) -->
                 <StackPanel Margin="0,16,0,0">
-                    <TextBlock Text="PROFILES" Style="{StaticResource CardHeader}" Margin="0,0,0,8"/>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                        <TextBlock Text="PROFILES" Style="{StaticResource CardHeader}"/>
+                        <Border Background="#4A4A55" CornerRadius="4" Padding="6,1,6,2" Margin="8,0,0,0"
+                                VerticalAlignment="Center">
+                            <TextBlock Text="WIP" Foreground="#FFD54F" FontSize="10" FontWeight="Bold"/>
+                        </Border>
+                    </StackPanel>
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>

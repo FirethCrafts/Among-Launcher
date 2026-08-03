@@ -539,7 +539,8 @@ public partial class MainView
         ModsList.ItemsSource = mods;
     }
 
-    // Profile switcher
+    // Profile switcher (WIP: saved profiles store no download URLs, so applying
+    // a profile only verifies present mods and relocates missing ones to the library)
     private void RefreshProfiles()
     {
         var profiles = new ModProfileManager(LauncherConfig.Load()).LoadProfiles();
