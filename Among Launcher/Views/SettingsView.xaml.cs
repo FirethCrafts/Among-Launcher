@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Windows;
 using System.Windows.Controls;
 using Microsoft.Win32;
@@ -77,20 +78,81 @@ public partial class SettingsView
         if (storefront == null)
         {
             var all = _locator.FindAmongUsWithStorefront();
+
             if (all.DetectedButUnavailable)
             {
                 StorefrontStatusText.Text =
                     "An install was detected but is inaccessible. See the guide in the main install flow.";
+                return;
             }
-            else
+
+            var found = new List<GameSearchResult>();
+            foreach (var sf in new[] { Storefront.Steam, Storefront.Epic, Storefront.MicrosoftStore })
+            {
+                var candidate = _locator.FindAmongUsForStorefront(sf);
+                if (candidate.Path != null) found.Add(candidate);
+            }
+
+            if (found.Count == 0)
             {
                 StorefrontStatusText.Text = "No Among Us installation found.";
+                return;
             }
+
+            if (found.Count == 1)
+            {
+                var only = found[0];
+                GamePathText.Text = only.Path;
+                if (only.Storefront.HasValue)
+                {
+                    SaveStorefront(only.Storefront.Value);
+                    SyncComboToStorefront(only.Storefront.Value);
+                }
+                StorefrontStatusText.Text = $"Auto-detected: {only.Storefront}";
+                return;
+            }
+
+            OpenPicker(found);
         }
         else
         {
             StorefrontStatusText.Text = "";
         }
+    }
+
+    private void OpenPicker(List<GameSearchResult> found)
+    {
+        var mainWindow = Window.GetWindow(this) as MainWindow;
+        if (mainWindow == null) return;
+
+        var picker = new StorefrontPickerModal();
+        picker.SetResults(found);
+        picker.Selected += (_, chosen) =>
+        {
+            mainWindow.ModalOverlayControl.Hide();
+            if (chosen.Storefront.HasValue)
+            {
+                SaveStorefront(chosen.Storefront.Value);
+                SyncComboToStorefront(chosen.Storefront.Value);
+            }
+            GamePathText.Text = chosen.Path;
+            StorefrontStatusText.Text = "";
+        };
+
+        mainWindow.ModalOverlayControl.Show("Choose Among Us Installation", picker);
+    }
+
+    private void SyncComboToStorefront(Storefront storefront)
+    {
+        _isInitializing = true;
+        StorefrontCombo.SelectedItem = storefront switch
+        {
+            Storefront.Steam => "Steam",
+            Storefront.Epic => "Epic",
+            Storefront.MicrosoftStore => "Microsoft Store",
+            _ => "Auto"
+        };
+        _isInitializing = false;
     }
 
     private void SaveStorefront(Storefront? storefront)
