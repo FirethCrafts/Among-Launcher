@@ -91,12 +91,12 @@ app.MapPost("/lobby/{code}/repost", async (string code) =>
     return Results.Ok();
 });
 
-// POST /lobby/{code}/kick — kick one player via WebSocket push
-app.MapPost("/lobby/{code}/kick", async (string code, KickRequest body, CancellationToken ct) =>
+// POST /lobby/{code}/kick — force the lobby's connected launchers to leave
+app.MapPost("/lobby/{code}/kick", async (string code, CancellationToken ct) =>
 {
     var lobby = store.Get(code);
     if (lobby == null) return Results.NotFound(new { error = "lobby not found" });
-    await hub.PushKickAsync(code, body.TargetUserId, body.Reason, ct);
+    await hub.PushKickAsync(code, ct);
     return Results.Ok();
 });
 
@@ -112,19 +112,9 @@ app.MapDelete("/lobby/{code}", async (string code) =>
 });
 
 // POST /lobby/{code}/heartbeat — keepalive from the host launcher
-app.MapPost("/lobby/{code}/heartbeat", (string code, HeartbeatRequest body) =>
+app.MapPost("/lobby/{code}/heartbeat", (string code) =>
 {
     if (!store.Touch(code)) return Results.NotFound(new { error = "lobby not found" });
-    return Results.Ok();
-});
-
-// POST /lobby/{code}/players — report player count (embed updates)
-app.MapPost("/lobby/{code}/players", async (string code, PlayersRequest body) =>
-{
-    var lobby = store.Get(code);
-    if (lobby == null) return Results.NotFound(new { error = "lobby not found" });
-    lobby.PlayerCount = body.PlayerCount;
-    await notifier.EditLobbyAsync(lobby);
     return Results.Ok();
 });
 
@@ -141,8 +131,6 @@ app.Map("/ws", async (HttpContext context) =>
     }
 
     var lobbyCode = context.Request.Query["code"].ToString();
-    var userId = ResolveUserId(context.Request);
-
     if (string.IsNullOrWhiteSpace(lobbyCode))
     {
         context.Response.StatusCode = (int)HttpStatusCode.BadRequest;
@@ -150,7 +138,7 @@ app.Map("/ws", async (HttpContext context) =>
     }
 
     using var socket = await context.WebSockets.AcceptWebSocketAsync();
-    var connectionId = hub.Register(lobbyCode, userId, socket);
+    var connectionId = hub.Register(lobbyCode, socket);
 
     try
     {
@@ -171,18 +159,6 @@ app.Map("/ws", async (HttpContext context) =>
 
 app.Run();
 
-static string ResolveUserId(HttpRequest request)
-{
-    var auth = request.Headers.Authorization.ToString();
-    if (auth.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
-    {
-        var token = auth["Bearer ".Length..].Trim();
-        if (!string.IsNullOrEmpty(token))
-            return "user:" + token[..Math.Min(8, token.Length)];
-    }
-    return "anon";
-}
-
 static bool SameModSet(List<ModSetEntry>? a, List<ModSetEntry>? b)
 {
     if (a == null && b == null) return true;
@@ -195,7 +171,3 @@ static bool SameModSet(List<ModSetEntry>? a, List<ModSetEntry>? b)
 static LobbyResponse ToResponse(Lobby lobby) => new(
     lobby.Code, lobby.Region, lobby.RegionIp, lobby.RegionPort,
     lobby.ModSet, lobby.HostUserId, lobby.PlayerCount);
-
-public record KickRequest(string TargetUserId, string? Reason);
-public record PlayersRequest(int PlayerCount);
-public record HeartbeatRequest(string Code, string HostUserId);

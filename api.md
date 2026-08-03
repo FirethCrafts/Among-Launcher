@@ -435,12 +435,11 @@ REST + WebSocket contract implemented by the self-hosted `Among Backend` server.
 | Method | Endpoint | Body | Purpose |
 |--------|----------|------|---------|
 | POST | `/lobby` | `{ code, region, regionIp, regionPort, modSet, hostUserId }` | Create/register a lobby. If the host previously ran a lobby with connected launchers and the mod set differs, pushes `rejoin` to the old lobby's guests. Re-POSTing an existing code refreshes it. |
-| GET | `/lobby/{code}` | — | Fetch a lobby ? `{ code, region, regionIp, regionPort, modSet, hostUserId, playerCount }`. 404 if not found. |
-| POST | `/lobby/{code}/repost` | — | Refresh the Discord embed. |
-| POST | `/lobby/{code}/kick` | `{ targetUserId, reason? }` | Push `kick` to the lobby's connected launchers over WebSocket. |
-| POST | `/lobby/{code}/players` | `{ playerCount }` | Report the current player count (updates the embed). |
-| DELETE | `/lobby/{code}` | — | Disband/delete a lobby and remove its Discord embed. |
-| POST | `/lobby/{code}/heartbeat` | `{ code, hostUserId }` | Keepalive from the host launcher. Lobbies that stop heartbeating are auto-expired after the grace period. |
+| GET | `/lobby/{code}` | ï¿½ | Fetch a lobby ? `{ code, region, regionIp, regionPort, modSet, hostUserId, playerCount }`. 404 if not found. |
+| POST | `/lobby/{code}/repost` | ï¿½ | Refresh the Discord embed. |
+| POST | `/lobby/{code}/kick` | â€” | Push `kick` to the lobby's connected launchers over WebSocket (forces them to leave). |
+| DELETE | `/lobby/{code}` | â€” | Disband/delete a lobby and remove its Discord embed. |
+| POST | `/lobby/{code}/heartbeat` | â€” | Keepalive from the host launcher. Lobbies that stop heartbeating are auto-expired after the grace period. |
 
 `modSet` entries: `{ fileName, downloadUrl, sha256?, version? }`.
 
@@ -449,8 +448,8 @@ REST + WebSocket contract implemented by the self-hosted `Among Backend` server.
 - **Endpoint:** `<BackendWssUrl>?code={lobbyCode}` (e.g. `wss://yourserver.com/ws?code=ALSKDJ`).
 - **Auth:** `Authorization: Bearer <DiscordAccessToken>` header.
 - **Server ? launcher messages:**
-  - `kick` — `{ "type": "kick", "reason": "..." }` ? launcher kills the game.
-  - `rejoin` — `{ "type": "rejoin", "payload": { "lobbyCode", "modSet", "region", "regionIp", "regionPort" } }` ? launcher installs the new mod set, relaunches, and rejoins.
+  - `kick` ï¿½ `{ "type": "kick", "reason": "..." }` ? launcher kills the game.
+  - `rejoin` ï¿½ `{ "type": "rejoin", "payload": { "lobbyCode", "modSet", "region", "regionIp", "regionPort" } }` ? launcher installs the new mod set, relaunches, and rejoins.
 - The launcher reconnects with backoff on drop and re-declares its lobby via the `?code=` param.
 
 ## Heartbeat Expiry

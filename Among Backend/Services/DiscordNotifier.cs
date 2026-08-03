@@ -23,14 +23,15 @@ public class DiscordNotifier
 
     public bool Enabled => !string.IsNullOrWhiteSpace(_webhookUrl);
 
+    private const string HostingDescription = "**A player is hosting a lobby — click to join!**";
+
     public async Task<ulong?> PostLobbyAsync(Models.Lobby lobby)
     {
         if (!Enabled) return null;
 
-        var payload = BuildEmbed(lobby, "**A player is hosting a lobby — click to join!**");
         try
         {
-            using var resp = await _http.PostAsJsonAsync(_webhookUrl, payload);
+            using var resp = await _http.PostAsJsonAsync(_webhookUrl, BuildEmbed(lobby));
             if (!resp.IsSuccessStatusCode)
             {
                 _log.LogWarning("Discord embed post failed: {Status}", resp.StatusCode);
@@ -51,10 +52,9 @@ public class DiscordNotifier
     {
         if (!Enabled || lobby.DiscordMessageId == null) return;
 
-        var payload = BuildEmbed(lobby, "**A player is hosting a lobby — click to join!**");
         try
         {
-            using var resp = await _http.PatchAsJsonAsync($"{_webhookUrl}/messages/{lobby.DiscordMessageId}", payload);
+            using var resp = await _http.PatchAsJsonAsync($"{_webhookUrl}/messages/{lobby.DiscordMessageId}", BuildEmbed(lobby));
             if (!resp.IsSuccessStatusCode)
                 _log.LogWarning("Discord embed edit failed: {Status}", resp.StatusCode);
         }
@@ -80,7 +80,7 @@ public class DiscordNotifier
         }
     }
 
-    private static object BuildEmbed(Models.Lobby lobby, string description)
+    private static object BuildEmbed(Models.Lobby lobby)
     {
         return new
         {
@@ -90,7 +90,7 @@ public class DiscordNotifier
                 new
                 {
                     title = $"Join lobby {lobby.Code}",
-                    description,
+                    description = HostingDescription,
                     color = 0xDC2626,
                     fields = new object[]
                     {

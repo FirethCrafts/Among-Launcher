@@ -10,11 +10,8 @@ public class WebSocketHub
     private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, WebSocket>> _connections =
         new(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>
-    /// Registers a launcher's WebSocket for a lobby. The user id identifies the
-    /// launcher (Discord user id when authenticated, otherwise the connection id).
-    /// </summary>
-    public string Register(string lobbyCode, string userId, WebSocket socket)
+    /// <summary>Registers a launcher's WebSocket for a lobby and returns a connection id.</summary>
+    public string Register(string lobbyCode, WebSocket socket)
     {
         var bucket = _connections.GetOrAdd(lobbyCode, _ => new ConcurrentDictionary<string, WebSocket>());
         var connectionId = Guid.NewGuid().ToString("N")[..8];
@@ -30,9 +27,9 @@ public class WebSocketHub
             _connections.TryRemove(lobbyCode, out _);
     }
 
-    public async Task PushKickAsync(string lobbyCode, string targetUserId, string? reason, CancellationToken ct)
+    public async Task PushKickAsync(string lobbyCode, CancellationToken ct)
     {
-        var message = JsonSerializer.Serialize(new { type = "kick", reason = reason ?? "" });
+        var message = JsonSerializer.Serialize(new { type = "kick", reason = "You were kicked from the lobby" });
         await SendToAllAsync(lobbyCode, message, ct);
     }
 

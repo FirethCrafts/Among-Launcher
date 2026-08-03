@@ -19,8 +19,6 @@ public record LobbyResponse(
     string? HostUserId,
     int PlayerCount);
 
-public record LobbyPlayer(string DiscordUserId, string? PlayerName, bool IsHost);
-
 public class Lobby
 {
     public required string Code { get; init; }
