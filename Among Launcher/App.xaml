@@ -572,6 +572,10 @@
                                     <Setter TargetName="B" Property="Background" Value="{StaticResource GlassSurfaceWeak}"/>
                                     <Setter Property="Foreground" Value="{StaticResource TextTitle}"/>
                                 </Trigger>
+                                <Trigger Property="IsSelected" Value="True">
+                                    <Setter TargetName="B" Property="Background" Value="#335865F2"/>
+                                    <Setter Property="Foreground" Value="{StaticResource TextTitle}"/>
+                                </Trigger>
                             </ControlTemplate.Triggers>
                         </ControlTemplate>
                     </Setter.Value>
@@ -581,9 +585,6 @@
             <!-- Custom glass combo box -->
             <Style x:Key="GlassCombo" TargetType="ComboBox">
                 <Setter Property="Foreground" Value="{StaticResource TextBody}"/>
-                <Setter Property="Background" Value="{StaticResource GlassSurfaceWeak}"/>
-                <Setter Property="BorderBrush" Value="{StaticResource GlassBorder}"/>
-                <Setter Property="BorderThickness" Value="1"/>
                 <Setter Property="Height" Value="32"/>
                 <Setter Property="FontSize" Value="13"/>
                 <Setter Property="SnapsToDevicePixels" Value="True"/>
@@ -594,32 +595,20 @@
                     <Setter.Value>
                         <ControlTemplate TargetType="ComboBox">
                             <Grid>
-                                <ToggleButton x:Name="Toggle" Focusable="False" ClickMode="Press"
+                                <ToggleButton x:Name="ToggleButton" Focusable="False" ClickMode="Press"
                                               IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}">
                                     <ToggleButton.Template>
                                         <ControlTemplate TargetType="ToggleButton">
-                                            <Border x:Name="TB" Background="{TemplateBinding Background}"
+                                            <Border x:Name="TB" Background="{StaticResource GlassSurfaceWeak}"
                                                     BorderBrush="{StaticResource GlassBorder}" BorderThickness="1"
-                                                    CornerRadius="8" SnapsToDevicePixels="True" UseLayoutRounding="True"
-                                                    RenderTransformOrigin="0.5,0.5">
-                                                <Border.RenderTransform>
-                                                    <ScaleTransform x:Name="TbScale" ScaleX="1" ScaleY="1"/>
-                                                </Border.RenderTransform>
-                                                <Grid>
-                                                    <Grid.ColumnDefinitions>
-                                                        <ColumnDefinition Width="*"/>
-                                                        <ColumnDefinition Width="Auto"/>
-                                                    </Grid.ColumnDefinitions>
-                                                    <ContentPresenter Grid.Column="0" Margin="10,0,6,0"
-                                                                      HorizontalAlignment="Left" VerticalAlignment="Center"/>
-                                                    <Path Grid.Column="1" Data="M 0 0 L 4 4 L 8 0 Z" Fill="{StaticResource TextMuted}"
-                                                          Stretch="Uniform" Width="10" Height="6"
-                                                          HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,0,10,0"/>
-                                                </Grid>
+                                                    CornerRadius="8" SnapsToDevicePixels="True" UseLayoutRounding="True">
+                                                <Path Data="M 0 0 L 4 4 L 8 0 Z" Fill="{StaticResource TextMuted}"
+                                                      Stretch="Uniform" Width="10" Height="6"
+                                                      HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,12,0"/>
                                             </Border>
                                             <ControlTemplate.Triggers>
                                                 <Trigger Property="IsMouseOver" Value="True">
-                                                    <Setter TargetName="TB" Property="Background" Value="{StaticResource GlassSurfaceWeak}"/>
+                                                    <Setter TargetName="TB" Property="BorderBrush" Value="#55FFFFFF"/>
                                                 </Trigger>
                                                 <Trigger Property="IsChecked" Value="True">
                                                     <Setter TargetName="TB" Property="BorderBrush" Value="#B35865F2"/>
@@ -629,9 +618,15 @@
                                     </ToggleButton.Template>
                                 </ToggleButton>
 
+                                <ContentPresenter x:Name="ContentSite" IsHitTestVisible="False"
+                                                  Content="{TemplateBinding SelectionBoxItem}"
+                                                  ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                                                  ContentTemplateSelector="{TemplateBinding ItemTemplateSelector}"
+                                                  Margin="10,0,0,0" VerticalAlignment="Center" HorizontalAlignment="Left"/>
+
                                 <Popup x:Name="PART_Popup" IsOpen="{TemplateBinding IsDropDownOpen}"
-                                       Placement="Bottom" AllowsTransparency="True" StaysOpen="False"
-                                       Focusable="False" PopupAnimation="Fade">
+                                       Placement="Bottom" AllowsTransparency="True"
+                                       PopupAnimation="Fade">
                                     <Border Background="{StaticResource GlassSurfaceStrong}"
                                             BorderBrush="{StaticResource GlassBorder}" BorderThickness="1"
                                             CornerRadius="8" Margin="0,4,0,0" MinWidth="{TemplateBinding ActualWidth}"
