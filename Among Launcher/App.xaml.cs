@@ -5,6 +5,8 @@ namespace AmongLauncher;
 
 public partial class App
 {
+    private Mutex? _singleInstanceMutex;
+
     public static bool ReduceMotion { get; private set; }
 
     /// <summary>Raised when a deep link arrives (used for single-instance protocol re-dispatch).</summary>
@@ -17,7 +19,7 @@ public partial class App
         var deepLink = DeepLinkHandler.FindDeepLinkArgument();
 
         // Single-instance: only the primary process hosts the UI and the IPC pipe.
-        if (!SingleInstance.TryBecomePrimary(out _))
+        if (!SingleInstance.TryBecomePrimary(out _singleInstanceMutex))
         {
             if (deepLink != null)
                 SingleInstance.ForwardDeepLink(deepLink);
