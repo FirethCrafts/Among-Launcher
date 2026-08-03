@@ -1,4 +1,5 @@
 using System.Text.Json;
+using AmongLauncher.Models;
 
 namespace AmongLauncher.Config;
 
@@ -18,6 +19,10 @@ public class LauncherConfig
     public string LastModId { get; set; } = string.Empty;
     public string AvatarUrl { get; set; } = string.Empty;
     public string UserName { get; set; } = string.Empty;
+    public string BackendWssUrl { get; set; } = "wss://yourserver.com/ws";
+    public string DiscordAccessToken { get; set; } = string.Empty;
+    public long DiscordTokenExpiry { get; set; }
+    public List<ModProfile> Profiles { get; set; } = new();
 
     public static LauncherConfig Load()
     {
