@@ -123,6 +123,10 @@ public class LobbyJoiner : IDisposable
             {
                 await Task.Delay(PumpIntervalMs, cts.Token);
             }
+            catch (ObjectDisposedException)
+            {
+                break;
+            }
             catch (OperationCanceledException)
             {
                 break;
@@ -149,8 +153,9 @@ public class LobbyJoiner : IDisposable
         if (serverManager == null)
             return new JoinResult(false, "ServerManager singleton unavailable");
 
-        // 2-4. Build + select the custom region. If no region endpoint was provided by the
-        //      launcher, degrade gracefully to whatever region the game currently has selected.
+        // 2-4. Build + select the custom region. Intentional: the launcher may send empty
+        //      region/regionIp fields, so degrade gracefully to the game's currently
+        //      selected region instead of erroring (adjudicated as correct behavior).
         if (request.RegionIp.Length > 0 || request.Region.Length > 0)
         {
             // Build the region: StaticHttpRegionInfo(name, NoTranslation, pingServer, servers)
