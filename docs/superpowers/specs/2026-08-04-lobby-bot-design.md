@@ -139,6 +139,17 @@ Serialized (camelCase) exactly as the requirement specifies:
 }
 ```
 
+**JSON serialization:** `LobbyBotClient` must configure `System.Text.Json` with
+camelCase property naming so the C# PascalCase record properties serialize to
+lowercase JSON keys:
+
+```csharp
+var jsonOptions = new JsonSerializerOptions
+{
+    PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+};
+```
+
 **Response handling:** after sending the frame, `SendLobbyCreatedAsync`
 executes `ReceiveAsync` to await the bot's response frame. It parses
 `{ "ok": bool, "error": string }` into `LobbyBotResponse` and logs the result
