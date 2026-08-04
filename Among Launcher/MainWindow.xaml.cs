@@ -24,6 +24,7 @@ public partial class MainWindow
     private readonly Services.Lobby.LobbyWebSocketClient _ws;
     // Kept for its ctor side-effects: subscribes _ws.Kicked / _ws.Rejoin.
     private readonly Services.Lobby.LobbyCommandService _commands;
+    private readonly Services.Lobby.LobbyBotClient _botClient = new();
     private Services.Lobby.LobbyHeartbeatService? _heartbeat;
     private readonly Config.LauncherConfig _config;
     private string _userId = "";
@@ -130,6 +131,27 @@ public partial class MainWindow
             {
                 Dispatcher.Invoke(() => ShowHostPanel(info));
             }
+
+            var moddedPath = System.IO.Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "AmongLauncher", "ModdedAmongUs");
+            var mod = Services.Lobby.LobbyTypeDetector.DetectLobbyType(moddedPath);
+            var roleId = mod == "modded" ? _config.ModdedRoleId : _config.VanillaRoleId;
+
+            if (string.IsNullOrWhiteSpace(_config.BotWsEndpoint))
+            {
+                return new { type = "lobby_created_ack" };
+            }
+
+            if (string.IsNullOrEmpty(roleId) || !System.Text.RegularExpressions.Regex.IsMatch(roleId, @"^\d{17,20}$"))
+            {
+                Services.LauncherLog.Write("Skipping lobby bot announce: invalid or missing role ID");
+                return new { type = "lobby_created_ack" };
+            }
+
+            var payload = new Services.Lobby.LobbyBotPayload(info.Code, info.Region, host, mod, roleId, System.Array.Empty<string>());
+            await _botClient.SendLobbyCreatedAsync(payload);
+
             return new { type = "lobby_created_ack" };
         });
 
@@ -140,6 +162,7 @@ public partial class MainWindow
             if (_activeLobby != null) await _backend.DisbandAsync(code, CancellationToken.None);
             StopHeartbeat();
             _ws.Disconnect();
+            _botClient.Disconnect();
             _activeLobby = null;
             _hostPanel = null;
             return new { type = "lobby_closed_ack" };
