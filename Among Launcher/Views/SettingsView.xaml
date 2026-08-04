@@ -11,6 +11,9 @@
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
@@ -71,6 +74,36 @@
                           Stretch="Uniform" Width="22" Height="22"/>
                 </Button>
             </Grid>
+        </Border>
+
+        <!-- Bot WS Endpoint -->
+        <Border Grid.Row="4" Style="{StaticResource GlassCard}">
+            <StackPanel>
+                <TextBlock Text="BOT WS ENDPOINT" Style="{StaticResource CardHeader}"/>
+                <TextBox x:Name="BotWsEndpointTextBox"
+                         TextChanged="BotWsEndpointTextBox_TextChanged"
+                         Style="{StaticResource GlassInput}"/>
+            </StackPanel>
+        </Border>
+
+        <!-- Modded Role ID -->
+        <Border Grid.Row="5" Style="{StaticResource GlassCard}">
+            <StackPanel>
+                <TextBlock Text="MODDED ROLE ID" Style="{StaticResource CardHeader}"/>
+                <TextBox x:Name="ModdedRoleIdTextBox"
+                         TextChanged="ModdedRoleIdTextBox_TextChanged"
+                         Style="{StaticResource GlassInput}"/>
+            </StackPanel>
+        </Border>
+
+        <!-- Vanilla Role ID -->
+        <Border Grid.Row="6" Style="{StaticResource GlassCard}">
+            <StackPanel>
+                <TextBlock Text="VANILLA ROLE ID" Style="{StaticResource CardHeader}"/>
+                <TextBox x:Name="VanillaRoleIdTextBox"
+                         TextChanged="VanillaRoleIdTextBox_TextChanged"
+                         Style="{StaticResource GlassInput}"/>
+            </StackPanel>
         </Border>
     </Grid>
 </UserControl>

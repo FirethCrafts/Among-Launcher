@@ -36,6 +36,9 @@ public partial class SettingsView
     {
         var config = Config.LauncherConfig.Load();
         ServerUrlTextBox.Text = config.ServerUrl;
+        BotWsEndpointTextBox.Text = config.BotWsEndpoint;
+        ModdedRoleIdTextBox.Text = config.ModdedRoleId;
+        VanillaRoleIdTextBox.Text = config.VanillaRoleId;
 
         _isInitializing = true;
         if (StorefrontCombo.Items.Count == 0)
@@ -49,6 +52,27 @@ public partial class SettingsView
         _isInitializing = false;
 
         RefreshStorefrontSearch(config.Storefront);
+    }
+
+    private void BotWsEndpointTextBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        var config = Config.LauncherConfig.Load();
+        config.BotWsEndpoint = BotWsEndpointTextBox.Text;
+        config.Save();
+    }
+
+    private void ModdedRoleIdTextBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        var config = Config.LauncherConfig.Load();
+        config.ModdedRoleId = ModdedRoleIdTextBox.Text;
+        config.Save();
+    }
+
+    private void VanillaRoleIdTextBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        var config = Config.LauncherConfig.Load();
+        config.VanillaRoleId = VanillaRoleIdTextBox.Text;
+        config.Save();
     }
 
     private void StorefrontCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)

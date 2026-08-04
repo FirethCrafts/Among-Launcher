@@ -17,6 +17,9 @@ public class LauncherConfig
         "AmongLauncher", "ModdedAmongUs");
 
     public Storefront? Storefront { get; set; }
+    public string BotWsEndpoint { get; set; } = "ws://127.0.0.1:8080";
+    public string ModdedRoleId { get; set; } = string.Empty;
+    public string VanillaRoleId { get; set; } = string.Empty;
     public string ServerUrl { get; set; } = "https://yourserver.com/api";
     public string ModdedInstallPath { get; set; } = DefaultModdedPath();
     public string AvatarUrl { get; set; } = string.Empty;
