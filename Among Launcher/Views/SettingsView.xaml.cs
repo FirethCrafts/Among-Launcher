@@ -61,6 +61,14 @@ public partial class SettingsView
         config.Save();
     }
 
+    private void SaveServerUrl_Click(object sender, RoutedEventArgs e)
+    {
+        var config = Config.LauncherConfig.Load();
+        config.ServerUrl = ServerUrlTextBox.Text.Trim();
+        config.Save();
+        MessageBox.Show("Server URL saved.", "Settings", MessageBoxButton.OK, MessageBoxImage.Information);
+    }
+
     private void ModdedRoleIdTextBox_TextChanged(object sender, TextChangedEventArgs e)
     {
         var config = Config.LauncherConfig.Load();
