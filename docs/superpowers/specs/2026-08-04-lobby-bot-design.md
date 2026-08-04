@@ -9,14 +9,13 @@ Integrate the Among Launcher with the Lobby Forum Bot WebSocket protocol so
 that hosting a game triggers an automated forum thread. Adds three persisted
 config fields, expands the Settings UI, auto-detects modded vs vanilla lobbies
 from the modded install, and sends the bot's JSON payload over a WebSocket
-connection that stays open while hosting (ready for a future lobby-fullness
-updates feature).
+connection. The bot closes the socket immediately after its ACK, so each
+dispatch is a one-shot connect → send → await-ACK cycle with no auto-reconnect.
 
 **Non-goals:**
 - No forum-thread posting logic inside the launcher — the bot owns that; the
   launcher only sends the payload.
-- No lobby-fullness/player-count updates over the bot socket in this iteration
-  (connection stays open to support it later).
+- No lobby-fullness/player-count updates over the bot socket in this iteration.
 - No changes to the existing backend (`LobbyBackendClient` /
   `LobbyWebSocketClient`) flows.
 - No new NuGet packages — `ClientWebSocket` (already used) covers this.
@@ -90,15 +89,24 @@ Rules:
 New `Services/Lobby/LobbyBotClient.cs`, modeled on `LobbyWebSocketClient`:
 
 - `Task ConnectAsync(string endpoint, CancellationToken ct)` — opens a
-  `ClientWebSocket` to `endpoint` and keeps it open while hosting, reconnecting
-  with the same exponential backoff pattern on drop (mirrors
-  `LobbyWebSocketClient.ConnectAsync`).
+  `ClientWebSocket` to `endpoint` for a single dispatch cycle.
 - `Task SendLobbyCreatedAsync(LobbyBotPayload payload)` — serializes the
-  payload to the exact JSON and sends one frame; if the socket is not open,
+  payload to the exact JSON, sends one frame, then reads the bot's response
+  frame, and returns the parsed `LobbyBotResponse`. If the socket is not open,
   connects first so a payload always attempts delivery.
-- `void Disconnect()` — cancels the keep-alive loop and disposes the socket.
+- `void Disconnect()` — cancels any pending receive/keep-alive work and
+  disposes the socket.
 - All socket operations are wrapped in try/catch; failures never propagate to
-  the caller (fire into a void/log).
+  the caller.
+
+**Connection lifecycle (bot protocol):** the bot server calls `close()`
+immediately after transmitting its ACK response. Server-initiated closure
+after response delivery is treated as **normal, successful completion**, not a
+connection drop. Therefore **no auto-reconnect loop** is used for the bot
+dispatch cycle — the socket is a one-shot per `SendLobbyCreatedAsync` call.
+`ConnectAsync` may attempt the initial connection with bounded retries, but
+once a response is received (or the socket is closed by the server post-ACK),
+the cycle ends cleanly without reconnect.
 
 Payload record:
 
@@ -109,7 +117,13 @@ public record LobbyBotPayload(
     string Host,
     string Mod,
     string RoleId,
-    object[] AppliedTags);
+    string[] AppliedTags);
+```
+
+Response record:
+
+```csharp
+public record LobbyBotResponse(bool Ok, string? Error);
 ```
 
 Serialized (camelCase) exactly as the requirement specifies:
@@ -125,6 +139,13 @@ Serialized (camelCase) exactly as the requirement specifies:
 }
 ```
 
+**Response handling:** after sending the frame, `SendLobbyCreatedAsync`
+executes `ReceiveAsync` to await the bot's response frame. It parses
+`{ "ok": bool, "error": string }` into `LobbyBotResponse` and logs the result
+to the launcher log viewer via `LauncherLog.Write(...)`. The subsequent socket
+closure by the bot is handled gracefully (treated as the normal end of the
+dispatch cycle, no reconnect, no error surfaced).
+
 ### MainWindow wiring
 
 - Field: `private readonly Services.Lobby.LobbyBotClient _botClient = new();`
@@ -136,10 +157,17 @@ Serialized (camelCase) exactly as the requirement specifies:
   - `var mod = LobbyTypeDetector.DetectLobbyType(moddedPath);`
   - `var roleId = mod == "modded" ? _config.ModdedRoleId : _config.VanillaRoleId;`
   - `var host = _config.UserName;` (Discord display name, set at login).
-  - Build `LobbyBotPayload(info.Code, info.Region, host, mod, roleId, [])`.
-  - If `_config.BotWsEndpoint` is non-empty: start the keep-open connection via
-    `ConnectAsync(endpoint, ct)` and send the payload via
-    `SendLobbyCreatedAsync(payload)`.
+  - **Role ID validation (pre-send):** validate `roleId` against the Snowflake
+    regex `/^\d{17,20}$/`. If `roleId` is empty or fails the regex, log
+    `"Skipping lobby bot announce: invalid or missing role ID"` via
+    `LauncherLog.Write(...)` and bypass sending the payload entirely. This
+    prevents deterministic server-side payload rejections.
+  - Build `LobbyBotPayload(info.Code, info.Region, host, mod, roleId, [])`
+    (only after validation passes).
+  - If `_config.BotWsEndpoint` is non-empty: call
+    `SendLobbyCreatedAsync(payload)` which connects, sends, awaits the ACK,
+    and logs the result. No keep-open connection is maintained across
+    dispatch cycles (the bot closes after ACK).
 - In the `lobby_closed` IPC handler: `_botClient.Disconnect();`.
 
 ### Data Flow
@@ -148,9 +176,12 @@ Serialized (camelCase) exactly as the requirement specifies:
 lobby_created (IPC from AmongAPI)
   └─ mirror to backend (existing)
   └─ LobbyTypeDetector.DetectLobbyType(moddedPath) → "modded" | "vanilla"
-  └─ roleId = matching config field (empty OK)
-  └─ LobbyBotClient.ConnectAsync(botWsEndpoint)   [keep open while hosting]
-  └─ LobbyBotClient.SendLobbyCreatedAsync({ code, region, host, mod, roleId, appliedTags: [] })
+  └─ roleId = matching config field
+  └─ validate roleId against /^\d{17,20}$/
+       ├─ empty/invalid → LauncherLog "Skipping lobby bot announce: invalid or missing role ID", stop
+       └─ valid → LobbyBotClient.SendLobbyCreatedAsync({ code, region, host, mod, roleId, appliedTags: [] })
+            ├─ connect (one-shot) → send frame → ReceiveAsync → parse { ok, error } → log result
+            └─ bot closes socket post-ACK → treated as normal completion, no reconnect
 
 lobby_closed (IPC)
   └─ LobbyBotClient.Disconnect()
@@ -161,8 +192,12 @@ lobby_closed (IPC)
 - WS connect/send failures caught internally — never crash `lobby_created`.
 - Empty `BotWsEndpoint` → skip bot integration silently.
 - Missing modded install → `DetectLobbyType` returns `"vanilla"`.
-- Empty `roleId` for the chosen branch → payload still sent with `roleId: ""`
-  (bot decides whether to ignore).
+- Empty or invalid `roleId` (fails `/^\d{17,20}$/`) → log warning and bypass
+  sending the payload.
+- Server socket closure after ACK → normal completion, not an error, no
+  reconnect loop.
+- Response parse failure (`ok`/`error` absent) → log the raw response text
+  and continue; no crash.
 
 ## Testing
 
@@ -171,6 +206,8 @@ lobby_closed (IPC)
   save to `config.json`.
 - Manual: with a local WS echo server listening on `ws://127.0.0.1:8080`,
   trigger `lobby_created` and confirm the exact JSON payload arrives; confirm
-  the connection stays open until `lobby_closed`; confirm a populated plugins
-  dir yields `mod` `"modded"` and an empty/`AmongApi`-only dir yields
-  `"vanilla"`.
+  the ACK is read and logged, and the socket close after ACK ends the cycle
+  without a reconnect storm; confirm a populated plugins dir yields `mod`
+  `"modded"` and an empty/`AmongApi`-only dir yields `"vanilla"`; confirm an
+  empty or non-numeric `roleId` logs
+  "Skipping lobby bot announce: invalid or missing role ID" and sends nothing.
