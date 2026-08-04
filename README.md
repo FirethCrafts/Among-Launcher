@@ -88,9 +88,13 @@ The self-hosted lobby backend lives in `Among Backend/` (ASP.NET Core, .NET 10).
 dotnet run --project "Among Backend/Among Backend.csproj"
 ```
 
-- Point the launcher's **Server URL** setting at the backend (e.g. `https://yourserver.com/api`) and the **WebSocket** URL at `wss://yourserver.com/ws`.
+By default it listens on **`http://localhost:5013`** (see `Among Backend/Properties/launchSettings.json`).
+
+- Point the launcher's **Server URL** setting at the backend root — e.g. `http://localhost:5013` when running locally (the REST routes live at `/lobby`, `/ws`, etc.; do **not** append `/api` — the backend has no such prefix). For a real deployment use `https://yourserver.com`.
+- Point the **Bot WS Endpoint** at `ws://localhost:5013/ws` locally, or `wss://yourserver.com/ws` for a real deployment.
 - Set `Discord:WebhookUrl` in `Among Backend/appsettings.json` to enable the invite embed; leave it empty to run without Discord.
 - `Lobby:HeartbeatGraceSeconds` (default 90) controls how long a host can stop heartbeating before the backend expires its lobby.
+- To run the backend on a different port: `dotnet run --project "Among Backend/Among Backend.csproj" --urls http://localhost:8000` — then use that port in the launcher's Server URL instead.
 
 Full REST + WebSocket contract: see [api.md](api.md).
 
