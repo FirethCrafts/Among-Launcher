@@ -30,22 +30,46 @@ public class LobbyBackendClient
 
     public async Task<LobbyInfo?> GetLobbyAsync(string code, CancellationToken ct)
     {
-        using var msg = new HttpRequestMessage(HttpMethod.Get, $"lobby/{code}");
-        ApplyAuth(msg);
-        using var resp = await _http.SendAsync(msg, ct);
-        if (!resp.IsSuccessStatusCode) return null;
-        var body = await resp.Content.ReadFromJsonAsync<LobbyResponse>(cancellationToken: ct);
-        if (body == null) return null;
-        return new LobbyInfo
+        try
         {
-            Code = body.Code,
-            Region = body.Region,
-            RegionIp = body.RegionIp,
-            RegionPort = body.RegionPort,
-            ModSet = body.ModSet ?? new List<ModSetEntry>(),
-            HostUserId = body.HostUserId,
-            PlayerCount = body.PlayerCount
-        };
+            using var msg = new HttpRequestMessage(HttpMethod.Get, $"lobby/{code}");
+            ApplyAuth(msg);
+            using var resp = await _http.SendAsync(msg, ct);
+
+            if (!resp.IsSuccessStatusCode)
+            {
+                Services.LauncherLog.Write($"[Backend] GET lobby/{code} -> {(int)resp.StatusCode} {resp.ReasonPhrase}");
+                return null;
+            }
+
+            var body = await resp.Content.ReadFromJsonAsync<LobbyResponse>(cancellationToken: ct);
+            if (body == null)
+            {
+                Services.LauncherLog.Write($"[Backend] GET lobby/{code} returned an empty body.");
+                return null;
+            }
+
+            return new LobbyInfo
+            {
+                Code = body.Code,
+                Region = body.Region,
+                RegionIp = body.RegionIp,
+                RegionPort = body.RegionPort,
+                ModSet = body.ModSet ?? new List<ModSetEntry>(),
+                HostUserId = body.HostUserId,
+                PlayerCount = body.PlayerCount
+            };
+        }
+        catch (TaskCanceledException) when (!ct.IsCancellationRequested)
+        {
+            Services.LauncherLog.Write($"[Backend] GET lobby/{code} timed out.");
+            return null;
+        }
+        catch (HttpRequestException ex)
+        {
+            Services.LauncherLog.Write($"[Backend] GET lobby/{code} failed: {ex.Message}");
+            return null;
+        }
     }
 
     public async Task<bool> CreateLobbyAsync(CreateLobbyRequest req, CancellationToken ct)

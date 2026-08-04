@@ -44,7 +44,8 @@ public partial class LibraryView : UserControl
     private void InstallLibraryMod_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not Button button || button.DataContext is not LibraryEntry entry) return;
-        if (string.IsNullOrEmpty(entry.FileName)) return;
+        var fileName = entry.FileName;
+        if (string.IsNullOrEmpty(fileName)) return;
 
         var pluginsDir = GetPluginsDir();
         if (pluginsDir == null)
@@ -53,15 +54,15 @@ public partial class LibraryView : UserControl
             return;
         }
 
-        if (_library.InstallToPlugins(entry.FileName, pluginsDir))
+        if (_library.InstallToPlugins(fileName, pluginsDir))
         {
-            LibraryInfoText.Text = $"Installed '{entry.FileName}' to the game.";
+            LibraryInfoText.Text = $"Installed '{fileName}' to the game.";
             if (Window.GetWindow(this) is MainWindow mw && mw.MainView != null)
                 mw.MainView.RefreshModsList();
         }
         else
         {
-            MessageBox.Show($"Library file '{entry.FileName}' is missing.", "Library", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show($"Library file '{fileName}' is missing.", "Library", MessageBoxButton.OK, MessageBoxImage.Error);
             RefreshLibrary();
         }
     }
@@ -69,17 +70,18 @@ public partial class LibraryView : UserControl
     private void RemoveLibraryMod_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not Button button || button.DataContext is not LibraryEntry entry) return;
-        if (string.IsNullOrEmpty(entry.FileName)) return;
+        var fileName = entry.FileName;
+        if (string.IsNullOrEmpty(fileName)) return;
 
         var result = MessageBox.Show(
-            $"Remove '{entry.FileName}' from the library?\n\nThe file will be deleted.",
+            $"Remove '{fileName}' from the library?\n\nThe file will be deleted.",
             "Remove from Library",
             MessageBoxButton.YesNo,
             MessageBoxImage.Warning);
 
         if (result != MessageBoxResult.Yes) return;
 
-        _library.RemoveFromLibrary(entry.FileName);
+        _library.RemoveFromLibrary(fileName);
         RefreshLibrary();
     }
 }

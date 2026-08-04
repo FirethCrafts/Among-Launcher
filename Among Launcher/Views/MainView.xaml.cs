@@ -471,7 +471,7 @@ public partial class MainView
                 // First pass: prefer the preset's preferred asset name
                 foreach (var asset in assets.EnumerateArray())
                 {
-                    var name = asset.TryGetProperty("name", out var n) ? n.GetString() : "";
+                    var name = asset.TryGetProperty("name", out var n) ? (n.GetString() ?? "") : "";
                     if (name.EndsWith(".dll", StringComparison.OrdinalIgnoreCase) &&
                         (preset.PreferredAsset == null ||
                          string.Equals(name, preset.PreferredAsset, StringComparison.OrdinalIgnoreCase)))
@@ -486,7 +486,7 @@ public partial class MainView
                 {
                     foreach (var asset in assets.EnumerateArray())
                     {
-                        var name = asset.TryGetProperty("name", out var n) ? n.GetString() : "";
+                        var name = asset.TryGetProperty("name", out var n) ? (n.GetString() ?? "") : "";
                         if (name.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
                         {
                             downloadUrl = asset.TryGetProperty("browser_download_url", out var u) ? u.GetString() : null;

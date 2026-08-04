@@ -232,18 +232,27 @@ public partial class MainWindow
     public void HandleDeepLink(string? deepLink)
     {
         deepLink ??= Services.DeepLinkHandler.FindDeepLinkArgument();
-        if (deepLink == null) return;
+        if (deepLink == null)
+        {
+            // Normal launch (no custom-protocol URI): load the default state.
+            LogDebug("[Launcher] No deep link argument; skipping auto-join.");
+            return;
+        }
 
         var join = Services.DeepLinkHandler.TryParseJoin(deepLink);
         if (join != null)
         {
-            LogDebug($"[Launcher] Join request received: code={join.Code}");
+            LogDebug($"[Launcher] Extracted code: {join.Code}");
             _ = HandleJoinLinkAsync(join.Code);
             return;
         }
 
         var requests = Services.DeepLinkHandler.Parse(deepLink);
-        if (requests.Count == 0) return;
+        if (requests.Count == 0)
+        {
+            LogDebug($"[Launcher] Unrecognized deep link: {deepLink}");
+            return;
+        }
 
         LogDebug($"[Launcher] Deep link detected with {requests.Count} mods.");
 
@@ -348,6 +357,13 @@ public partial class MainWindow
         var modSetSync = new Services.Lobby.ModSetSync(
             Path.Combine(moddedPath, "BepInEx", "plugins"),
             (_, url, dest) => DownloadModAsync(url, dest));
+
+        // Quarantine mods that are neither whitelisted nor required by this lobby.
+        var cleanupEngine = new Services.Lobby.ModCleanupEngine(
+            Path.Combine(moddedPath, "BepInEx", "plugins"));
+        await cleanupEngine.QuarantineAsync(
+            lobby.ModSet.Select(m => m.FileName).ToList(),
+            CancellationToken.None);
 
         var joinService = new Services.Lobby.LobbyJoinService(
             getLobby: (_, _) => Task.FromResult<LobbyInfo?>(lobby),

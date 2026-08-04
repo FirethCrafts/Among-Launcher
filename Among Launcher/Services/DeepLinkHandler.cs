@@ -1,3 +1,5 @@
+using System.Text.RegularExpressions;
+
 namespace AmongLauncher.Services;
 
 public static class DeepLinkHandler
@@ -5,12 +7,66 @@ public static class DeepLinkHandler
     public const string Scheme = "amongus-launcher";
     public const string JoinScheme = "amonglauncher";
 
+    /// <summary>Among Us lobby codes are exactly 6 uppercase letters (A-Z).</summary>
+    private static readonly Regex RoomCodeRegex = new("^[A-Z]{6}$", RegexOptions.Compiled);
+
+    public record JoinRequest(string Code);
+
+    /// <summary>
+    /// Finds the custom-protocol URI in the process arguments (the OS passes the
+    /// full URI as a single argument when a registered scheme is clicked). Returns
+    /// null when the app was started normally.
+    /// </summary>
     public static string? FindDeepLinkArgument()
     {
         var args = Environment.GetCommandLineArgs();
         return args.FirstOrDefault(a =>
             a.StartsWith($"{Scheme}://", StringComparison.OrdinalIgnoreCase) ||
             a.StartsWith($"{JoinScheme}://", StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Parses a join deep link. Supports both query and path forms:
+    ///   amonglauncher://join?code=ABCDEF
+    ///   amonglauncher://join/ABCDEF
+    /// The code is trimmed, upper-cased, and must be exactly 6 alphabetical
+    /// characters. Returns null for any other URI shape or invalid code.
+    /// </summary>
+    public static JoinRequest? TryParseJoin(string deepLink)
+    {
+        if (!Uri.TryCreate(deepLink, UriKind.Absolute, out var uri))
+            return null;
+        if (!string.Equals(uri.Scheme, JoinScheme, StringComparison.OrdinalIgnoreCase))
+            return null;
+        if (!string.Equals(uri.Host, "join", StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        // Query form: join?code=ABCDEF
+        var code = ExtractParam(uri.Query.TrimStart('?'), "code");
+
+        // Path form: join/ABCDEF (Host = "join", AbsolutePath = "/ABCDEF")
+        if (string.IsNullOrWhiteSpace(code))
+        {
+            var segments = uri.AbsolutePath.Split('/',
+                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (segments.Length == 1)
+                code = segments[0];
+        }
+
+        return NormalizeRoomCode(code) is { } valid ? new JoinRequest(valid) : null;
+    }
+
+    /// <summary>
+    /// Validates and normalizes a room code: trims, upper-cases, and requires
+    /// exactly 6 alphabetical characters. Returns null when invalid.
+    /// </summary>
+    public static string? NormalizeRoomCode(string? code)
+    {
+        if (string.IsNullOrWhiteSpace(code))
+            return null;
+
+        var normalized = code.Trim().ToUpperInvariant();
+        return RoomCodeRegex.IsMatch(normalized) ? normalized : null;
     }
 
     public static List<ModDownloadRequest> Parse(string deepLink)
@@ -40,25 +96,6 @@ public static class DeepLinkHandler
         }
 
         return requests;
-    }
-
-    public record JoinRequest(string Code);
-
-    public static JoinRequest? TryParseJoin(string deepLink)
-    {
-        if (!Uri.TryCreate(deepLink, UriKind.Absolute, out var uri))
-            return null;
-        if (!string.Equals(uri.Scheme, JoinScheme, StringComparison.OrdinalIgnoreCase))
-            return null;
-        if (!string.Equals(uri.Host, "join", StringComparison.OrdinalIgnoreCase))
-            return null;
-        var code = ExtractParam(uri.Query.TrimStart('?'), "code");
-        if (string.IsNullOrWhiteSpace(code))
-            return null;
-        code = Uri.UnescapeDataString(code).Trim().ToUpperInvariant();
-        if (code.Length < 4 || code.Length > 8)
-            return null;
-        return new JoinRequest(code);
     }
 
     public static void RegisterProtocol()
