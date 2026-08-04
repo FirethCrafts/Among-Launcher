@@ -101,6 +101,12 @@ public partial class MainWindow
             var regionPort = p.TryGetProperty("regionPort", out var rp) && rp.GetInt32() > 0
                 ? rp.GetInt32()
                 : 22023;
+            // Fallback chain: Discord display name if signed in; otherwise use the
+            // in-game host name reported by Among API; otherwise a generic label.
+            var rawHost = p.TryGetProperty("host", out var h) ? h.GetString() : "";
+            var host = !string.IsNullOrWhiteSpace(_config.UserName)
+                ? _config.UserName
+                : (!string.IsNullOrWhiteSpace(rawHost) && rawHost != "UNKNOWN" ? rawHost : "Host");
             var info = new LobbyInfo
             {
                 Code = p.GetProperty("code").GetString() ?? "",
@@ -108,7 +114,8 @@ public partial class MainWindow
                 RegionIp = p.GetProperty("regionIp").GetString() ?? "",
                 RegionPort = regionPort,
                 ModSet = GetInstalledModSet(),
-                HostUserId = _userId
+                HostUserId = _userId,
+                Host = host
             };
             _activeLobby = info;
             _lobbyPlayerNames.Clear();

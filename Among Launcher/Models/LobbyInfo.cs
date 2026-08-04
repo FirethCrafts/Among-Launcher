@@ -8,5 +8,6 @@ public class LobbyInfo
     public int RegionPort { get; set; }
     public List<ModSetEntry> ModSet { get; set; } = new();
     public string? HostUserId { get; set; }
+    public string Host { get; set; } = "Host";
     public int PlayerCount { get; set; }
 }
