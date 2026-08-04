@@ -20,13 +20,13 @@ public partial class MainWindow
     private readonly PipeServer _pipeServer = new();
     private readonly HttpClient _httpClient = new();
     private string? _moddedPath;
-    private readonly Services.Lobby.LobbyBackendClient _backend;
-    private readonly Services.Lobby.LobbyWebSocketClient _ws;
+    private Services.Lobby.LobbyBackendClient _backend;
+    private Services.Lobby.LobbyWebSocketClient _ws;
     // Kept for its ctor side-effects: subscribes _ws.Kicked / _ws.Rejoin.
-    private readonly Services.Lobby.LobbyCommandService _commands;
+    private Services.Lobby.LobbyCommandService _commands;
     private readonly Services.Lobby.LobbyBotClient _botClient = new();
     private Services.Lobby.LobbyHeartbeatService? _heartbeat;
-    private readonly Config.LauncherConfig _config;
+    private Config.LauncherConfig _config;
     private string _userId = "";
     private LobbyInfo? _activeLobby;
     private Views.HostControlPanelView? _hostPanel;
@@ -94,8 +94,7 @@ public partial class MainWindow
 
         // Handler: AmongAPI created a lobby in-game - mirror it to the backend
         _pipeServer.RegisterHandler("lobby_created", async element =>
-        {
-            var p = element.GetProperty("payload");
+        {            var p = element.GetProperty("payload");
             // After host gating only the host's mod emits lobby_created, so the local
             // signed-in user is the host. The tracker sends regionPort 0; fall back to
             // the default port when it is missing or non-positive.
@@ -207,6 +206,29 @@ public partial class MainWindow
         };
     }
 
+    /// <summary>
+    /// Reloads config from disk and rebuilds the backend + WebSocket clients so a
+    /// Server URL / Bot WS endpoint saved in Settings while the app is running
+    /// takes effect immediately instead of at the next launch.
+    /// </summary>
+    private void RefreshConfig()
+    {
+        _config = Config.LauncherConfig.Load();
+        _backend = new Services.Lobby.LobbyBackendClient(_httpClient, _config);
+        _ws = new Services.Lobby.LobbyWebSocketClient(_config);
+        _commands = new Services.Lobby.LobbyCommandService(_ws,
+            killGame: () =>
+            {
+                Dispatcher.Invoke(() =>
+                {
+                    _mainView.StopGame();
+                    _mainView.UpdateModStatusText("Kicked from lobby");
+                });
+                return Task.CompletedTask;
+            },
+            rejoin: cmd => RejoinAsync(cmd));
+    }
+
     public void HandleDeepLink(string? deepLink)
     {
         deepLink ??= Services.DeepLinkHandler.FindDeepLinkArgument();
@@ -257,6 +279,10 @@ public partial class MainWindow
                 if (ContentArea.Content is MainView mv)
                     mv.UpdateModStatusText($"Joining lobby {code}...");
             });
+
+            // Reload config so a Server URL saved in Settings while the app is running
+            // takes effect immediately (the in-memory copy is a startup snapshot).
+            RefreshConfig();
 
             if (!Services.Lobby.LobbyBackendClient.IsConfigured(_config))
             {
