@@ -358,6 +358,47 @@ public static class GameAssembly
     /// <summary>Gets AmongUsClient.Instance (null-safe).</summary>
     public static object? AmongUsClient() => GetStaticProp(Type("AmongUsClient"), "Instance");
 
+    /// <summary>
+    /// The currently selected region's display name (e.g. "NA", "EU", "ASIA", or a
+    /// custom server label) via ServerManager.CurrentRegion.Name. Falls back to
+    /// "UNKNOWN" rather than throwing when reflection cannot resolve it.
+    /// </summary>
+    public static string CurrentRegionName()
+    {
+        var serverManagerType = Type("ServerManager");
+        var serverManager = serverManagerType?.BaseType == null
+            ? null
+            : GetStaticProp(serverManagerType.BaseType, "Instance");
+        if (serverManager == null)
+            return "UNKNOWN";
+
+        var region = GetInstanceProp(serverManager, "CurrentRegion");
+        if (region == null)
+            return "UNKNOWN";
+
+        var name = ToStr(GetInstanceProp(region, "Name"));
+        return string.IsNullOrEmpty(name) ? "UNKNOWN" : name;
+    }
+
+    /// <summary>
+    /// The local player's display name via PlayerControl.LocalPlayer.Data.PlayerName.
+    /// Falls back to "UNKNOWN" rather than throwing when reflection cannot resolve it.
+    /// </summary>
+    public static string LocalPlayerName()
+    {
+        var playerControlType = Type("PlayerControl");
+        var localPlayer = GetStaticMember(playerControlType, "LocalPlayer");
+        if (localPlayer == null)
+            return "UNKNOWN";
+
+        var data = GetInstanceProp(localPlayer, "Data");
+        if (data == null)
+            return "UNKNOWN";
+
+        var name = ToStr(GetInstanceProp(data, "PlayerName"));
+        return string.IsNullOrEmpty(name) ? "UNKNOWN" : name;
+    }
+
     private static PropertyInfo? ResolveProperty(Type type, string name, bool isStatic)
     {
         var key = $"{type.FullName}::{name}:{(isStatic ? 's' : 'i')}";

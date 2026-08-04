@@ -137,12 +137,16 @@ The host entered or created a lobby in-game. The launcher mirrors the lobby to t
     "code": "ABCDEF",
     "region": "NA",
     "regionIp": "127.0.0.1",
-    "regionPort": 22023
+    "regionPort": 22023,
+    "host": "PlayerName",
+    "playerCount": 1
   }
 }
 ```
 
-Note: the current `GameStateTracker` cannot read region info, so it sends `region`/`regionIp` empty and `regionPort` `0`; the launcher falls back to port `22023` when `regionPort` is absent.
+- `region` is the selected region's display name resolved from `ServerManager.CurrentRegion.Name` (e.g. `"NA"`, `"EU"`, `"ASIA"`, or a custom server label). `"UNKNOWN"` when the game hasn't loaded the server manager yet.
+- `host` is the local player's display name from `PlayerControl.LocalPlayer.Data.PlayerName`. `"UNKNOWN"` when unavailable.
+- `regionIp`/`regionPort` are currently sent empty/`0`; the launcher falls back to port `22023` when `regionPort` is missing or non-positive.
 
 **Response:** `lobby_created_ack`
 

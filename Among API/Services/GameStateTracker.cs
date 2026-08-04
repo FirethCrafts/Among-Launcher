@@ -1,12 +1,12 @@
 namespace AmongApi.Services;
 
-public record LobbyInfo(string Code, string Region, string RegionIp, int RegionPort);
+public record LobbyInfo(string Code, string Region, string RegionIp, int RegionPort, string Host, int PlayerCount);
 public record PlayerInfo(string PlayerName, int PlayerCount);
 
 /// <summary>
 /// Polls the game for lobby / player state via reflection (GameAssembly) and
-/// raises transition events. Region info is not reliably readable from here;
-/// the launcher owns region configuration, so Region fields are left empty.
+/// raises transition events. Region and host names are read from the game's
+/// ServerManager / PlayerControl (falling back to "UNKNOWN" when unavailable).
 /// </summary>
 public class GameStateTracker : IDisposable
 {
@@ -78,6 +78,8 @@ public class GameStateTracker : IDisposable
         string code;
         int count;
         bool isHost;
+        string region;
+        string host;
 
         try
         {
@@ -85,6 +87,8 @@ public class GameStateTracker : IDisposable
             code = LobbyCode();
             count = PlayerCount();
             isHost = IsHost();
+            region = GameAssembly.CurrentRegionName();
+            host = GameAssembly.LocalPlayerName();
         }
         catch (Exception ex)
         {
@@ -103,9 +107,9 @@ public class GameStateTracker : IDisposable
             {
                 if (_lastWasHost)
                 {
-                    _log.LogInfo($"[GameStateTracker] Lobby created (code {code}, players {count}).");
+                    _log.LogInfo($"[GameStateTracker] Lobby created (code {code}, region {region}, host {host}, players {count}).");
                     _lastPlayerCount = count >= 0 ? count : -1;
-                    LobbyCreated?.Invoke(this, new LobbyInfo(code, "", "", 0));
+                    LobbyCreated?.Invoke(this, new LobbyInfo(code, region, "", 0, host, count));
                 }
                 else
                 {

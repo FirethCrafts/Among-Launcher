@@ -46,9 +46,17 @@ public class Plugin : BasePlugin
             tracker.LobbyCreated += (_, info) =>
             {
                 _lastLobby = info;
-                FileLogger.Info($"Lobby created: {info.Code}");
+                FileLogger.Info($"Lobby created: {info.Code} (region {info.Region}, host {info.Host})");
                 _ = pipe.SendMessageAsync("lobby_created",
-                    new { code = info.Code, region = info.Region, regionIp = info.RegionIp, regionPort = info.RegionPort });
+                    new
+                    {
+                        code = info.Code,
+                        region = info.Region,
+                        regionIp = info.RegionIp,
+                        regionPort = info.RegionPort,
+                        host = info.Host,
+                        playerCount = info.PlayerCount
+                    });
             };
             tracker.LobbyClosed += (_, reason) =>
             {
@@ -97,7 +105,15 @@ public class Plugin : BasePlugin
             // In-game host chat commands (Task 16): /repost and /disband
             var commands = new ChatCommandHandler(Log);
             commands.OnRepost = () => _ = pipe.SendMessageAsync("lobby_created",
-                new { code = _lastLobby?.Code ?? "", region = _lastLobby?.Region ?? "", regionIp = _lastLobby?.RegionIp ?? "", regionPort = _lastLobby?.RegionPort ?? 0 });
+                new
+                {
+                    code = _lastLobby?.Code ?? "",
+                    region = _lastLobby?.Region ?? "",
+                    regionIp = _lastLobby?.RegionIp ?? "",
+                    regionPort = _lastLobby?.RegionPort ?? 0,
+                    host = _lastLobby?.Host ?? "",
+                    playerCount = _lastLobby?.PlayerCount ?? 0
+                });
             commands.OnDisband = () =>
             {
                 _ = pipe.SendMessageAsync("lobby_closed", new { code = _lastLobby?.Code ?? "", reason = "disband" });
