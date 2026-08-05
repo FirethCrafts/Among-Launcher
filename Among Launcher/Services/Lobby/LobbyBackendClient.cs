@@ -32,20 +32,20 @@ public class LobbyBackendClient
     {
         try
         {
-            using var msg = new HttpRequestMessage(HttpMethod.Get, $"lobby/{code}");
+            using var msg = new HttpRequestMessage(HttpMethod.Get, $"api/v1/lobby/{code}");
             ApplyAuth(msg);
             using var resp = await _http.SendAsync(msg, ct);
 
             if (!resp.IsSuccessStatusCode)
             {
-                Services.LauncherLog.Write($"[Backend] GET lobby/{code} -> {(int)resp.StatusCode} {resp.ReasonPhrase}");
+                Services.LauncherLog.Write($"[Backend] GET api/v1/lobby/{code} -> {(int)resp.StatusCode} {resp.ReasonPhrase}");
                 return null;
             }
 
             var body = await resp.Content.ReadFromJsonAsync<LobbyResponse>(cancellationToken: ct);
             if (body == null)
             {
-                Services.LauncherLog.Write($"[Backend] GET lobby/{code} returned an empty body.");
+                Services.LauncherLog.Write($"[Backend] GET api/v1/lobby/{code} returned an empty body.");
                 return null;
             }
 
@@ -62,35 +62,35 @@ public class LobbyBackendClient
         }
         catch (TaskCanceledException) when (!ct.IsCancellationRequested)
         {
-            Services.LauncherLog.Write($"[Backend] GET lobby/{code} timed out.");
+            Services.LauncherLog.Write($"[Backend] GET api/v1/lobby/{code} timed out.");
             return null;
         }
         catch (HttpRequestException ex)
         {
-            Services.LauncherLog.Write($"[Backend] GET lobby/{code} failed: {ex.Message}");
+            Services.LauncherLog.Write($"[Backend] GET api/v1/lobby/{code} failed: {ex.Message}");
             return null;
         }
     }
 
     public async Task<bool> CreateLobbyAsync(CreateLobbyRequest req, CancellationToken ct)
     {
-        using var msg = new HttpRequestMessage(HttpMethod.Post, "lobby") { Content = JsonContent.Create(req) };
+        using var msg = new HttpRequestMessage(HttpMethod.Post, "api/v1/lobby") { Content = JsonContent.Create(req) };
         ApplyAuth(msg);
         using var resp = await _http.SendAsync(msg, ct);
         return resp.IsSuccessStatusCode;
     }
 
     public Task<bool> RepostAsync(string code, CancellationToken ct) =>
-        PostNoContent($"lobby/{code}/repost", ct);
+        PostNoContent($"api/v1/lobby/{code}/repost", ct);
 
     public Task<bool> KickAsync(string code, string targetUserId, CancellationToken ct) =>
-        PostNoContent($"lobby/{code}/kick", ct, new { player_id = targetUserId });
+        PostNoContent($"api/v1/lobby/{code}/kick", ct, new { player_id = targetUserId });
 
     public Task<bool> DisbandAsync(string code, CancellationToken ct) =>
-        DeleteNoContent($"lobby/{code}", ct);
+        DeleteNoContent($"api/v1/lobby/{code}", ct);
 
     public Task<bool> HeartbeatAsync(string code, string hostUserId, CancellationToken ct) =>
-        PostNoContent($"lobby/{code}/heartbeat", ct);
+        PostNoContent($"api/v1/lobby/{code}/heartbeat", ct);
 
     private async Task<bool> PostNoContent(string path, CancellationToken ct, object? body = null)
     {
