@@ -27,7 +27,6 @@ public partial class MainView
         Loaded += MainView_Loaded;
         _gameManager.GameExited += OnGameExited;
 
-        // Configure HttpClient with User-Agent
         _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("AmongUsLauncher");
     }
 
@@ -530,8 +529,6 @@ public partial class MainView
         ModsList.ItemsSource = GetInstalledMods();
     }
 
-    // Profile switcher (WIP: saved profiles store no download URLs, so applying
-    // a profile only verifies present mods and relocates missing ones to the library)
     private void RefreshProfiles()
     {
         var profiles = new ModProfileManager(LauncherConfig.Load()).LoadProfiles();

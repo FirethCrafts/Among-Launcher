@@ -53,11 +53,11 @@ public class LobbyBackendClient
             {
                 Code = body.Code,
                 Region = body.Region,
-                RegionIp = body.RegionIp,
-                RegionPort = body.RegionPort,
-                ModSet = body.ModSet ?? new List<ModSetEntry>(),
-                HostUserId = body.HostUserId,
-                PlayerCount = body.PlayerCount
+                ModSet = (body.Mods ?? new List<ModInfoEntry>())
+                    .Select(m => new ModSetEntry { FileName = m.Name, Version = m.Version, Sha256 = m.FileHash })
+                    .ToList(),
+                Host = body.Host,
+                PlayerCount = body.Players?.Count ?? 0
             };
         }
         catch (TaskCanceledException) when (!ct.IsCancellationRequested)
@@ -84,13 +84,13 @@ public class LobbyBackendClient
         PostNoContent($"lobby/{code}/repost", ct);
 
     public Task<bool> KickAsync(string code, string targetUserId, CancellationToken ct) =>
-        PostNoContent($"lobby/{code}/kick", ct, new { targetUserId });
+        PostNoContent($"lobby/{code}/kick", ct, new { player_id = targetUserId });
 
     public Task<bool> DisbandAsync(string code, CancellationToken ct) =>
         DeleteNoContent($"lobby/{code}", ct);
 
     public Task<bool> HeartbeatAsync(string code, string hostUserId, CancellationToken ct) =>
-        PostNoContent($"lobby/{code}/heartbeat", ct, new { hostUserId });
+        PostNoContent($"lobby/{code}/heartbeat", ct);
 
     private async Task<bool> PostNoContent(string path, CancellationToken ct, object? body = null)
     {

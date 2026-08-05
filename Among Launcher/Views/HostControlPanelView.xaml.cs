@@ -16,7 +16,7 @@ public partial class HostControlPanelView : System.Windows.Controls.UserControl
     {
         InitializeComponent();
         CodeText.Text = lobby.Code;
-        RegionText.Text = $"{lobby.Region}  {lobby.RegionIp}:{lobby.RegionPort}";
+        RegionText.Text = lobby.Region;
         DataContext = this;
     }
 

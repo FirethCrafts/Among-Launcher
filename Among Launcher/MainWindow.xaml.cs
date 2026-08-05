@@ -22,7 +22,6 @@ public partial class MainWindow
     private string? _moddedPath;
     private Services.Lobby.LobbyBackendClient _backend;
     private Services.Lobby.LobbyWebSocketClient _ws;
-    // Kept for its ctor side-effects: subscribes _ws.Kicked / _ws.Rejoin.
     private Services.Lobby.LobbyCommandService _commands;
     private readonly Services.Lobby.LobbyBotClient _botClient = new();
     private Services.Lobby.LobbyHeartbeatService? _heartbeat;
@@ -80,7 +79,7 @@ public partial class MainWindow
             });
         };
 
-        // Handler: game_ready - AmongAPI loaded and connected
+        // Handler: game_ready
         _pipeServer.RegisterHandler("game_ready", _ =>
         {
             _gameReadyTcs?.TrySetResult(true);
@@ -92,17 +91,13 @@ public partial class MainWindow
             return Task.FromResult<object?>(new { type = "game_ready_ack", restart = false });
         });
 
-        // Handler: AmongAPI created a lobby in-game - mirror it to the backend
+        // Handler: lobby_created
         _pipeServer.RegisterHandler("lobby_created", async element =>
-        {            var p = element.GetProperty("payload");
-            // After host gating only the host's mod emits lobby_created, so the local
-            // signed-in user is the host. The tracker sends regionPort 0; fall back to
-            // the default port when it is missing or non-positive.
+        {
+            var p = element.GetProperty("payload");
             var regionPort = p.TryGetProperty("regionPort", out var rp) && rp.GetInt32() > 0
                 ? rp.GetInt32()
                 : 22023;
-            // Fallback chain: Discord display name if signed in; otherwise use the
-            // in-game host name reported by Among API; otherwise a generic label.
             var rawHost = p.TryGetProperty("host", out var h) ? h.GetString() : "";
             var host = !string.IsNullOrWhiteSpace(_config.UserName)
                 ? _config.UserName
@@ -119,13 +114,10 @@ public partial class MainWindow
             };
             _activeLobby = info;
             _lobbyPlayerNames.Clear();
-            await _backend.CreateLobbyAsync(new CreateLobbyRequest(info.Code, info.Region, info.RegionIp, info.RegionPort, info.ModSet, _userId), CancellationToken.None);
+            var modInfoEntries = info.ModSet.Select(m => new ModInfoEntry(m.FileName, m.Version, m.Sha256)).ToList();
+            await _backend.CreateLobbyAsync(new CreateLobbyRequest(info.Code, info.Region, info.Host, "modded", modInfoEntries), CancellationToken.None);
             StartHeartbeat(info.Code);
             _ = _ws.ConnectAsync(info.Code, CancellationToken.None);
-            // Only the host's mod emits lobby_created, so the host check is normally authoritative.
-            // Keep the empty-user fallback (string.IsNullOrEmpty) so testing without a signed-in
-            // profile still surfaces the host panel; when a userId IS set, require an exact match
-            // so a non-host user never sees host controls.
             if (string.IsNullOrEmpty(_userId) || _userId == info.HostUserId)
             {
                 Dispatcher.Invoke(() => ShowHostPanel(info));
@@ -154,7 +146,7 @@ public partial class MainWindow
             return new { type = "lobby_created_ack" };
         });
 
-        // Handler: AmongAPI closed a lobby - disband it on the backend
+        // Handler: lobby_closed
         _pipeServer.RegisterHandler("lobby_closed", async element =>
         {
             var code = element.GetProperty("payload").GetProperty("code").GetString() ?? "";
@@ -170,7 +162,6 @@ public partial class MainWindow
         _pipeServer.RegisterHandler("player_joined", element => ForwardPlayerChange(element, joined: true));
         _pipeServer.RegisterHandler("player_left", element => ForwardPlayerChange(element, joined: false));
 
-        // Handler: result of a join_lobby broadcast (surfaces errors to the UI)
         _pipeServer.RegisterHandler("join_lobby_result", async element =>
         {
             var p = element.GetProperty("payload");
@@ -196,7 +187,6 @@ public partial class MainWindow
         if (!empty)
             LoadSavedAvatar();
 
-        // Register custom URI protocol and check for a deep-link payload
         Services.DeepLinkHandler.RegisterProtocol();
         App.DeepLinkReceived += link => Dispatcher.Invoke(() => HandleDeepLink(link));
         Loaded += async (_, _) =>
@@ -206,11 +196,6 @@ public partial class MainWindow
         };
     }
 
-    /// <summary>
-    /// Reloads config from disk and rebuilds the backend + WebSocket clients so a
-    /// Server URL / Bot WS endpoint saved in Settings while the app is running
-    /// takes effect immediately instead of at the next launch.
-    /// </summary>
     private void RefreshConfig()
     {
         _config = Config.LauncherConfig.Load();
@@ -289,8 +274,6 @@ public partial class MainWindow
                     mv.UpdateModStatusText($"Joining lobby {code}...");
             });
 
-            // Reload config so a Server URL saved in Settings while the app is running
-            // takes effect immediately (the in-memory copy is a startup snapshot).
             RefreshConfig();
 
             if (!Services.Lobby.LobbyBackendClient.IsConfigured(_config))
@@ -442,10 +425,7 @@ public partial class MainWindow
 
         var readyTask = _gameReadyTcs.Task;
         var timeout = Task.Delay(90_000);
-        // Crash guard: fire if the game process is observed running and then dies.
-        // The game is launched via MainView's own manager, so we poll the process
-        // table and only treat a running-then-exited transition as a crash. If the
-        // game never starts, the 90s timeout still catches it.
+        // Crash guard: detect running-then-exited transition
         var exited = Task.Run(async () =>
         {
             var seenRunning = false;
@@ -486,9 +466,6 @@ public partial class MainWindow
 
     private List<LobbyPlayer> BuildPlayerList()
     {
-        // Discord ID resolution is a backend concern (deferred); player names are
-        // matched against the logged-in user (the host) via config UserName, falling
-        // back to marking the single-player row as host.
         var players = _lobbyPlayerNames.Select(n => new LobbyPlayer("", n, false)).ToList();
 
         var hostName = _config.UserName;
@@ -525,8 +502,6 @@ public partial class MainWindow
         panel.DisbandRequested += (_, _) => _ = ConfirmDisbandAsync(info.Code);
         panel.KickRequested += async (_, targetUserId) =>
         {
-            // Rows without a resolved Discord ID cannot be kicked; no-op with feedback
-            // rather than calling the backend with an empty target.
             if (string.IsNullOrEmpty(targetUserId))
             {
                 Dispatcher.Invoke(() =>
@@ -681,7 +656,6 @@ public partial class MainWindow
         confirmModal.Confirmed += (_, _) =>
         {
             ModalOverlay.Hide();
-            // Clear avatar
             SidebarAvatar.Source = null;
             SidebarAvatar.Visibility = Visibility.Collapsed;
             ShowView(_welcomeView, showSidebar: false);
@@ -723,7 +697,6 @@ public partial class MainWindow
     {
         _userId = profile.Id;
 
-        // Save avatar to config for reload on next launch
         _config.AvatarUrl = profile.AvatarUrl;
         _config.UserName = profile.GlobalName ?? profile.Username;
         _config.Save();
@@ -748,7 +721,6 @@ public partial class MainWindow
         }
         catch
         {
-            // Keep default logo if avatar fails to load
         }
     }
 
@@ -787,7 +759,6 @@ public partial class MainWindow
 
     private void StopGameButton_Click(object sender, RoutedEventArgs e)
     {
-        // Find the MainView and call its stop method
         if (ContentArea.Content is MainView mainView)
         {
             mainView.StopGame();
