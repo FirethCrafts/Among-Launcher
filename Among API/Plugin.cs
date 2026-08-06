@@ -177,7 +177,18 @@ public class Plugin : BasePlugin
                 if (_lastLobby != null && !string.IsNullOrEmpty(_serverUrl))
                 {
                     FileLogger.Info("/postlobby: posting lobby to backend...");
-                    _ = PostLobbyToBackend(_lastLobby);
+                    var lobby = _lastLobby;
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            await PostLobbyToBackend(lobby);
+                        }
+                        catch (Exception ex)
+                        {
+                            FileLogger.Error($"/postlobby background task failed: {ex.Message}");
+                        }
+                    });
                 }
                 else
                 {
