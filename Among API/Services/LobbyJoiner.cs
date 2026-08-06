@@ -143,13 +143,20 @@ public class LobbyJoiner : IDisposable
         _log.LogInfo($"[LobbyJoiner] Joining lobby '{request.Code}' via region '{request.Region}' ({request.RegionIp}:{request.RegionPort})...");
 
         if (AlreadyInLobby())
+        {
+            _log.LogWarning("[LobbyJoiner] Already in a lobby");
             return new JoinResult(false, "Already in a lobby; leaving before joining is not supported");
+        }
+
+        _log.LogInfo($"[LobbyJoiner] Current thread: {Environment.CurrentManagedThreadId}, IsMainThread: {Environment.CurrentManagedThreadId == 1}");
 
         // 1. ServerManager singleton is inherited: DestroyableSingleton<ServerManager>.Instance.
         var serverManagerType = GameAssembly.Type("ServerManager");
+        _log.LogInfo($"[LobbyJoiner] ServerManager type: {serverManagerType?.FullName ?? "null"}");
         var serverManager = serverManagerType?.BaseType == null
             ? null
             : GameAssembly.GetStaticProp(serverManagerType.BaseType, "Instance");
+        _log.LogInfo($"[LobbyJoiner] ServerManager instance: {serverManager != null}");
         if (serverManager == null)
             return new JoinResult(false, "ServerManager singleton unavailable");
 
@@ -214,26 +221,31 @@ public class LobbyJoiner : IDisposable
 
         // 5. Decode the 6-char code to an int lobby id.
         var gameCodeType = GameAssembly.Type("InnerNet.GameCode");
+        _log.LogInfo($"[LobbyJoiner] GameCode type: {gameCodeType?.FullName ?? "null"}");
         var gameIdObj = GameAssembly.CallStaticMethod(gameCodeType, "GameNameToInt",
             new object?[] { request.Code }, new[] { typeof(string) });
         if (gameIdObj == null)
+        {
+            _log.LogWarning($"[LobbyJoiner] Failed to decode code '{request.Code}'");
             return new JoinResult(false, "Failed to decode lobby code");
+        }
         var gameId = GameAssembly.ToInt(gameIdObj);
         _log.LogInfo($"[LobbyJoiner] Code '{request.Code}' -> gameId {gameId}.");
 
         // 6. Join via coroutine: CoJoinOnlineGameFromCode(gameId, fromEnterCode:false) + StartCoroutine.
         var client = GameAssembly.AmongUsClient();
+        _log.LogInfo($"[LobbyJoiner] AmongUsClient instance: {client != null}");
         if (client == null)
             return new JoinResult(false, "AmongUsClient not available (not in main menu?)");
 
         var enumerator = GameAssembly.CallInstanceMethod(client, "CoJoinOnlineGameFromCode",
             new object?[] { gameId, false }, new[] { typeof(int), typeof(bool) });
+        _log.LogInfo($"[LobbyJoiner] CoJoinOnlineGameFromCode enumerator: {enumerator != null}");
         if (enumerator == null)
             return new JoinResult(false, "Join coroutine could not be created");
 
-        // StartCoroutine has no compile-time-expressible parameter type, so the best-match
-        // overload resolution picks StartCoroutine(Il2CppSystem.Collections.IEnumerator).
         var coroutine = GameAssembly.CallInstanceMethod(client, "StartCoroutine", new object?[] { enumerator });
+        _log.LogInfo($"[LobbyJoiner] StartCoroutine result: {coroutine != null}");
         if (coroutine == null)
             return new JoinResult(false, "StartCoroutine failed (main-thread requirement not met?)");
 
