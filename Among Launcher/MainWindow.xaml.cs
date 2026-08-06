@@ -32,6 +32,8 @@ public partial class MainWindow
     private readonly List<string> _lobbyPlayerNames = new();
     private TaskCompletionSource<bool>? _gameReadyTcs;
     private bool _joining;
+    private bool _lobbyPostedToBackend;
+    private string _postedLobbyCode = "";
 
     public ModalOverlay ModalOverlayControl => ModalOverlay;
 
@@ -146,11 +148,11 @@ public partial class MainWindow
             if (_config.AutoPostLobby)
             {
                 await _backend.CreateLobbyAsync(new CreateLobbyRequest(info.Code, info.Region, info.Host, "modded", modEntries), CancellationToken.None);
+                _lobbyPostedToBackend = true;
+                _postedLobbyCode = info.Code;
+                StartHeartbeat(info.Code);
+                _ = _ws.ConnectAsync(info.Code, CancellationToken.None);
             }
-
-            // Heartbeat + WebSocket always run to keep the lobby alive on the backend
-            StartHeartbeat(info.Code);
-            _ = _ws.ConnectAsync(info.Code, CancellationToken.None);
             if (string.IsNullOrEmpty(_userId) || _userId == info.HostUserId)
             {
                 Dispatcher.Invoke(() => ShowHostPanel(info));
@@ -180,9 +182,14 @@ public partial class MainWindow
         _pipeServer.RegisterHandler("lobby_closed", async element =>
         {
             var code = element.GetProperty("payload").GetProperty("code").GetString() ?? "";
-            if (_activeLobby != null) await _backend.DisbandAsync(code, CancellationToken.None);
-            StopHeartbeat();
-            _ws.Disconnect();
+            if (_lobbyPostedToBackend && code == _postedLobbyCode)
+            {
+                await _backend.DisbandAsync(code, CancellationToken.None);
+                StopHeartbeat();
+                _ws.Disconnect();
+                _lobbyPostedToBackend = false;
+                _postedLobbyCode = "";
+            }
             _botClient.Disconnect();
             _activeLobby = null;
             _hostPanel = null;
