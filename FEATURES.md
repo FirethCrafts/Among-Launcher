@@ -30,25 +30,33 @@ This document lists the features of the **Among Launcher** (WPF desktop app) and
 - Install preset mods from GitHub repositories (latest release asset selection with preferred-name matching, `.dll` fallback) via a preset library modal.
 - Remove mods with a danger confirmation modal.
 - Mod profiles: save a named mod set, apply a profile (diff against installed, download missing, and move non-profile mods to the library).
+- Mod cleanup: quarantines mods that are not in the lobby's required set to `BepInEx/plugins/.disabled` (never hard-deleted).
 
 ### Lobby integration / deep links
 - Deep-link install: `amongus-launcher://install?mods=<url1>,<url2>` downloads and installs mods then launches the game.
-- Deep-link join: `amonglauncher://join?code=XXXXXX` fetches the lobby from the backend, syncs its mod set, launches the game, waits for readiness, and tells the in-game mod to join.
+- Deep-link join: `amonglauncher://join?code=XXXXXX` sends a GET request to the backend at `/api/v1/lobbies/<code>`, syncs the mod set, launches the game, waits for readiness, and tells the in-game mod to join.
 - Auto-registers both custom URI protocols in the registry.
 - Single-instance routing: deep links are forwarded to an already-running instance instead of opening a second copy.
 
-### Self-hosted lobby backend integration
-- REST client (create/fetch/repost/kick/disband/heartbeat lobby) with optional bearer token auth.
-- WebSocket client with reconnect/backoff that receives live `kick` and `rejoin` commands.
+### Lobby backend integration
+- REST client communicating with the Python FastAPI backend at `/api/v1/lobbies/` with optional bearer token auth.
+- Endpoints: create/refresh lobby (`POST`), fetch lobby (`GET`), heartbeat, repost, kick (`player_id`), disband.
+- Lobby data sent to the backend uses the Python backend's format: `host` (player name), `mod_type`, `mods[]` with `name`/`version`/`file_hash`.
+- WebSocket client with reconnect/backoff that receives live `kick` and `rejoin` commands from the backend.
 - Host control panel: live player list, repost, kick, and disband controls; disband gated by a confirmation modal.
-- Heartbeat service that keeps the host's lobby alive every 30s.
-- Mod-set sync: diff the lobby's mod set against local plugins and install missing mods before joining.
+- Heartbeat service that keeps the host's lobby alive every 30s (no body sent).
+- Mod-set sync: diff the lobby's mod set against local plugins and install missing DLLs before joining.
 - In-game chat commands `/repost` and `/disband` surface from the mod into the launcher's host flow.
+
+### Discord bot integration
+- Sends lobby creation events to a Discord bot via WebSocket for forum thread creation.
+- Detects lobby type (modded/vanilla) and selects the configured role ID per type.
 
 ### IPC & infrastructure
 - Named-pipe server (`AmongLauncher.IPC`) for bidirectional JSON messaging with the in-game mod; status of the connection shown in the UI.
+- Named-pipe redirect server (`AmongLauncher.Redirect`) for single-instance deep-link forwarding.
 - IPC log viewer modal.
-- Persistence via `config.json` (storefront, server URLs, Discord token/avatar/username, profiles, library).
+- Persistence via `config.json` (storefront, server URLs, Discord token/avatar/username, profiles, library, bot WS endpoint, role IDs).
 - Custom dark-matte theme with glow effects, animated buttons/modals, and a `ReduceMotion` accessibility toggle.
 - Welcome screen with entrance animations.
 
