@@ -244,7 +244,12 @@ public partial class MainView
 
     private string? GetLaunchArguments()
     {
-        var args = new List<string>();
+        var safeArgs = Environment.GetCommandLineArgs().Skip(1)
+            .Where(arg =>
+                !arg.StartsWith($"{Services.DeepLinkHandler.Scheme}://", StringComparison.OrdinalIgnoreCase) &&
+                !arg.StartsWith($"{Services.DeepLinkHandler.JoinScheme}://", StringComparison.OrdinalIgnoreCase));
+
+        var args = new List<string>(safeArgs);
 
         if (_storefront == Storefront.Epic)
             args.Add("-EpicPortal");

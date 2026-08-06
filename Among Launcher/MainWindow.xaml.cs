@@ -80,10 +80,9 @@ public partial class MainWindow
         };
 
         // Handler: game_ready
-        _pipeServer.RegisterHandler("game_ready", async _ =>
+        _pipeServer.RegisterHandler("game_ready", element =>
         {
             LogDebug("[Launcher] game_ready received from mod!");
-            _gameReadyTcs?.TrySetResult(true);
             Dispatcher.Invoke(() =>
             {
                 if (ContentArea.Content is MainView mv)
@@ -92,10 +91,18 @@ public partial class MainWindow
 
             if (!string.IsNullOrEmpty(_config.ServerUrl) && !_config.ServerUrl.Contains("yourserver.com"))
             {
-                await _pipeServer.BroadcastMessageAsync("set_server_url", new { url = _config.ServerUrl });
+                var url = _config.ServerUrl;
+                Task.Run(async () => await _pipeServer.BroadcastMessageAsync("set_server_url", new { url }));
             }
 
-            return (object?)new { type = "game_ready_ack", restart = false };
+            var tcs = _gameReadyTcs;
+            Task.Run(async () =>
+            {
+                await Task.Delay(250);
+                tcs?.TrySetResult(true);
+            });
+
+            return Task.FromResult<object?>(new { type = "game_ready_ack", restart = false });
         });
 
         // Handler: lobby_created
@@ -597,6 +604,12 @@ public partial class MainWindow
                     mv.UpdateModStatusText($"Join failed: {ex.Message}");
             });
         }
+    }
+
+    private static async Task FireDelayedReady(TaskCompletionSource<bool>? tcs)
+    {
+        await Task.Delay(250);
+        tcs?.TrySetResult(true);
     }
 
     private async Task<bool> WaitForGameReadyAsync()
