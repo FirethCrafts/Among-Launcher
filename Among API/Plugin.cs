@@ -214,7 +214,23 @@ public class Plugin : BasePlugin
     {
         try
         {
-            var url = _serverUrl.TrimEnd('/') + "/api/v1/lobbies";
+            if (string.IsNullOrEmpty(_serverUrl))
+            {
+                FileLogger.Warn("PostLobby: server URL is empty");
+                return;
+            }
+
+            var baseUrl = _serverUrl.TrimEnd('/');
+            if (!baseUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
+                !baseUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+            {
+                FileLogger.Warn($"PostLobby: invalid server URL format: {_serverUrl}");
+                return;
+            }
+
+            var url = baseUrl + "/api/v1/lobbies";
+            FileLogger.Info($"PostLobby: POST to {url}");
+
             var body = new
             {
                 code = lobby.Code,
@@ -225,17 +241,24 @@ public class Plugin : BasePlugin
             };
 
             var json = JsonSerializer.Serialize(body);
-            var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
-            var response = await _http.PostAsync(url, content);
+            FileLogger.Info($"PostLobby: payload: {json}");
 
-            if (response.IsSuccessStatusCode)
-                FileLogger.Info($"PostLobby: success ({(int)response.StatusCode})");
-            else
-                FileLogger.Warn($"PostLobby: failed ({(int)response.StatusCode} {response.ReasonPhrase})");
+            using var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
+            using var response = await _http.PostAsync(url, content).WaitAsync(TimeSpan.FromSeconds(10));
+
+            FileLogger.Info($"PostLobby: response {(int)response.StatusCode} {response.ReasonPhrase}");
+        }
+        catch (TaskCanceledException)
+        {
+            FileLogger.Warn("PostLobby: request timed out after 10s");
+        }
+        catch (HttpRequestException ex)
+        {
+            FileLogger.Error($"PostLobby HTTP error: {ex.Message}");
         }
         catch (Exception ex)
         {
-            FileLogger.Error($"PostLobby failed: {ex.Message}");
+            FileLogger.Error($"PostLobby failed: {ex.GetType().Name}: {ex.Message}");
         }
     }
 
