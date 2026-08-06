@@ -75,6 +75,19 @@ public class Plugin : BasePlugin
             FileLogger.Info("Connected to launcher.");
             Log.LogInfo($"[{MyPluginInfo.PLUGIN_NAME}] Connected to launcher.");
 
+            // Wait until the game is actually loaded before signaling ready
+            FileLogger.Info("Waiting for game to initialize...");
+            for (int i = 0; i < 60; i++)
+            {
+                var client = GameAssembly.AmongUsClient();
+                if (client != null)
+                {
+                    FileLogger.Info($"AmongUsClient found after {i * 500}ms");
+                    break;
+                }
+                await Task.Delay(500);
+            }
+
             await pipe.SendMessageAsync("game_ready");
             FileLogger.Info("Game ready signal sent to launcher.");
 
