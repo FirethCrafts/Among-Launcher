@@ -636,7 +636,7 @@ public partial class MainView
         StopGame();
 
         var pluginsDir = Path.Combine(_moddedPath, "BepInEx", "plugins");
-        var sync = new ModSetSync(pluginsDir, (_, url, dest) => DownloadModToFileAsync(url, dest));
+        var sync = new ModSetSync(pluginsDir, _httpClient);
 
         try
         {
@@ -674,9 +674,6 @@ public partial class MainView
             HideProgress();
         }
     }
-
-    private Task DownloadModToFileAsync(string url, string destPath) =>
-        Services.ModDownloader.DownloadToFileAsync(_httpClient, url, destPath);
 
     // Remove Mod
     private void RemoveMod_Click(object sender, RoutedEventArgs e)

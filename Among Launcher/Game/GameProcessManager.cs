@@ -37,31 +37,21 @@ public class GameProcessManager
         if (_gameProcess == null || _gameProcess.HasExited)
             return;
 
-        // Try graceful close first
         try
         {
             if (_gameProcess.CloseMainWindow())
-            {
-                _gameProcess.WaitForExit(3000);
-            }
+                _gameProcess.WaitForExit(15000);
         }
-        catch
-        {
-            // CloseMainWindow may throw if process already exited
-        }
+        catch { }
 
-        // Force kill if still running
         if (!_gameProcess.HasExited)
         {
             try
             {
                 _gameProcess.Kill();
-                _gameProcess.WaitForExit(5000);
+                _gameProcess.WaitForExit(15000);
             }
-            catch
-            {
-                // Process may have exited between checks
-            }
+            catch { }
         }
     }
 

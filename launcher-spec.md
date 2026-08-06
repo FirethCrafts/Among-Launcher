@@ -237,6 +237,8 @@ The launcher's `LobbyBackendClient` sends requests to `ServerUrl` (e.g. `https:/
 
 **Create / refresh lobby (`POST /api/v1/lobbies`):**
 
+Before creating the lobby, the launcher uploads each mod DLL to the backend via `POST /api/v1/mods` and includes the returned `id` and `file_hash` (SHA-256) in the lobby payload.
+
 The launcher sends:
 ```json
 {
@@ -244,7 +246,7 @@ The launcher sends:
   "region": "NA",
   "host": "Alice",
   "mod_type": "modded",
-  "mods": [{"name": "ExampleMod", "version": "1.0.0", "file_hash": null}]
+  "mods": [{"name": "ExampleMod", "version": "1.0.0", "file_hash": "9f86d08..."}]
 }
 ```
 
@@ -271,7 +273,7 @@ The Python backend returns:
 
 The launcher maps `mods` → internal `ModSetEntry` list (for mod-set sync) and uses `players.Count` for the player count.
 
-**Fetch lobby (`GET /api/v1/lobbies/{code}`):** returns a single `LobbyResponse` (same shape). Used for mod-set sync during join. The launcher converts `mods[].name` → `ModSetEntry.FileName`.
+**Fetch lobby (`GET /api/v1/lobbies/{code}`):** returns a single `LobbyResponse` (same shape). Used for mod-set sync during join. The launcher converts `mods[].name` → `ModSetEntry.FileName` and `mods[].file_hash` → `ModSetEntry.Sha256`. After downloading missing mods from `GET /api/v1/mods/{id}/download`, the launcher validates the SHA-256 hash and deletes the file on mismatch.
 
 **Heartbeat (`POST /api/v1/lobbies/{code}/heartbeat`):** no body. Response: `{ "ok": true, "error": null }`.
 
@@ -284,6 +286,8 @@ The launcher maps `mods` → internal `ModSetEntry` list (for mod-set sync) and 
 Response: `{ "ok": true, "error": null }`.
 
 **Disband (`DELETE /api/v1/lobbies/{code}`):** no body. Response: `{ "ok": true, "error": null }`.
+
+**Mod upload (`POST /api/v1/mods`):** `multipart/form-data` with `name` (string) and `file` (binary). Returns `ModInfoEntry` with `id`, `name`, `version`, `file_hash`, `size`, `url`. Auth required.
 
 **Mod download (`GET /api/v1/mods/{id}/download`):** public, returns binary file with `Content-Disposition` filename.
 

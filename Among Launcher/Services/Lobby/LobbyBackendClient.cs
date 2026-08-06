@@ -80,6 +80,26 @@ public class LobbyBackendClient
         return resp.IsSuccessStatusCode;
     }
 
+    public async Task<ModInfoEntry?> UploadModAsync(Stream fileStream, string fileName, CancellationToken ct)
+    {
+        try
+        {
+            using var content = new MultipartFormDataContent();
+            content.Add(new StreamContent(fileStream), "file", fileName);
+            content.Add(new StringContent(Path.GetFileNameWithoutExtension(fileName)), "name");
+
+            using var msg = new HttpRequestMessage(HttpMethod.Post, "api/v1/mods") { Content = content };
+            ApplyAuth(msg);
+            using var resp = await _http.SendAsync(msg, ct);
+            if (!resp.IsSuccessStatusCode) return null;
+
+            return await resp.Content.ReadFromJsonAsync<ModInfoEntry>(cancellationToken: ct);
+        }
+        catch { return null; }
+    }
+
+    public string GetModDownloadUrl(string modId) => $"api/v1/mods/{modId}/download";
+
     public Task<bool> RepostAsync(string code, CancellationToken ct) =>
         PostNoContent($"api/v1/lobbies/{code}/repost", ct);
 

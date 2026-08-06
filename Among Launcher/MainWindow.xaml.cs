@@ -108,14 +108,27 @@ public partial class MainWindow
                 Region = p.GetProperty("region").GetString() ?? "",
                 RegionIp = p.GetProperty("regionIp").GetString() ?? "",
                 RegionPort = regionPort,
-                ModSet = GetInstalledModSet(),
+                ModSet = await GetInstalledModSetAsync(),
                 HostUserId = _userId,
                 Host = host
             };
             _activeLobby = info;
             _lobbyPlayerNames.Clear();
-            var modInfoEntries = info.ModSet.Select(m => new ModInfoEntry(m.FileName, m.Version, m.Sha256)).ToList();
-            await _backend.CreateLobbyAsync(new CreateLobbyRequest(info.Code, info.Region, info.Host, "modded", modInfoEntries), CancellationToken.None);
+
+            var modEntries = new List<ModInfoEntry>();
+            var moddedPath = GetModdedPath();
+            foreach (var entry in info.ModSet)
+            {
+                var filePath = Path.Combine(moddedPath!, "BepInEx", "plugins", entry.FileName);
+                if (!File.Exists(filePath)) continue;
+
+                var uploaded = await _backend.UploadModAsync(
+                    File.OpenRead(filePath), entry.FileName, CancellationToken.None);
+
+                modEntries.Add(uploaded ?? new ModInfoEntry(entry.FileName, entry.Version, entry.Sha256));
+            }
+
+            await _backend.CreateLobbyAsync(new CreateLobbyRequest(info.Code, info.Region, info.Host, "modded", modEntries), CancellationToken.None);
             StartHeartbeat(info.Code);
             _ = _ws.ConnectAsync(info.Code, CancellationToken.None);
             if (string.IsNullOrEmpty(_userId) || _userId == info.HostUserId)
@@ -123,10 +136,7 @@ public partial class MainWindow
                 Dispatcher.Invoke(() => ShowHostPanel(info));
             }
 
-            var moddedPath = System.IO.Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "AmongLauncher", "ModdedAmongUs");
-            var mod = Services.Lobby.LobbyTypeDetector.DetectLobbyType(moddedPath);
+            var mod = Services.Lobby.LobbyTypeDetector.DetectLobbyType(moddedPath!);
             var roleId = mod == "modded" ? _config.ModdedRoleId : _config.VanillaRoleId;
 
             if (string.IsNullOrWhiteSpace(_config.BotWsEndpoint))
@@ -339,7 +349,7 @@ public partial class MainWindow
 
         var modSetSync = new Services.Lobby.ModSetSync(
             Path.Combine(moddedPath, "BepInEx", "plugins"),
-            (_, url, dest) => DownloadModAsync(url, dest));
+            _httpClient, _backend);
 
         // Quarantine mods that are neither whitelisted nor required by this lobby.
         var cleanupEngine = new Services.Lobby.ModCleanupEngine(
@@ -614,7 +624,7 @@ public partial class MainWindow
         return Directory.Exists(_moddedPath) ? _moddedPath : null;
     }
 
-    private List<ModSetEntry> GetInstalledModSet()
+    private async Task<List<ModSetEntry>> GetInstalledModSetAsync()
     {
         var moddedPath = GetModdedPath();
         if (string.IsNullOrEmpty(moddedPath)) return new List<ModSetEntry>();
@@ -622,13 +632,14 @@ public partial class MainWindow
         var pluginsDir = Path.Combine(moddedPath, "BepInEx", "plugins");
         if (!Directory.Exists(pluginsDir)) return new List<ModSetEntry>();
 
-        return Directory.GetFiles(pluginsDir, "*.dll")
-            .Select(f => new ModSetEntry { FileName = Path.GetFileName(f) })
-            .ToList();
+        var entries = new List<ModSetEntry>();
+        foreach (var file in Directory.GetFiles(pluginsDir, "*.dll"))
+        {
+            var hash = await Services.Sha256Helper.HashFileAsync(file);
+            entries.Add(new ModSetEntry { FileName = Path.GetFileName(file), Sha256 = hash });
+        }
+        return entries;
     }
-
-    private async Task DownloadModAsync(string url, string destPath) =>
-        await Services.ModDownloader.DownloadToFileAsync(_httpClient, url, destPath, LogDebug);
 
     private void NavButton_Click(object sender, RoutedEventArgs e)
     {
