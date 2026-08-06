@@ -78,8 +78,6 @@ public class GameStateTracker : IDisposable
         string code;
         int count;
         bool isHost;
-        string region;
-        string host;
 
         try
         {
@@ -87,8 +85,6 @@ public class GameStateTracker : IDisposable
             code = LobbyCode();
             count = PlayerCount();
             isHost = IsHost();
-            region = GameAssembly.CurrentRegionName();
-            host = GameAssembly.LocalPlayerName();
         }
         catch (Exception ex)
         {
@@ -98,8 +94,6 @@ public class GameStateTracker : IDisposable
 
         lock (_lock)
         {
-            // Only meaningful while in a lobby; kept for the leave transition, when the
-            // connection may already be torn down and the host check would be unreliable.
             if (inLobby)
                 _lastWasHost = isHost;
 
@@ -107,6 +101,10 @@ public class GameStateTracker : IDisposable
             {
                 if (_lastWasHost)
                 {
+                    var region = "UNKNOWN";
+                    var host = "UNKNOWN";
+                    try { region = GameAssembly.CurrentRegionName(); } catch { }
+                    try { host = GameAssembly.LocalPlayerName(); } catch { }
                     _log.LogInfo($"[GameStateTracker] Lobby created (code {code}, region {region}, host {host}, players {count}).");
                     _lastPlayerCount = count >= 0 ? count : -1;
                     LobbyCreated?.Invoke(this, new LobbyInfo(code, region, "", 0, host, count));
