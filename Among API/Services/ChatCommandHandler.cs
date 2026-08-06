@@ -107,10 +107,18 @@ public class ChatCommandHandler : IDisposable
         if (!handled)
             return;
 
-        if (TryClearInput())
-            _lastHandledText = "";
-        else
+        try
+        {
+            if (TryClearInput())
+                _lastHandledText = "";
+            else
+                _lastHandledText = text;
+        }
+        catch (Exception ex)
+        {
+            FileLogger.Error($"[ChatCommandHandler] Input clear failed: {ex.Message}");
             _lastHandledText = text;
+        }
     }
 
     /// <summary>
