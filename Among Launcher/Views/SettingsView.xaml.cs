@@ -40,6 +40,7 @@ public partial class SettingsView
         ModdedRoleIdTextBox.Text = config.ModdedRoleId;
         VanillaRoleIdTextBox.Text = config.VanillaRoleId;
         DebugModeToggle.IsChecked = config.DebugMode;
+        AutoPostToggle.IsChecked = config.AutoPostLobby;
 
         _isInitializing = true;
         if (StorefrontCombo.Items.Count == 0)
@@ -89,6 +90,14 @@ public partial class SettingsView
         if (_isInitializing || !IsLoaded) return;
         var config = Config.LauncherConfig.Load();
         config.DebugMode = DebugModeToggle.IsChecked == true;
+        config.Save();
+    }
+
+    private void AutoPostToggle_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_isInitializing || !IsLoaded) return;
+        var config = Config.LauncherConfig.Load();
+        config.AutoPostLobby = AutoPostToggle.IsChecked == true;
         config.Save();
     }
 

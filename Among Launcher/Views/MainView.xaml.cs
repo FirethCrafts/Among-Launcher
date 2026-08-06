@@ -244,11 +244,18 @@ public partial class MainView
 
     private string? GetLaunchArguments()
     {
-        return _storefront switch
-        {
-            Storefront.Epic => "-EpicPortal",
-            _ => null
-        };
+        var args = new List<string>();
+
+        if (_storefront == Storefront.Epic)
+            args.Add("-EpicPortal");
+
+        var config = Config.LauncherConfig.Load();
+        args.Add(config.AutoPostLobby ? "--autopost" : "--no-autopost");
+
+        if (!string.IsNullOrEmpty(config.ServerUrl) && !config.ServerUrl.Contains("yourserver.com"))
+            args.Add($"--server-url={config.ServerUrl}");
+
+        return args.Count > 0 ? string.Join(" ", args) : null;
     }
 
     private void BrowseFilesButton_Click(object sender, RoutedEventArgs e)

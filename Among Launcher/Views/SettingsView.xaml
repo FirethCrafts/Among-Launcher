@@ -17,6 +17,7 @@
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
         <TextBlock Grid.Row="0" Text="Settings" Style="{StaticResource PageTitle}"/>
@@ -133,6 +134,27 @@
                 <ToggleButton Grid.Column="1" x:Name="DebugModeToggle"
                               Checked="DebugModeToggle_Changed"
                               Unchecked="DebugModeToggle_Changed"
+                              IsChecked="False"
+                              Style="{StaticResource GlassToggle}"
+                              VerticalAlignment="Center" Margin="8,0,0,0"/>
+            </Grid>
+        </Border>
+
+        <!-- Auto-Post Lobby -->
+        <Border Grid.Row="8" Style="{StaticResource GlassCard}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0">
+                    <TextBlock Text="AUTO-POST LOBBY" Style="{StaticResource CardHeader}"/>
+                    <TextBlock Text="Automatically posts lobby to backend on game start. Off = use /postlobby in chat."
+                               FontSize="12" Foreground="{StaticResource TextMuted}" TextWrapping="Wrap"/>
+                </StackPanel>
+                <ToggleButton Grid.Column="1" x:Name="AutoPostToggle"
+                              Checked="AutoPostToggle_Changed"
+                              Unchecked="AutoPostToggle_Changed"
                               IsChecked="False"
                               Style="{StaticResource GlassToggle}"
                               VerticalAlignment="Center" Margin="8,0,0,0"/>

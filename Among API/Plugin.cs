@@ -1,3 +1,6 @@
+using System.Net.Http;
+using System.Text.Json;
+
 namespace AmongApi;
 
 [BepInPlugin(MyPluginInfo.PLUGIN_GUID, MyPluginInfo.PLUGIN_NAME, MyPluginInfo.PLUGIN_VERSION)]
@@ -5,6 +8,9 @@ public class Plugin : BasePlugin
 {
     internal static new ManualLogSource Log = null!;
     private LobbyInfo? _lastLobby;
+    private bool _autoPost;
+    private string _serverUrl = "";
+    private readonly HttpClient _http = new();
 
     public override void Load()
     {
@@ -14,7 +20,39 @@ public class Plugin : BasePlugin
         FileLogger.Info($"Plugin v{MyPluginInfo.PLUGIN_VERSION} loading...");
         Log.LogInfo($"[{MyPluginInfo.PLUGIN_NAME}] Loading...");
 
+        ParseLaunchArgs();
+
         _ = RunAsync();
+    }
+
+    private void ParseLaunchArgs()
+    {
+        try
+        {
+            var args = Environment.GetCommandLineArgs();
+            for (int i = 0; i < args.Length; i++)
+            {
+                if (args[i].Equals("--autopost", StringComparison.OrdinalIgnoreCase))
+                {
+                    _autoPost = true;
+                    FileLogger.Info("Auto-post enabled via launch args.");
+                }
+                else if (args[i].Equals("--no-autopost", StringComparison.OrdinalIgnoreCase))
+                {
+                    _autoPost = false;
+                    FileLogger.Info("Auto-post disabled via launch args.");
+                }
+                else if (args[i].StartsWith("--server-url=", StringComparison.OrdinalIgnoreCase))
+                {
+                    _serverUrl = args[i]["--server-url=".Length..].Trim();
+                    FileLogger.Info($"Server URL from args: {_serverUrl}");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            FileLogger.Error($"Failed to parse launch args: {ex.Message}");
+        }
     }
 
     private async Task RunAsync()
@@ -37,9 +75,20 @@ public class Plugin : BasePlugin
             FileLogger.Info("Connected to launcher.");
             Log.LogInfo($"[{MyPluginInfo.PLUGIN_NAME}] Connected to launcher.");
 
-            // Tell launcher the game is ready
             await pipe.SendMessageAsync("game_ready");
             FileLogger.Info("Game ready signal sent to launcher.");
+
+            // Listen for server_url from launcher if not set via args
+            pipe.RegisterHandler("set_server_url", element =>
+            {
+                var p = element.GetProperty("payload");
+                if (p.TryGetProperty("url", out var urlProp))
+                {
+                    _serverUrl = urlProp.GetString() ?? "";
+                    FileLogger.Info($"Server URL received from launcher: {_serverUrl}");
+                }
+                return Task.FromResult<object?>(null);
+            });
 
             // Report lobby / player state transitions to the launcher
             var tracker = new GameStateTracker(Log);
@@ -57,6 +106,11 @@ public class Plugin : BasePlugin
                         host = info.Host,
                         playerCount = info.PlayerCount
                     });
+
+                if (_autoPost && !string.IsNullOrEmpty(_serverUrl))
+                {
+                    _ = PostLobbyToBackend(info);
+                }
             };
             tracker.LobbyClosed += (_, reason) =>
             {
@@ -76,7 +130,6 @@ public class Plugin : BasePlugin
             };
             tracker.Start();
 
-            // In-game direct lobby join (Task 15)
             var joiner = new LobbyJoiner(Log);
             pipe.Disconnected += (_, _) => joiner.Dispose();
 
@@ -102,7 +155,7 @@ public class Plugin : BasePlugin
                 return new { success = result.Success, error = result.Error };
             });
 
-            // In-game host chat commands (Task 16): /repost and /disband
+            // Chat commands: /repost, /disband, /postlobby
             var commands = new ChatCommandHandler(Log);
             commands.OnRepost = () => _ = pipe.SendMessageAsync("lobby_created",
                 new
@@ -119,13 +172,24 @@ public class Plugin : BasePlugin
                 _ = pipe.SendMessageAsync("lobby_closed", new { code = _lastLobby?.Code ?? "", reason = "disband" });
                 LeaveLobby();
             };
+            commands.OnPostLobby = () =>
+            {
+                if (_lastLobby != null && !string.IsNullOrEmpty(_serverUrl))
+                {
+                    FileLogger.Info("/postlobby: posting lobby to backend...");
+                    _ = PostLobbyToBackend(_lastLobby);
+                }
+                else
+                {
+                    FileLogger.Warn("/postlobby: no active lobby or server URL not set.");
+                }
+            };
             commands.Start();
 
-            // Stop polling if the launcher connection drops
             pipe.Disconnected += (_, _) => tracker.Stop();
             pipe.Disconnected += (_, _) => commands.Dispose();
 
-            // Keep connection alive - launcher may send commands later
+            FileLogger.Info($"Auto-post: {_autoPost}, Server URL: {_serverUrl}");
             await Task.Delay(Timeout.Infinite);
         }
         catch (Exception ex)
@@ -135,11 +199,35 @@ public class Plugin : BasePlugin
         }
     }
 
-    /// <summary>
-    /// Leaves the current lobby via the game API: AmongUsClient.Instance.ExitGame
-    /// (DisconnectReasons.ExitGame) — the same path the in-game "leave" button uses.
-    /// All reflection calls are wrapped in try/catch; failures are logged, never thrown.
-    /// </summary>
+    private async Task PostLobbyToBackend(LobbyInfo lobby)
+    {
+        try
+        {
+            var url = _serverUrl.TrimEnd('/') + "/api/v1/lobbies";
+            var body = new
+            {
+                code = lobby.Code,
+                region = lobby.Region,
+                host = lobby.Host,
+                mod_type = "modded",
+                mods = new object[] { }
+            };
+
+            var json = JsonSerializer.Serialize(body);
+            var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
+            var response = await _http.PostAsync(url, content);
+
+            if (response.IsSuccessStatusCode)
+                FileLogger.Info($"PostLobby: success ({(int)response.StatusCode})");
+            else
+                FileLogger.Warn($"PostLobby: failed ({(int)response.StatusCode} {response.ReasonPhrase})");
+        }
+        catch (Exception ex)
+        {
+            FileLogger.Error($"PostLobby failed: {ex.Message}");
+        }
+    }
+
     private static void LeaveLobby()
     {
         try

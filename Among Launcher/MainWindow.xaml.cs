@@ -80,7 +80,7 @@ public partial class MainWindow
         };
 
         // Handler: game_ready
-        _pipeServer.RegisterHandler("game_ready", _ =>
+        _pipeServer.RegisterHandler("game_ready", async _ =>
         {
             LogDebug("[Launcher] game_ready received from mod!");
             _gameReadyTcs?.TrySetResult(true);
@@ -89,7 +89,13 @@ public partial class MainWindow
                 if (ContentArea.Content is MainView mv)
                     mv.UpdateModStatusText("Game loaded — AmongAPI active");
             });
-            return Task.FromResult<object?>(new { type = "game_ready_ack", restart = false });
+
+            if (!string.IsNullOrEmpty(_config.ServerUrl) && !_config.ServerUrl.Contains("yourserver.com"))
+            {
+                await _pipeServer.BroadcastMessageAsync("set_server_url", new { url = _config.ServerUrl });
+            }
+
+            return (object?)new { type = "game_ready_ack", restart = false };
         });
 
         // Handler: lobby_created

@@ -17,6 +17,7 @@ public class ChatCommandHandler : IDisposable
 
     public Action? OnRepost { get; set; }
     public Action? OnDisband { get; set; }
+    public Action? OnPostLobby { get; set; }
 
     public ChatCommandHandler(ManualLogSource log) => _log = log;
 
@@ -93,6 +94,12 @@ public class ChatCommandHandler : IDisposable
             _log.LogInfo("[ChatCommandHandler] /disband detected.");
             handled = true;
             OnDisband?.Invoke();
+        }
+        else if (text.StartsWith("/postlobby", StringComparison.OrdinalIgnoreCase))
+        {
+            _log.LogInfo("[ChatCommandHandler] /postlobby detected.");
+            handled = true;
+            OnPostLobby?.Invoke();
         }
 
         if (!handled)

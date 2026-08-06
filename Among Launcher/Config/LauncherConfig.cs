@@ -29,6 +29,7 @@ public class LauncherConfig
     public List<ModProfile> Profiles { get; set; } = new();
     public List<LibraryEntry> Library { get; set; } = new();
     public bool DebugMode { get; set; }
+    public bool AutoPostLobby { get; set; }
 
     public static LauncherConfig Load()
     {
