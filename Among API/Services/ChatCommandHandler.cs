@@ -76,27 +76,29 @@ public class ChatCommandHandler : IDisposable
             return;
         }
 
-        // Re-fire guard: if the same text is still sitting in the input (input
-        // clear failed), don't invoke the action repeatedly. Any change or a
-        // manual clear resets the guard so the same command can be used again.
         if (string.Equals(text, _lastHandledText, StringComparison.Ordinal))
             return;
+
+        FileLogger.Info($"[ChatCommandHandler] Chat input: '{text}'");
 
         var handled = false;
         if (text.StartsWith("/repost", StringComparison.OrdinalIgnoreCase))
         {
+            FileLogger.Info("[ChatCommandHandler] /repost detected.");
             _log.LogInfo("[ChatCommandHandler] /repost detected.");
             handled = true;
             OnRepost?.Invoke();
         }
         else if (text.StartsWith("/disband", StringComparison.OrdinalIgnoreCase))
         {
+            FileLogger.Info("[ChatCommandHandler] /disband detected.");
             _log.LogInfo("[ChatCommandHandler] /disband detected.");
             handled = true;
             OnDisband?.Invoke();
         }
         else if (text.StartsWith("/postlobby", StringComparison.OrdinalIgnoreCase))
         {
+            FileLogger.Info("[ChatCommandHandler] /postlobby detected.");
             _log.LogInfo("[ChatCommandHandler] /postlobby detected.");
             handled = true;
             OnPostLobby?.Invoke();
