@@ -901,10 +901,7 @@ public partial class MainWindow
 
     private void StopGameButton_Click(object sender, RoutedEventArgs e)
     {
-        if (ContentArea.Content is MainView mainView)
-        {
-            mainView.StopGame();
-        }
+        _mainView.StopGame();
     }
 
     private void Minimize_Click(object sender, RoutedEventArgs e) =>

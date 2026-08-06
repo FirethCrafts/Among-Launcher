@@ -134,6 +134,7 @@
                               Checked="DebugModeToggle_Changed"
                               Unchecked="DebugModeToggle_Changed"
                               IsChecked="False"
+                              Style="{StaticResource GlassToggle}"
                               VerticalAlignment="Center" Margin="8,0,0,0"/>
             </Grid>
         </Border>

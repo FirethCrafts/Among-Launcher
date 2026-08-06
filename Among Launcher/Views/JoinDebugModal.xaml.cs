@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Documents;
+using System.Text.RegularExpressions;
 
 namespace AmongLauncher.Views;
 
@@ -17,11 +18,31 @@ public partial class JoinDebugModal : UserControl
     {
         Dispatcher.Invoke(() =>
         {
-            var run = new Run(text + "\n")
+            if (bold)
             {
-                FontWeight = bold ? FontWeights.Bold : FontWeights.Normal
-            };
-            StatusTextBlock.Inlines.Add(run);
+                var run = new Run(text + "\n") { FontWeight = FontWeights.Bold };
+                StatusTextBlock.Inlines.Add(run);
+            }
+            else
+            {
+                var parts = Regex.Split(text, @"(\*\*.*?\*\*)");
+                foreach (var part in parts)
+                {
+                    if (string.IsNullOrEmpty(part)) continue;
+
+                    if (part.StartsWith("**") && part.EndsWith("**"))
+                    {
+                        var inner = part[2..^2];
+                        StatusTextBlock.Inlines.Add(new Run(inner + "\n") { FontWeight = FontWeights.Bold });
+                    }
+                    else
+                    {
+                        StatusTextBlock.Inlines.Add(new Run(part));
+                    }
+                }
+                StatusTextBlock.Inlines.Add(new Run("\n"));
+            }
+
             LogScrollViewer.ScrollToEnd();
         });
     }

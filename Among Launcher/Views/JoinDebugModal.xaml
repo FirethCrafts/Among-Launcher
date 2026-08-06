@@ -4,24 +4,29 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              mc:Ignorable="d"
-             d:DesignHeight="400" d:DesignWidth="450">
+             d:DesignHeight="420" d:DesignWidth="450">
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <ScrollViewer x:Name="LogScrollViewer" Grid.Row="0"
-                      VerticalScrollBarVisibility="Auto" MaxHeight="360">
-            <TextBlock x:Name="StatusTextBlock" Text=""
-                       FontSize="13" Foreground="{StaticResource TextBody}"
-                       FontFamily="Consolas" TextWrapping="Wrap" LineHeight="22"/>
-        </ScrollViewer>
+        <Border Grid.Row="0" Background="#0DFFFFFF" CornerRadius="8"
+                BorderBrush="{StaticResource GlassBorder}" BorderThickness="1"
+                Padding="16" Margin="0,0,0,4">
+            <ScrollViewer x:Name="LogScrollViewer"
+                          VerticalScrollBarVisibility="Auto">
+                <TextBlock x:Name="StatusTextBlock" Text=""
+                           FontSize="13" Foreground="{StaticResource TextBody}"
+                           FontFamily="Consolas" TextWrapping="Wrap" LineHeight="22"/>
+            </ScrollViewer>
+        </Border>
 
         <Button x:Name="PlayButton" Content="PLAY" Visibility="Collapsed"
                 Click="PlayButton_Click"
                 Height="40" Padding="30,8" FontSize="16" FontWeight="Bold"
-                HorizontalAlignment="Right" Margin="0,12,0,0"
+                HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                Margin="0,8,0,0"
                 Background="#10B981" Foreground="White" BorderThickness="0"
                 Cursor="Hand"/>
     </Grid>
