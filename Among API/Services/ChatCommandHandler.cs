@@ -161,19 +161,34 @@ public class ChatCommandHandler : IDisposable
 
     private static object? GetFreeChatField()
     {
-        // HudManager : DestroyableSingleton<HudManager>; the Instance static lives
-        // on the closed generic base (same pattern as ServerManager in LobbyJoiner).
-        var hudManagerType = GameAssembly.Type("HudManager");
-        if (hudManagerType?.BaseType == null)
-            return null;
-        var hudManager = GameAssembly.GetStaticProp(hudManagerType.BaseType, "Instance");
-        if (hudManager == null)
-            return null;
+        try
+        {
+            var hudManagerType = GameAssembly.Type("HudManager");
+            if (hudManagerType?.BaseType == null)
+            {
+                FileLogger.Warn("[ChatCommandHandler] HudManager type not found");
+                return null;
+            }
+            var hudManager = GameAssembly.GetStaticProp(hudManagerType.BaseType, "Instance");
+            if (hudManager == null)
+            {
+                FileLogger.Warn("[ChatCommandHandler] HudManager.Instance is null");
+                return null;
+            }
 
-        var chat = GameAssembly.GetInstanceProp(hudManager, "Chat");
-        if (chat == null)
-            return null;
+            var chat = GameAssembly.GetInstanceProp(hudManager, "Chat");
+            if (chat == null)
+            {
+                FileLogger.Warn("[ChatCommandHandler] Chat is null");
+                return null;
+            }
 
-        return GameAssembly.GetInstanceProp(chat, "freeChatField");
+            return GameAssembly.GetInstanceProp(chat, "freeChatField");
+        }
+        catch (Exception ex)
+        {
+            FileLogger.Error($"[ChatCommandHandler] GetFreeChatField failed: {ex.Message}");
+            return null;
+        }
     }
 }
