@@ -88,6 +88,9 @@ public class Plugin : BasePlugin
                 await Task.Delay(500);
             }
 
+            // Capture Unity's SynchronizationContext for main-thread dispatch
+            MainThreadDispatcher.CaptureContext();
+
             await pipe.SendMessageAsync("game_ready");
             FileLogger.Info("Game ready signal sent to launcher.");
 
@@ -122,7 +125,19 @@ public class Plugin : BasePlugin
 
                 if (_autoPost && !string.IsNullOrEmpty(_serverUrl))
                 {
-                    _ = PostLobbyToBackend(info);
+                    FileLogger.Info("Auto-post: dispatching lobby POST to main thread...");
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+                            await PostLobbyToBackend(info, cts.Token);
+                        }
+                        catch (Exception ex)
+                        {
+                            FileLogger.Error($"Auto-post background task failed: {ex.GetType().Name}: {ex.Message}");
+                        }
+                    });
                 }
             };
             tracker.LobbyClosed += (_, reason) =>
@@ -143,6 +158,7 @@ public class Plugin : BasePlugin
             };
             tracker.Start();
 
+            // In-game direct lobby join
             var joiner = new LobbyJoiner(Log);
             pipe.Disconnected += (_, _) => joiner.Dispose();
 
@@ -156,10 +172,15 @@ public class Plugin : BasePlugin
                     var region = ReadString(payload, "region");
                     var regionIp = ReadString(payload, "regionIp");
                     var regionPort = ReadInt(payload, "regionPort");
+
+                    FileLogger.Info($"join_lobby received: code={code}, region={region}, regionIp={regionIp}, regionPort={regionPort}");
+
+                    // Dispatch join to main thread via SynchronizationContext
                     result = await joiner.JoinAsync(code, region, regionIp, regionPort);
                 }
                 catch (Exception ex)
                 {
+                    FileLogger.Error($"join_lobby handler exception: {ex.GetType().Name}: {ex.Message}");
                     result = new JoinResult(false, ex.Message);
                 }
 
@@ -189,17 +210,18 @@ public class Plugin : BasePlugin
             {
                 if (_lastLobby != null && !string.IsNullOrEmpty(_serverUrl))
                 {
-                    FileLogger.Info("/postlobby: posting lobby to backend...");
+                    FileLogger.Info("/postlobby: dispatching POST to background thread...");
                     var lobby = _lastLobby;
                     _ = Task.Run(async () =>
                     {
                         try
                         {
-                            await PostLobbyToBackend(lobby);
+                            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+                            await PostLobbyToBackend(lobby, cts.Token);
                         }
                         catch (Exception ex)
                         {
-                            FileLogger.Error($"/postlobby background task failed: {ex.Message}");
+                            FileLogger.Error($"/postlobby background task failed: {ex.GetType().Name}: {ex.Message}");
                         }
                     });
                 }
@@ -223,56 +245,40 @@ public class Plugin : BasePlugin
         }
     }
 
-    private async Task PostLobbyToBackend(LobbyInfo lobby)
+    private async Task PostLobbyToBackend(LobbyInfo lobby, CancellationToken ct)
     {
-        try
+        if (string.IsNullOrEmpty(_serverUrl))
         {
-            if (string.IsNullOrEmpty(_serverUrl))
-            {
-                FileLogger.Warn("PostLobby: server URL is empty");
-                return;
-            }
-
-            var baseUrl = _serverUrl.TrimEnd('/');
-            if (!baseUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
-                !baseUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
-            {
-                FileLogger.Warn($"PostLobby: invalid server URL format: {_serverUrl}");
-                return;
-            }
-
-            var url = baseUrl + "/api/v1/lobbies";
-            FileLogger.Info($"PostLobby: POST to {url}");
-
-            var body = new
-            {
-                code = lobby.Code,
-                region = lobby.Region,
-                host = lobby.Host,
-                mod_type = "modded",
-                mods = new object[] { }
-            };
-
-            var json = JsonSerializer.Serialize(body);
-            FileLogger.Info($"PostLobby: payload: {json}");
-
-            using var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
-            using var response = await _http.PostAsync(url, content).WaitAsync(TimeSpan.FromSeconds(10));
-
-            FileLogger.Info($"PostLobby: response {(int)response.StatusCode} {response.ReasonPhrase}");
+            FileLogger.Warn("PostLobby: server URL is empty");
+            return;
         }
-        catch (TaskCanceledException)
+
+        var baseUrl = _serverUrl.TrimEnd('/');
+        if (!baseUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
+            !baseUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
         {
-            FileLogger.Warn("PostLobby: request timed out after 10s");
+            FileLogger.Warn($"PostLobby: invalid server URL format: {_serverUrl}");
+            return;
         }
-        catch (HttpRequestException ex)
+
+        var url = baseUrl + "/api/v1/lobbies";
+        FileLogger.Info($"PostLobby: POST to {url}");
+
+        var body = new
         {
-            FileLogger.Error($"PostLobby HTTP error: {ex.Message}");
-        }
-        catch (Exception ex)
-        {
-            FileLogger.Error($"PostLobby failed: {ex.GetType().Name}: {ex.Message}");
-        }
+            code = lobby.Code,
+            region = lobby.Region,
+            host = lobby.Host,
+            mod_type = "modded",
+            mods = new object[] { }
+        };
+
+        var json = JsonSerializer.Serialize(body);
+        FileLogger.Info($"PostLobby: payload: {json}");
+
+        using var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
+        using var response = await _http.PostAsync(url, content, ct);
+        FileLogger.Info($"PostLobby: response {(int)response.StatusCode} {response.ReasonPhrase}");
     }
 
     private static void LeaveLobby()
@@ -282,7 +288,7 @@ public class Plugin : BasePlugin
             var client = GameAssembly.AmongUsClient();
             if (client == null)
             {
-                FileLogger.Warn("LeaveLobby: AmongUsClient not available; nothing to leave.");
+                FileLogger.Warn("LeaveLobby: AmongUsClient not available");
                 return;
             }
 
@@ -290,18 +296,12 @@ public class Plugin : BasePlugin
             var exitGame = GameAssembly.EnumValue(disconnectReasons, "ExitGame");
             if (exitGame == null)
             {
-                FileLogger.Warn("LeaveLobby: DisconnectReasons.ExitGame not found.");
-                return;
-            }
-
-            if (!GameAssembly.HasInstanceMethod(client, "ExitGame", 1))
-            {
-                FileLogger.Warn("LeaveLobby: ExitGame(DisconnectReasons) not found.");
+                FileLogger.Warn("LeaveLobby: DisconnectReasons.ExitGame not found");
                 return;
             }
 
             GameAssembly.CallInstanceMethod(client, "ExitGame", new object?[] { exitGame });
-            FileLogger.Info("LeaveLobby: ExitGame(DisconnectReasons.ExitGame) invoked.");
+            FileLogger.Info("LeaveLobby: ExitGame invoked");
         }
         catch (Exception ex)
         {

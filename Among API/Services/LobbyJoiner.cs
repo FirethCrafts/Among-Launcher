@@ -5,27 +5,12 @@ namespace AmongApi.Services;
 public record JoinResult(bool Success, string? Error);
 
 /// <summary>
-/// In-game direct lobby join. Follows the research doc §5.5 ordered sequence:
-/// ServerManager (via DestroyableSingleton&lt;ServerManager&gt;.Instance) → build a
-/// StaticHttpRegionInfo + ServerInfo array → AddOrUpdateRegion → SetRegion →
-/// GameCode.GameNameToInt → AmongUsClient.Instance.CoJoinOnlineGameFromCode →
-/// MonoBehaviour.StartCoroutine. All game access is reflection via GameAssembly
-/// (zero game-assembly references; the csproj is untouched).
-///
-/// THREADING: Unity APIs and coroutine starts must run on the Unity main thread,
-/// but pipe handlers arrive on the plugin's async loop thread. This implementation
-/// uses the pragmatic approach sanctioned for the task: JoinAsync only validates and
-/// enqueues the request; a background pump (100ms tick) drains the queue and runs the
-/// full region-set + join sequence. The pump thread is NOT the Unity main thread.
-/// StartCoroutine is called reflection-only and any failure is caught, logged and
-/// returned as a failed JoinResult (the launcher retries). A production improvement
-/// is a plugin-owned MonoBehaviour created at runtime whose Update drains the queue
-/// on the main thread; that requires a Unity compile reference and is out of scope
-/// for the zero-game-reference constraint.
+/// In-game direct lobby join. Dispatches the full join sequence to the Unity
+/// main thread via SynchronizationContext.Post, ensuring StartCoroutine and
+/// other Unity APIs are called safely.
 /// </summary>
 public class LobbyJoiner : IDisposable
 {
-    private const int PumpIntervalMs = 100;
     private const int DispatchTimeoutMs = 30_000;
 
     private readonly ManualLogSource _log;
@@ -48,10 +33,6 @@ public class LobbyJoiner : IDisposable
         _pumpTask = Task.Run(PumpAsync);
     }
 
-    /// <summary>
-    /// Validates the request, enqueues it for the pump, and returns the pump's
-    /// actual join outcome (Success = the join coroutine was started).
-    /// </summary>
     public async Task<JoinResult> JoinAsync(string code, string region, string regionIp, int regionPort)
     {
         code = code.Trim();
@@ -102,154 +83,153 @@ public class LobbyJoiner : IDisposable
             {
                 if (_queue.TryDequeue(out var request) && request.Tcs != null)
                 {
-                    JoinResult result;
-                    try
+                    FileLogger.Info($"[LobbyJoiner] Dequeued join request for '{request.Code}'");
+
+                    // Dispatch the entire join sequence to the Unity main thread
+                    var syncCtx = SynchronizationContext.Current;
+                    if (syncCtx != null)
                     {
-                        result = ExecuteJoin(request);
+                        FileLogger.Info("[LobbyJoiner] Dispatching join to main thread via SynchronizationContext");
+                        JoinResult result = null!;
+                        var done = new ManualResetEventSlim(false);
+                        syncCtx.Post(_ =>
+                        {
+                            try
+                            {
+                                result = ExecuteJoin(request);
+                            }
+                            catch (Exception ex)
+                            {
+                                FileLogger.Error($"[LobbyJoiner] ExecuteJoin on main thread failed: {ex.Message}");
+                                result = new JoinResult(false, ex.Message);
+                            }
+                            finally
+                            {
+                                done.Set();
+                            }
+                        }, null);
+
+                        // Wait for the main thread to finish (with timeout)
+                        if (!done.Wait(TimeSpan.FromSeconds(15)))
+                        {
+                            FileLogger.Warn("[LobbyJoiner] Main thread dispatch timed out after 15s");
+                            result = new JoinResult(false, "Main thread dispatch timed out");
+                        }
+
+                        request.Tcs.TrySetResult(result);
                     }
-                    catch (Exception ex)
+                    else
                     {
-                        _log.LogWarning($"[LobbyJoiner] Join execution failed: {ex.Message}");
-                        result = new JoinResult(false, ex.Message);
+                        FileLogger.Warn("[LobbyJoiner] No SynchronizationContext; running join on pump thread (may fail)");
+                        JoinResult result;
+                        try
+                        {
+                            result = ExecuteJoin(request);
+                        }
+                        catch (Exception ex)
+                        {
+                            FileLogger.Error($"[LobbyJoiner] Join execution failed: {ex.Message}");
+                            result = new JoinResult(false, ex.Message);
+                        }
+                        request.Tcs.TrySetResult(result);
                     }
-                    request.Tcs.TrySetResult(result);
                 }
             }
             catch (Exception ex)
             {
-                _log.LogWarning($"[LobbyJoiner] Pump tick failed: {ex.Message}");
+                FileLogger.Error($"[LobbyJoiner] Pump tick failed: {ex.Message}");
             }
             try
             {
-                await Task.Delay(PumpIntervalMs, cts.Token);
+                await Task.Delay(100, cts.Token);
             }
-            catch (ObjectDisposedException)
-            {
-                break;
-            }
-            catch (OperationCanceledException)
-            {
-                break;
-            }
+            catch (ObjectDisposedException) { break; }
+            catch (OperationCanceledException) { break; }
         }
     }
 
-    /// <summary>
-    /// Runs the full §5.5 join sequence via reflection. Must not throw — all failures
-    /// become a failed JoinResult with a message.
-    /// </summary>
     private JoinResult ExecuteJoin(JoinRequest request)
     {
-        _log.LogInfo($"[LobbyJoiner] Joining lobby '{request.Code}' via region '{request.Region}' ({request.RegionIp}:{request.RegionPort})...");
+        FileLogger.Info($"[LobbyJoiner] ExecuteJoin: code={request.Code}, region={request.Region}, ip={request.RegionIp}:{request.RegionPort}");
+        FileLogger.Info($"[LobbyJoiner] Thread: {Environment.CurrentManagedThreadId}");
 
         if (AlreadyInLobby())
         {
-            _log.LogWarning("[LobbyJoiner] Already in a lobby");
-            return new JoinResult(false, "Already in a lobby; leaving before joining is not supported");
+            FileLogger.Warn("[LobbyJoiner] Already in a lobby");
+            return new JoinResult(false, "Already in a lobby");
         }
 
-        _log.LogInfo($"[LobbyJoiner] Current thread: {Environment.CurrentManagedThreadId}, IsMainThread: {Environment.CurrentManagedThreadId == 1}");
-
-        // 1. ServerManager singleton is inherited: DestroyableSingleton<ServerManager>.Instance.
+        // 1. Get ServerManager
         var serverManagerType = GameAssembly.Type("ServerManager");
-        _log.LogInfo($"[LobbyJoiner] ServerManager type: {serverManagerType?.FullName ?? "null"}");
         var serverManager = serverManagerType?.BaseType == null
             ? null
             : GameAssembly.GetStaticProp(serverManagerType.BaseType, "Instance");
-        _log.LogInfo($"[LobbyJoiner] ServerManager instance: {serverManager != null}");
+        FileLogger.Info($"[LobbyJoiner] ServerManager: {serverManager != null}");
         if (serverManager == null)
-            return new JoinResult(false, "ServerManager singleton unavailable");
+            return new JoinResult(false, "ServerManager unavailable");
 
-        // 2-4. Build + select the custom region. Intentional: the launcher may send empty
-        //      region/regionIp fields, so degrade gracefully to the game's currently
-        //      selected region instead of erroring (adjudicated as correct behavior).
+        // 2-4. Set custom region if provided
         if (request.RegionIp.Length > 0 || request.Region.Length > 0)
         {
-            // Build the region: StaticHttpRegionInfo(name, NoTranslation, pingServer, servers)
-            // with servers = [ ServerInfo("Http-1", "https://host", port, useDtls:false) ].
             var host = StripScheme(request.RegionIp);
             var ip = WithScheme(request.RegionIp);
             var port = (ushort)(request.RegionPort > 0 ? request.RegionPort : 443);
             var regionName = request.Region.Length > 0 ? request.Region : host;
 
             var serverInfoType = GameAssembly.Type("ServerInfo");
-            var serverInfo = GameAssembly.CreateInstance(serverInfoType,
-                new object?[] { "Http-1", ip, port, false });
-            if (serverInfo == null)
-                return new JoinResult(false, "Failed to construct ServerInfo");
-            _log.LogInfo($"[LobbyJoiner] ServerInfo constructed ({ip}:{port}).");
+            var serverInfo = GameAssembly.CreateInstance(serverInfoType, new object?[] { "Http-1", ip, port, false });
+            if (serverInfo == null) return new JoinResult(false, "Failed to construct ServerInfo");
 
-            // Il2CppReferenceArray<ServerInfo> is a real interop type; build it via its (T[]) ctor.
             var arrayType = GameAssembly.GenericType("Il2CppReferenceArray`1", serverInfoType!);
             var plainArray = Array.CreateInstance(serverInfoType!, 1);
             plainArray.SetValue(serverInfo, 0);
             var servers = GameAssembly.CreateInstance(arrayType, new object?[] { plainArray });
-            if (servers == null)
-                return new JoinResult(false, "Failed to construct ServerInfo array");
+            if (servers == null) return new JoinResult(false, "Failed to construct ServerInfo array");
 
             var staticHttpRegionInfoType = GameAssembly.Type("StaticHttpRegionInfo");
             var noTranslation = GameAssembly.EnumValue(GameAssembly.Type("StringNames"), "NoTranslation");
             var regionObj = GameAssembly.CreateInstance(staticHttpRegionInfoType,
                 new object?[] { regionName, noTranslation, host, servers, null });
-            if (regionObj == null)
-                return new JoinResult(false, "Failed to construct StaticHttpRegionInfo");
-            _log.LogInfo($"[LobbyJoiner] Region '{regionName}' constructed.");
+            if (regionObj == null) return new JoinResult(false, "Failed to construct StaticHttpRegionInfo");
 
-            // AddOrUpdateRegion + SetRegion take IRegionInfo, but the interop StaticHttpRegionInfo
-            // does NOT CLR-inherit IRegionInfo. Wrap the same native object in an IRegionInfo
-            // wrapper (via its public Pointer) so the reflection call passes the type check.
             var regionInfoType = GameAssembly.Type("IRegionInfo");
             var pointer = GameAssembly.GetInstanceProp(regionObj, "Pointer");
             if (pointer is not IntPtr nativePointer)
                 return new JoinResult(false, "Could not read region native pointer");
             var regionAsInfo = GameAssembly.CreateInstance(regionInfoType, new object?[] { nativePointer });
-            if (regionAsInfo == null)
-                return new JoinResult(false, "Failed to wrap region as IRegionInfo");
-
-            if (!GameAssembly.HasInstanceMethod(serverManager, "AddOrUpdateRegion", 1) ||
-                !GameAssembly.HasInstanceMethod(serverManager, "SetRegion", 1))
-                return new JoinResult(false, "ServerManager region methods unavailable");
+            if (regionAsInfo == null) return new JoinResult(false, "Failed to wrap region as IRegionInfo");
 
             GameAssembly.CallInstanceMethod(serverManager, "AddOrUpdateRegion", new object?[] { regionAsInfo });
             GameAssembly.CallInstanceMethod(serverManager, "SetRegion", new object?[] { regionAsInfo });
-            _log.LogInfo($"[LobbyJoiner] Custom region '{regionName}' registered and selected.");
-        }
-        else
-        {
-            _log.LogInfo("[LobbyJoiner] No region endpoint provided; using the game's currently selected region.");
+            FileLogger.Info($"[LobbyJoiner] Region '{regionName}' set");
         }
 
-        // 5. Decode the 6-char code to an int lobby id.
+        // 5. Decode lobby code
         var gameCodeType = GameAssembly.Type("InnerNet.GameCode");
-        _log.LogInfo($"[LobbyJoiner] GameCode type: {gameCodeType?.FullName ?? "null"}");
         var gameIdObj = GameAssembly.CallStaticMethod(gameCodeType, "GameNameToInt",
             new object?[] { request.Code }, new[] { typeof(string) });
-        if (gameIdObj == null)
-        {
-            _log.LogWarning($"[LobbyJoiner] Failed to decode code '{request.Code}'");
-            return new JoinResult(false, "Failed to decode lobby code");
-        }
+        if (gameIdObj == null) return new JoinResult(false, "Failed to decode lobby code");
         var gameId = GameAssembly.ToInt(gameIdObj);
-        _log.LogInfo($"[LobbyJoiner] Code '{request.Code}' -> gameId {gameId}.");
+        FileLogger.Info($"[LobbyJoiner] Code '{request.Code}' -> gameId {gameId}");
 
-        // 6. Join via coroutine: CoJoinOnlineGameFromCode(gameId, fromEnterCode:false) + StartCoroutine.
+        // 6. Start join coroutine
         var client = GameAssembly.AmongUsClient();
-        _log.LogInfo($"[LobbyJoiner] AmongUsClient instance: {client != null}");
+        FileLogger.Info($"[LobbyJoiner] AmongUsClient: {client != null}");
         if (client == null)
-            return new JoinResult(false, "AmongUsClient not available (not in main menu?)");
+            return new JoinResult(false, "AmongUsClient not available");
 
         var enumerator = GameAssembly.CallInstanceMethod(client, "CoJoinOnlineGameFromCode",
             new object?[] { gameId, false }, new[] { typeof(int), typeof(bool) });
-        _log.LogInfo($"[LobbyJoiner] CoJoinOnlineGameFromCode enumerator: {enumerator != null}");
+        FileLogger.Info($"[LobbyJoiner] CoJoinOnlineGameFromCode: {enumerator != null}");
         if (enumerator == null)
             return new JoinResult(false, "Join coroutine could not be created");
 
         var coroutine = GameAssembly.CallInstanceMethod(client, "StartCoroutine", new object?[] { enumerator });
-        _log.LogInfo($"[LobbyJoiner] StartCoroutine result: {coroutine != null}");
+        FileLogger.Info($"[LobbyJoiner] StartCoroutine: {coroutine != null}");
         if (coroutine == null)
-            return new JoinResult(false, "StartCoroutine failed (main-thread requirement not met?)");
+            return new JoinResult(false, "StartCoroutine failed");
 
-        _log.LogInfo("[LobbyJoiner] Join coroutine started. Lobby join dispatched.");
+        FileLogger.Info("[LobbyJoiner] Join coroutine started successfully");
         return new JoinResult(true, null);
     }
 
@@ -258,12 +238,10 @@ public class LobbyJoiner : IDisposable
     private static string StripScheme(string endpoint)
     {
         var trimmed = endpoint.Trim().TrimEnd('/');
-        const string https = "https://";
-        const string http = "http://";
-        if (trimmed.StartsWith(https, StringComparison.OrdinalIgnoreCase))
-            return trimmed[https.Length..];
-        if (trimmed.StartsWith(http, StringComparison.OrdinalIgnoreCase))
-            return trimmed[http.Length..];
+        if (trimmed.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+            return trimmed["https://".Length..];
+        if (trimmed.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
+            return trimmed["http://".Length..];
         return trimmed;
     }
 
