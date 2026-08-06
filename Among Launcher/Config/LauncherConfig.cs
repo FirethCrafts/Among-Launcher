@@ -28,6 +28,7 @@ public class LauncherConfig
     public string DiscordAccessToken { get; set; } = string.Empty;
     public List<ModProfile> Profiles { get; set; } = new();
     public List<LibraryEntry> Library { get; set; } = new();
+    public bool DebugMode { get; set; }
 
     public static LauncherConfig Load()
     {

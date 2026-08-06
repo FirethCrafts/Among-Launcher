@@ -224,6 +224,7 @@ When the game closes, the mod's `PipeClient` read loop exits and fires `Disconne
 - **Single connection:** the `AmongLauncher.IPC` server accepts one client at a time (max instances = 1).
 - **Deep-link availability guards:** joins require a signed-in/configured backend (`ServerUrl` not containing `yourserver.com`) and an installed modded copy with `winhttp.dll`.
 - Two schemes are registered; only `amonglauncher://join` and `amongus-launcher://install` are meaningful to the parser. Anything else is ignored.
+- **Debug Mode:** When `DebugMode` is enabled in `LauncherConfig`, joining a lobby via deep link shows a `JoinDebugModal` with real-time status (lobby info, mod sync, errors). The game does not auto-launch; a green PLAY button appears when everything is ready. Clicking PLAY starts the game, waits for `game_ready`, and sends `join_lobby`.
 
 ---
 

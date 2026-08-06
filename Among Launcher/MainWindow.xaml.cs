@@ -280,6 +280,9 @@ public partial class MainWindow
         }
         _joining = true;
 
+        JoinDebugModal? debugModal = null;
+        var debug = _config.DebugMode;
+
         try
         {
             LogDebug($"[Launcher] Joining lobby {code}...");
@@ -291,40 +294,130 @@ public partial class MainWindow
 
             RefreshConfig();
 
-            LogDebug($"[Launcher] ServerUrl: '{_config.ServerUrl}'");
-            LogDebug($"[Launcher] IsConfigured: {Services.Lobby.LobbyBackendClient.IsConfigured(_config)}");
+            if (debug)
+            {
+                debugModal = new JoinDebugModal();
+                Dispatcher.Invoke(() => ModalOverlay.Show($"Joining Lobby: {code}", debugModal));
+                debugModal.AppendLine($"Joining Lobby: {code}", bold: true);
+                debugModal.AppendLine("");
+                debugModal.AppendLine("**Searching for lobby in backend...**", bold: true);
+            }
 
             if (!Services.Lobby.LobbyBackendClient.IsConfigured(_config))
             {
-                LogDebug("[Launcher] Join aborted: backend not configured");
-                Dispatcher.Invoke(() => ShowJoinError(
-                    "No lobby server is configured.\n\nSet the server URL in Settings, then try the link again."));
+                if (debug)
+                {
+                    debugModal?.AppendLine("Backend not configured!", bold: true);
+                    debugModal?.AppendLine("Set the server URL in Settings.");
+                }
+                else
+                {
+                    Dispatcher.Invoke(() => ShowJoinError(
+                        "No lobby server is configured.\n\nSet the server URL in Settings, then try the link again."));
+                }
                 return;
             }
 
             var lobby = await _backend.GetLobbyAsync(code, CancellationToken.None);
             if (lobby == null)
             {
-                LogDebug("[Launcher] Join failed: lobby not found");
-                Dispatcher.Invoke(() => ShowJoinError(
-                    $"Lobby '{code}' was not found on the server.\n\nIt may have closed, or the host hasn't created it yet."));
+                if (debug)
+                {
+                    debugModal?.AppendLine("**Not Found**", bold: true);
+                    debugModal?.AppendLine($"Lobby '{code}' was not found on the server.");
+                    debugModal?.AppendLine("It may have closed, or the host hasn't created it yet.");
+                }
+                else
+                {
+                    Dispatcher.Invoke(() => ShowJoinError(
+                        $"Lobby '{code}' was not found on the server.\n\nIt may have closed, or the host hasn't created it yet."));
+                }
                 return;
             }
 
-            if (await JoinPipelineAsync(lobby))
+            if (debug)
             {
-                LogDebug($"[Launcher] Join succeeded for lobby {code}");
-                _ = _ws.ConnectAsync(code, CancellationToken.None);
+                debugModal?.AppendLine("**Found**", bold: true);
+                debugModal?.AppendLine("");
+                debugModal?.AppendLine("**Info:**", bold: true);
+                debugModal?.AppendLine($"  Region: {lobby.Region}");
+                debugModal?.AppendLine($"  Host: {lobby.Host}");
+                debugModal?.AppendLine($"  Players: {lobby.PlayerCount}");
+                debugModal?.AppendLine($"  Code: {lobby.Code}");
+
+                var modType = lobby.ModSet.Count > 0 ? "Modded" : "Vanilla";
+                debugModal?.AppendLine($"  Type: {modType}");
+
+                if (lobby.ModSet.Count > 0)
+                {
+                    debugModal?.AppendLine("");
+                    debugModal?.AppendLine("  Mods:");
+                    foreach (var mod in lobby.ModSet)
+                        debugModal?.AppendLine($"    > {mod.FileName}");
+                }
+                debugModal?.AppendLine("");
+            }
+
+            if (debug)
+            {
+                var synced = await JoinPipelineAsync(lobby, debugModal, debug, autoLaunch: false);
+                if (synced)
+                {
+                    debugModal?.AppendLine("**Ready to launch!**", bold: true);
+                    var capturedCode = code;
+                    var capturedLobby = lobby;
+                    debugModal?.ShowPlayButton(() =>
+                    {
+                        _ = PlayAndJoinAsync(capturedLobby, capturedCode);
+                    });
+                }
+                else
+                {
+                    debugModal?.AppendLine("**Sync failed.**", bold: true);
+                }
+            }
+            else
+            {
+                if (await JoinPipelineAsync(lobby))
+                {
+                    LogDebug($"[Launcher] Join succeeded for lobby {code}");
+                    _ = _ws.ConnectAsync(code, CancellationToken.None);
+                }
             }
         }
         catch (Exception ex)
         {
             LogDebug($"[Launcher] Join failed with exception: {ex}");
-            Dispatcher.Invoke(() => ShowJoinError($"Could not reach the lobby server: {ex.Message}"));
+            if (debug)
+            {
+                debugModal?.AppendLine($"**Error:** {ex.Message}", bold: true);
+            }
+            else
+            {
+                Dispatcher.Invoke(() => ShowJoinError($"Could not reach the lobby server: {ex.Message}"));
+            }
         }
         finally
         {
             _joining = false;
+        }
+    }
+
+    private async Task PlayAndJoinAsync(LobbyInfo lobby, string code)
+    {
+        await StopGameAndWaitAsync();
+        _gameReadyTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        Dispatcher.Invoke(() =>
+        {
+            if (ContentArea.Content is MainView mv)
+                mv.LaunchGame();
+        });
+        var ready = await WaitForGameReadyAsync();
+        if (ready)
+        {
+            await _pipeServer.BroadcastMessageAsync("join_lobby",
+                new { code = lobby.Code, region = lobby.Region, regionIp = lobby.RegionIp, regionPort = lobby.RegionPort });
+            _ = _ws.ConnectAsync(code, CancellationToken.None);
         }
     }
 
@@ -340,18 +433,25 @@ public partial class MainWindow
         ModalOverlay.Show("Join Lobby Failed", modal);
     }
 
-    private async Task<bool> JoinPipelineAsync(LobbyInfo lobby)
+    private async Task<bool> JoinPipelineAsync(LobbyInfo lobby, JoinDebugModal? debugModal = null, bool debug = false, bool autoLaunch = true)
     {
         var moddedPath = GetModdedPath();
         if (string.IsNullOrEmpty(moddedPath) ||
             !File.Exists(Path.Combine(moddedPath, "winhttp.dll")))
         {
             LogDebug("[Launcher] Join aborted: modded Among Us not installed");
-            Dispatcher.Invoke(() =>
+            if (debug)
             {
-                if (ContentArea.Content is MainView mv)
-                    mv.UpdateModStatusText("Modded Among Us is not installed. Run one-click setup first.");
-            });
+                debugModal?.AppendLine("Modded Among Us is not installed. Run one-click setup first.", bold: true);
+            }
+            else
+            {
+                Dispatcher.Invoke(() =>
+                {
+                    if (ContentArea.Content is MainView mv)
+                        mv.UpdateModStatusText("Modded Among Us is not installed. Run one-click setup first.");
+                });
+            }
             return false;
         }
 
@@ -359,12 +459,35 @@ public partial class MainWindow
             Path.Combine(moddedPath, "BepInEx", "plugins"),
             _httpClient, _backend);
 
-        // Quarantine mods that are neither whitelisted nor required by this lobby.
         var cleanupEngine = new Services.Lobby.ModCleanupEngine(
             Path.Combine(moddedPath, "BepInEx", "plugins"));
         await cleanupEngine.QuarantineAsync(
             lobby.ModSet.Select(m => m.FileName).ToList(),
             CancellationToken.None);
+
+        var missing = await modSetSync.DiffAsync(lobby.ModSet, CancellationToken.None);
+        if (missing.Count > 0)
+        {
+            if (debug)
+            {
+                debugModal?.AppendLine("**Loading mods**", bold: true);
+                foreach (var mod in missing)
+                    debugModal?.AppendLine($"  > Loading {mod.FileName}...");
+            }
+
+            await StopGameAndWaitAsync();
+            await modSetSync.InstallAsync(missing, CancellationToken.None);
+
+            if (debug)
+            {
+                foreach (var mod in missing)
+                    debugModal?.AppendLine($"  > Loaded {mod.FileName}");
+                debugModal?.AppendLine("");
+            }
+        }
+
+        if (!autoLaunch)
+            return true;
 
         var joinService = new Services.Lobby.LobbyJoinService(
             getLobby: (_, _) => Task.FromResult<LobbyInfo?>(lobby),

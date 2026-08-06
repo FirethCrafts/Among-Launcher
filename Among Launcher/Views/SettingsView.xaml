@@ -16,6 +16,7 @@
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
         <TextBlock Grid.Row="0" Text="Settings" Style="{StaticResource PageTitle}"/>
@@ -115,6 +116,26 @@
                          TextChanged="VanillaRoleIdTextBox_TextChanged"
                          Style="{StaticResource GlassInput}"/>
             </StackPanel>
+        </Border>
+
+        <!-- Debug Mode -->
+        <Border Grid.Row="7" Style="{StaticResource GlassCard}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0">
+                    <TextBlock Text="DEBUG MODE" Style="{StaticResource CardHeader}"/>
+                    <TextBlock Text="Shows detailed join progress popup when clicking lobby links"
+                               FontSize="12" Foreground="{StaticResource TextMuted}"/>
+                </StackPanel>
+                <ToggleButton Grid.Column="1" x:Name="DebugModeToggle"
+                              Checked="DebugModeToggle_Changed"
+                              Unchecked="DebugModeToggle_Changed"
+                              IsChecked="False"
+                              VerticalAlignment="Center" Margin="8,0,0,0"/>
+            </Grid>
         </Border>
     </Grid>
     </ScrollViewer>

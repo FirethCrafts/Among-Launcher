@@ -39,6 +39,7 @@ public partial class SettingsView
         BotWsEndpointTextBox.Text = config.BotWsEndpoint;
         ModdedRoleIdTextBox.Text = config.ModdedRoleId;
         VanillaRoleIdTextBox.Text = config.VanillaRoleId;
+        DebugModeToggle.IsChecked = config.DebugMode;
 
         _isInitializing = true;
         if (StorefrontCombo.Items.Count == 0)
@@ -80,6 +81,14 @@ public partial class SettingsView
     {
         var config = Config.LauncherConfig.Load();
         config.VanillaRoleId = VanillaRoleIdTextBox.Text;
+        config.Save();
+    }
+
+    private void DebugModeToggle_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_isInitializing || !IsLoaded) return;
+        var config = Config.LauncherConfig.Load();
+        config.DebugMode = DebugModeToggle.IsChecked == true;
         config.Save();
     }
 
