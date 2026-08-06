@@ -7,8 +7,8 @@ public static class DeepLinkHandler
     public const string Scheme = "amongus-launcher";
     public const string JoinScheme = "amonglauncher";
 
-    /// <summary>Among Us lobby codes are exactly 6 uppercase letters (A-Z).</summary>
-    private static readonly Regex RoomCodeRegex = new("^[A-Z]{6}$", RegexOptions.Compiled);
+    /// <summary>Among Us lobby codes are 4-8 alphanumeric characters.</summary>
+    private static readonly Regex RoomCodeRegex = new("^[A-Za-z0-9]{4,8}$", RegexOptions.Compiled);
 
     public record JoinRequest(string Code);
 

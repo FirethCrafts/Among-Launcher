@@ -227,9 +227,10 @@ public partial class MainWindow
     public void HandleDeepLink(string? deepLink)
     {
         deepLink ??= Services.DeepLinkHandler.FindDeepLinkArgument();
+        LogDebug($"[Launcher] HandleDeepLink called with: '{deepLink ?? "(null)"}'");
+
         if (deepLink == null)
         {
-            // Normal launch (no custom-protocol URI): load the default state.
             LogDebug("[Launcher] No deep link argument; skipping auto-join.");
             return;
         }
@@ -241,6 +242,10 @@ public partial class MainWindow
             _ = HandleJoinLinkAsync(join.Code);
             return;
         }
+
+        LogDebug($"[Launcher] TryParseJoin returned null for: '{deepLink}'");
+        Dispatcher.Invoke(() => ShowJoinError(
+            $"Could not extract a valid lobby code from the link.\n\nLink: {deepLink}"));
 
         var requests = Services.DeepLinkHandler.Parse(deepLink);
         if (requests.Count == 0)
@@ -285,6 +290,9 @@ public partial class MainWindow
             });
 
             RefreshConfig();
+
+            LogDebug($"[Launcher] ServerUrl: '{_config.ServerUrl}'");
+            LogDebug($"[Launcher] IsConfigured: {Services.Lobby.LobbyBackendClient.IsConfigured(_config)}");
 
             if (!Services.Lobby.LobbyBackendClient.IsConfigured(_config))
             {
