@@ -164,14 +164,31 @@ public class GameStateTracker : IDisposable
     /// </summary>
     private static bool IsHost()
     {
-        var client = GameAssembly.AmongUsClient();
-        if (client == null)
-            return false;
+        try
+        {
+            var client = GameAssembly.AmongUsClient();
+            if (client == null)
+            {
+                FileLogger.Warn("[GameStateTracker] IsHost: AmongUsClient is null");
+                return false;
+            }
 
-        var hostId = GameAssembly.ToInt(GameAssembly.GetInstanceMember(client, "HostId"));
-        var innerNetClient = GameAssembly.Type("InnerNet.InnerNetClient");
-        var currentClient = GameAssembly.ToInt(GameAssembly.GetStaticMember(innerNetClient, "CurrentClient"));
-        return currentClient >= 0 && hostId == currentClient;
+            var hostIdObj = GameAssembly.GetInstanceMember(client, "HostId");
+            var innerNetClient = GameAssembly.Type("InnerNet.InnerNetClient");
+            var currentClientObj = GameAssembly.GetStaticMember(innerNetClient, "CurrentClient");
+
+            var hostId = GameAssembly.ToInt(hostIdObj);
+            var currentClient = GameAssembly.ToInt(currentClientObj);
+
+            FileLogger.Info($"[GameStateTracker] IsHost: HostId={hostId}, CurrentClient={currentClient}, isHost={currentClient >= 0 && hostId == currentClient}");
+
+            return currentClient >= 0 && hostId == currentClient;
+        }
+        catch (Exception ex)
+        {
+            FileLogger.Error($"[GameStateTracker] IsHost failed: {ex.Message}");
+            return false;
+        }
     }
 
     private static string LobbyCode()
