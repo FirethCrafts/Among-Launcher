@@ -173,18 +173,31 @@ public class GameStateTracker : IDisposable
                 return false;
             }
 
-            // Primary method: use the built-in AmHost property
-            var amHostObj = GameAssembly.GetInstanceProp(client, "AmHost");
-            if (amHostObj is bool amHost)
+            // Try AmHost via GetInstanceMember (checks both properties and fields)
+            var amHostObj = GameAssembly.GetInstanceMember(client, "AmHost");
+            if (amHostObj != null)
             {
-                FileLogger.Info($"[GameStateTracker] IsHost: AmHost={amHost}");
+                var amHost = GameAssembly.ToBool(amHostObj);
+                FileLogger.Info($"[GameStateTracker] IsHost: AmHost={amHost} (type={amHostObj.GetType().Name})");
                 return amHost;
+            }
+
+            // Also try InnerNetClient.AmHost (might be on the base class)
+            var innerNetClientType = GameAssembly.Type("InnerNet.InnerNetClient");
+            if (innerNetClientType != null)
+            {
+                var amHostObj2 = GameAssembly.GetStaticMember(innerNetClientType, "AmHost");
+                if (amHostObj2 != null)
+                {
+                    var amHost2 = GameAssembly.ToBool(amHostObj2);
+                    FileLogger.Info($"[GameStateTracker] IsHost: InnerNetClient.AmHost={amHost2}");
+                    return amHost2;
+                }
             }
 
             // Fallback: HostId == CurrentClient
             var hostIdObj = GameAssembly.GetInstanceMember(client, "HostId");
-            var innerNetClient = GameAssembly.Type("InnerNet.InnerNetClient");
-            var currentClientObj = GameAssembly.GetStaticMember(innerNetClient, "CurrentClient");
+            var currentClientObj = GameAssembly.GetStaticMember(innerNetClientType, "CurrentClient");
             var hostId = GameAssembly.ToInt(hostIdObj);
             var currentClient = GameAssembly.ToInt(currentClientObj);
             FileLogger.Info($"[GameStateTracker] IsHost fallback: HostId={hostId}, CurrentClient={currentClient}");
