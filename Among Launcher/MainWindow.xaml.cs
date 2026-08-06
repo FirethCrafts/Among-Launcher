@@ -606,12 +606,6 @@ public partial class MainWindow
         }
     }
 
-    private static async Task FireDelayedReady(TaskCompletionSource<bool>? tcs)
-    {
-        await Task.Delay(250);
-        tcs?.TrySetResult(true);
-    }
-
     private async Task<bool> WaitForGameReadyAsync()
     {
         if (_gameReadyTcs == null)
