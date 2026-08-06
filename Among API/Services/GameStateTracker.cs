@@ -173,15 +173,21 @@ public class GameStateTracker : IDisposable
                 return false;
             }
 
+            // Primary method: use the built-in AmHost property
+            var amHostObj = GameAssembly.GetInstanceProp(client, "AmHost");
+            if (amHostObj is bool amHost)
+            {
+                FileLogger.Info($"[GameStateTracker] IsHost: AmHost={amHost}");
+                return amHost;
+            }
+
+            // Fallback: HostId == CurrentClient
             var hostIdObj = GameAssembly.GetInstanceMember(client, "HostId");
             var innerNetClient = GameAssembly.Type("InnerNet.InnerNetClient");
             var currentClientObj = GameAssembly.GetStaticMember(innerNetClient, "CurrentClient");
-
             var hostId = GameAssembly.ToInt(hostIdObj);
             var currentClient = GameAssembly.ToInt(currentClientObj);
-
-            FileLogger.Info($"[GameStateTracker] IsHost: HostId={hostId}, CurrentClient={currentClient}, isHost={currentClient >= 0 && hostId == currentClient}");
-
+            FileLogger.Info($"[GameStateTracker] IsHost fallback: HostId={hostId}, CurrentClient={currentClient}");
             return currentClient >= 0 && hostId == currentClient;
         }
         catch (Exception ex)
