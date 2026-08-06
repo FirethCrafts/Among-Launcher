@@ -107,18 +107,11 @@ public class ChatCommandHandler : IDisposable
         if (!handled)
             return;
 
-        try
-        {
-            if (TryClearInput())
-                _lastHandledText = "";
-            else
-                _lastHandledText = text;
-        }
-        catch (Exception ex)
-        {
-            FileLogger.Error($"[ChatCommandHandler] Input clear failed: {ex.Message}");
-            _lastHandledText = text;
-        }
+        // Do NOT call TryClearInput — FreeChatInputField.Clear() is a Unity
+        // API call that crashes with 0xC0000005 when invoked from a background
+        // thread. The command text stays in the input but starts with "/" so
+        // the game won't send it as a normal chat message.
+        _lastHandledText = text;
     }
 
     /// <summary>

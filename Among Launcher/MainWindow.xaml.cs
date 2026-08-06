@@ -143,9 +143,12 @@ public partial class MainWindow
                 modEntries.Add(uploaded ?? new ModInfoEntry(entry.FileName, entry.Version, entry.Sha256));
             }
 
-            await _backend.CreateLobbyAsync(new CreateLobbyRequest(info.Code, info.Region, info.Host, "modded", modEntries), CancellationToken.None);
-            StartHeartbeat(info.Code);
-            _ = _ws.ConnectAsync(info.Code, CancellationToken.None);
+            if (_config.AutoPostLobby)
+            {
+                await _backend.CreateLobbyAsync(new CreateLobbyRequest(info.Code, info.Region, info.Host, "modded", modEntries), CancellationToken.None);
+                StartHeartbeat(info.Code);
+                _ = _ws.ConnectAsync(info.Code, CancellationToken.None);
+            }
             if (string.IsNullOrEmpty(_userId) || _userId == info.HostUserId)
             {
                 Dispatcher.Invoke(() => ShowHostPanel(info));
