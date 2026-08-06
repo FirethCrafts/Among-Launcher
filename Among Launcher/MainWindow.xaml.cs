@@ -82,6 +82,7 @@ public partial class MainWindow
         // Handler: game_ready
         _pipeServer.RegisterHandler("game_ready", _ =>
         {
+            LogDebug("[Launcher] game_ready received from mod!");
             _gameReadyTcs?.TrySetResult(true);
             Dispatcher.Invoke(() =>
             {
@@ -94,6 +95,7 @@ public partial class MainWindow
         // Handler: lobby_created
         _pipeServer.RegisterHandler("lobby_created", async element =>
         {
+            LogDebug("[Launcher] lobby_created received from mod");
             var p = element.GetProperty("payload");
             var regionPort = p.TryGetProperty("regionPort", out var rp) && rp.GetInt32() > 0
                 ? rp.GetInt32()
@@ -176,9 +178,10 @@ public partial class MainWindow
         {
             var p = element.GetProperty("payload");
             var ok = p.GetProperty("success").GetBoolean();
+            var error = p.TryGetProperty("error", out var errEl) ? errEl.GetString() : null;
+            LogDebug($"[Launcher] join_lobby_result received: success={ok}, error={error}");
             if (!ok)
             {
-                var error = p.TryGetProperty("error", out var e) ? e.GetString() : "unknown error";
                 Dispatcher.Invoke(() =>
                 {
                     if (ContentArea.Content is MainView mv)
@@ -405,19 +408,34 @@ public partial class MainWindow
 
     private async Task PlayAndJoinAsync(LobbyInfo lobby, string code)
     {
+        LogDebug("[Launcher] PlayAndJoinAsync: stopping any running game...");
         await StopGameAndWaitAsync();
+
+        LogDebug("[Launcher] PlayAndJoinAsync: setting up game_ready TCS...");
         _gameReadyTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        LogDebug("[Launcher] PlayAndJoinAsync: launching game...");
         Dispatcher.Invoke(() =>
         {
             if (ContentArea.Content is MainView mv)
                 mv.LaunchGame();
         });
+
+        LogDebug("[Launcher] PlayAndJoinAsync: waiting for game_ready (90s timeout)...");
         var ready = await WaitForGameReadyAsync();
+        LogDebug($"[Launcher] PlayAndJoinAsync: WaitForGameReady returned {ready}");
+
         if (ready)
         {
+            LogDebug($"[Launcher] PlayAndJoinAsync: sending join_lobby for code={lobby.Code}, region={lobby.Region}");
             await _pipeServer.BroadcastMessageAsync("join_lobby",
                 new { code = lobby.Code, region = lobby.Region, regionIp = lobby.RegionIp, regionPort = lobby.RegionPort });
+            LogDebug("[Launcher] PlayAndJoinAsync: join_lobby sent, connecting WebSocket...");
             _ = _ws.ConnectAsync(code, CancellationToken.None);
+        }
+        else
+        {
+            LogDebug("[Launcher] PlayAndJoinAsync: game_ready NOT received - join_lobby NOT sent");
         }
     }
 
@@ -487,8 +505,12 @@ public partial class MainWindow
         }
 
         if (!autoLaunch)
+        {
+            LogDebug("[Launcher] JoinPipelineAsync: autoLaunch=false, returning after mod sync");
             return true;
+        }
 
+        LogDebug("[Launcher] JoinPipelineAsync: creating LobbyJoinService for auto-launch...");
         var joinService = new Services.Lobby.LobbyJoinService(
             getLobby: (_, _) => Task.FromResult<LobbyInfo?>(lobby),
             ensureSetup: _ => Task.FromResult(
@@ -497,17 +519,29 @@ public partial class MainWindow
             killGame: () => StopGameAndWaitAsync(),
             launchGame: () =>
             {
+                LogDebug("[Launcher] LobbyJoinService: launchGame called");
                 _gameReadyTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
                 Dispatcher.Invoke(() =>
                 {
                     if (ContentArea.Content is MainView mv)
+                    {
+                        LogDebug("[Launcher] LobbyJoinService: calling MainView.LaunchGame()");
                         mv.LaunchGame();
+                    }
+                    else
+                    {
+                        LogDebug($"[Launcher] LobbyJoinService: ContentArea.Content is NOT MainView, it's {ContentArea.Content?.GetType().Name ?? "null"}");
+                    }
                 });
                 return Task.CompletedTask;
             },
             waitForGameReady: () => WaitForGameReadyAsync(),
-            sendJoinLobby: l => _pipeServer.BroadcastMessageAsync("join_lobby",
-                new { code = l.Code, region = l.Region, regionIp = l.RegionIp, regionPort = l.RegionPort }),
+            sendJoinLobby: l =>
+            {
+                LogDebug($"[Launcher] LobbyJoinService: sendJoinLobby called for code={l.Code}");
+                return _pipeServer.BroadcastMessageAsync("join_lobby",
+                    new { code = l.Code, region = l.Region, regionIp = l.RegionIp, regionPort = l.RegionPort });
+            },
             modSetSync);
 
         var outcome = await joinService.JoinLobbyAsync(lobby.Code, CancellationToken.None);
