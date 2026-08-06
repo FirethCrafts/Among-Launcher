@@ -193,6 +193,7 @@ public partial class MainWindow
             _botClient.Disconnect();
             _activeLobby = null;
             _hostPanel = null;
+            Dispatcher.Invoke(() => LobbyButton.Visibility = Visibility.Collapsed);
             return new { type = "lobby_closed_ack" };
         });
 
@@ -716,6 +717,7 @@ public partial class MainWindow
         panel.UpdatePlayers(BuildPlayerList());
         _hostPanel = panel;
         ShowView(panel, showSidebar: true);
+        LobbyButton.Visibility = Visibility.Visible;
     }
 
     private async Task ConfirmDisbandAsync(string code)
@@ -834,6 +836,19 @@ public partial class MainWindow
     private void NavButton_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not Button button || button.Tag is not string tag) return;
+
+        if (tag == "HostPanel")
+        {
+            if (_hostPanel != null)
+            {
+                ShowView(_hostPanel, showSidebar: true);
+            }
+            else if (_activeLobby != null)
+            {
+                ShowHostPanel(_activeLobby);
+            }
+            return;
+        }
 
         var view = tag switch
         {

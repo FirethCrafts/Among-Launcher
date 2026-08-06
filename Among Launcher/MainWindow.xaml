@@ -127,6 +127,16 @@
                               Fill="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}"/>
                     </Button>
 
+                    <!-- Lobby / Host Panel -->
+                    <Button x:Name="LobbyButton" Grid.Row="2" Tag="HostPanel"
+                            Click="NavButton_Click"
+                            Style="{StaticResource NavButton}"
+                            Margin="0,0,0,8" ToolTip="Lobby"
+                            Visibility="Collapsed">
+                        <Path Data="{StaticResource HomeIcon}" Stretch="Uniform" Width="24" Height="24"
+                              Fill="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}"/>
+                    </Button>
+
                     <!-- Spacer -->
                     <StackPanel Grid.Row="2"/>
 

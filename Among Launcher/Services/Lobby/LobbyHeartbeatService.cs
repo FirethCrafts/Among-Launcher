@@ -13,11 +13,20 @@ public class LobbyHeartbeatService
         _cts = new CancellationTokenSource();
         _ = Task.Run(async () =>
         {
+            LauncherLog.Write($"[Heartbeat] Starting for lobby {code}, host={hostUserId}");
             while (!_cts.IsCancellationRequested)
             {
                 try { await Task.Delay(TimeSpan.FromSeconds(30), _cts.Token); }
                 catch { return; }
-                try { await _heartbeat(code, hostUserId, _cts.Token); } catch { }
+                try
+                {
+                    var result = await _heartbeat(code, hostUserId, _cts.Token);
+                    LauncherLog.Write($"[Heartbeat] Sent for {code}: {result}");
+                }
+                catch (Exception ex)
+                {
+                    LauncherLog.Write($"[Heartbeat] Failed for {code}: {ex.Message}");
+                }
             }
         });
     }
