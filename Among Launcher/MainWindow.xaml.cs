@@ -146,9 +146,11 @@ public partial class MainWindow
             if (_config.AutoPostLobby)
             {
                 await _backend.CreateLobbyAsync(new CreateLobbyRequest(info.Code, info.Region, info.Host, "modded", modEntries), CancellationToken.None);
-                StartHeartbeat(info.Code);
-                _ = _ws.ConnectAsync(info.Code, CancellationToken.None);
             }
+
+            // Heartbeat + WebSocket always run to keep the lobby alive on the backend
+            StartHeartbeat(info.Code);
+            _ = _ws.ConnectAsync(info.Code, CancellationToken.None);
             if (string.IsNullOrEmpty(_userId) || _userId == info.HostUserId)
             {
                 Dispatcher.Invoke(() => ShowHostPanel(info));
