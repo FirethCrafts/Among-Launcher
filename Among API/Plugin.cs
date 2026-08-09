@@ -75,18 +75,10 @@ public class Plugin : BasePlugin
             FileLogger.Info("Connected to launcher.");
             Log.LogInfo($"[{MyPluginInfo.PLUGIN_NAME}] Connected to launcher.");
 
-            // Wait until the game is actually loaded before signaling ready
-            FileLogger.Info("Waiting for game to initialize...");
-            for (int i = 0; i < 60; i++)
-            {
-                var client = GameAssembly.AmongUsClient();
-                if (client != null)
-                {
-                    FileLogger.Info($"AmongUsClient found after {i * 500}ms");
-                    break;
-                }
-                await Task.Delay(500);
-            }
+            // Wait for game to fully load (splash + connecting + logging in)
+            FileLogger.Info("Waiting 30 seconds for game to fully load...");
+            Thread.Sleep(30000);
+            FileLogger.Info("Done waiting.");
 
             // Capture Unity's SynchronizationContext for main-thread dispatch
             MainThreadDispatcher.CaptureContext();
@@ -120,7 +112,8 @@ public class Plugin : BasePlugin
                         regionIp = info.RegionIp,
                         regionPort = info.RegionPort,
                         host = info.Host,
-                        playerCount = info.PlayerCount
+                        playerCount = info.PlayerCount,
+                        maxPlayers = info.MaxPlayers
                     });
 
                 if (_autoPost && !string.IsNullOrEmpty(_serverUrl))
@@ -264,13 +257,18 @@ public class Plugin : BasePlugin
         var url = baseUrl + "/api/v1/lobbies";
         FileLogger.Info($"PostLobby: POST to {url}");
 
+        var hostName = !string.IsNullOrWhiteSpace(lobby.Host) && !lobby.Host.Equals("UNKNOWN", StringComparison.OrdinalIgnoreCase)
+            ? lobby.Host
+            : "Host";
+
         var body = new
         {
             code = lobby.Code,
             region = lobby.Region,
-            host = lobby.Host,
+            host = hostName,
             mod_type = "modded",
-            mods = new object[] { }
+            mods = new object[] { },
+            max_players = lobby.MaxPlayers
         };
 
         var json = JsonSerializer.Serialize(body);
