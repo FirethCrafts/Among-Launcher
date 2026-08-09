@@ -233,58 +233,74 @@ public class LobbyJoiner : IDisposable
 
     private JoinResult TryJoinViaReflection(object client, int gameId, string code)
     {
-        // Use GameAssembly to get the actual AmongUsClient type, not the IL2CPP runtime type
-        var realType = GameAssembly.Type("AmongUsClient");
-        var runtimeType = client.GetType();
-        FileLogger.Info($"[LobbyJoiner] Runtime type: {runtimeType?.FullName ?? "unknown"}");
-        FileLogger.Info($"[LobbyJoiner] GameAssembly type: {realType?.FullName ?? "null"}");
+        var clientType = GameAssembly.Type("AmongUsClient");
+        FileLogger.Info($"[LobbyJoiner] AmongUsClient type: {clientType?.FullName ?? "null"}");
 
-        // Try runtime type first, then GameAssembly type
-        Type? joinType = runtimeType;
-        if (joinType == null) joinType = realType;
-        if (joinType == null)
+        if (clientType == null)
         {
-            FileLogger.Error("[LobbyJoiner] No type found");
-            return new JoinResult(false, "Cannot resolve client type");
+            return new JoinResult(false, "AmongUsClient type not found");
         }
 
         // Log all methods
-        var allMethods = joinType.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static);
-        var methodNames = allMethods.Select(m => $"{m.Name}({string.Join(",", m.GetParameters().Select(p => p.ParameterType.Name))})");
-        FileLogger.Info($"[LobbyJoiner] Methods on {joinType.Name}: {string.Join(" | ", methodNames)}");
+        var allMethods = clientType.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static);
+        var methodNames = allMethods.Where(m => !m.IsSpecialName && !m.Name.StartsWith("get_") && !m.Name.StartsWith("set_"))
+            .Select(m => $"{m.Name}({string.Join(",", m.GetParameters().Select(p => p.ParameterType.Name))})");
+        FileLogger.Info($"[LobbyJoiner] Methods: {string.Join(" | ", methodNames)}");
 
-        // If GameAssembly type has methods, use that for method lookup
-        // But invoke on the runtime instance
-        Type? methodType = realType ?? runtimeType;
+        // Try each join method using GameAssembly.CallInstanceMethod which handles IL2CPP type marshalling
+        string[] joinMethods = { "CoJoinOnlineGameFromCode", "JoinGame", "CoJoinOnline", "JoinOnlineGame", "StartGame" };
 
-        // Try various join methods
-        string[] joinMethodNames = { "CoJoinOnlineGameFromCode", "JoinGame", "CoJoinOnline", "JoinOnlineGame", "StartGame", "CoStartHost" };
-
-        foreach (var methodName in joinMethodNames)
+        foreach (var methodName in joinMethods)
         {
-            var methods = methodType!.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
-                .Where(m => m.Name == methodName).ToList();
-            if (methods.Count == 0) continue;
+            if (!allMethods.Any(m => m.Name == methodName)) continue;
 
-            FileLogger.Info($"[LobbyJoiner] Found {methods.Count} overload(s) of {methodName}");
+            FileLogger.Info($"[LobbyJoiner] Trying {methodName}...");
 
-            foreach (var method in methods)
+            // Try CoJoinOnlineGameFromCode(int, bool)
+            if (methodName == "CoJoinOnlineGameFromCode")
             {
-                var parameters = method.GetParameters();
-                var paramTypes = parameters.Select(p => p.ParameterType).ToArray();
-                FileLogger.Info($"[LobbyJoiner]   {methodName}({string.Join(",", paramTypes.Select(t => t.Name))})");
-
-                object?[]? args = BuildArgs(paramTypes, gameId, code);
-                if (args == null)
+                try
                 {
-                    FileLogger.Info($"[LobbyJoiner]   Skipping unsupported signature");
-                    continue;
+                    var result = GameAssembly.CallInstanceMethod(client, methodName, new object[] { gameId, false },
+                        new[] { typeof(int), typeof(bool) });
+                    FileLogger.Info($"[LobbyJoiner] {methodName} returned: {result}");
+                    if (result != null) return StartCoroutine(client, clientType, result);
                 }
+                catch (Exception ex) { FileLogger.Warn($"[LobbyJoiner] {methodName} failed: {ex.Message}"); }
+            }
 
-                if (TryInvokeCoroutine(client, methodType, methodName, args, paramTypes))
+            // Try JoinGame(string)
+            if (methodName == "JoinGame")
+            {
+                try
                 {
-                    return new JoinResult(true, null);
+                    var result = GameAssembly.CallInstanceMethod(client, methodName, new object[] { code },
+                        new[] { typeof(string) });
+                    FileLogger.Info($"[LobbyJoiner] JoinGame(string) returned: {result}");
+                    if (result != null) return StartCoroutine(client, clientType, result);
                 }
+                catch (Exception ex) { FileLogger.Warn($"[LobbyJoiner] JoinGame(string) failed: {ex.Message}"); }
+
+                try
+                {
+                    var result = GameAssembly.CallInstanceMethod(client, methodName, new object[] { gameId },
+                        new[] { typeof(int) });
+                    FileLogger.Info($"[LobbyJoiner] JoinGame(int) returned: {result}");
+                    if (result != null) return StartCoroutine(client, clientType, result);
+                }
+                catch (Exception ex) { FileLogger.Warn($"[LobbyJoiner] JoinGame(int) failed: {ex.Message}"); }
+            }
+
+            // Try other methods with no args
+            if (methodName != "CoJoinOnlineGameFromCode" && methodName != "JoinGame")
+            {
+                try
+                {
+                    var result = GameAssembly.CallInstanceMethod(client, methodName);
+                    FileLogger.Info($"[LobbyJoiner] {methodName} returned: {result}");
+                    if (result != null) return StartCoroutine(client, clientType, result);
+                }
+                catch (Exception ex) { FileLogger.Warn($"[LobbyJoiner] {methodName} failed: {ex.Message}"); }
             }
         }
 
@@ -292,78 +308,25 @@ public class LobbyJoiner : IDisposable
         return new JoinResult(false, "No working join method found");
     }
 
-    private static object?[]? BuildArgs(Type[] paramTypes, int gameId, string code)
+    private JoinResult StartCoroutine(object client, Type clientType, object enumerator)
     {
-        if (paramTypes.Length == 2 && paramTypes[0] == typeof(int) && paramTypes[1] == typeof(bool))
-            return new object[] { gameId, false };
-        if (paramTypes.Length == 1 && paramTypes[0] == typeof(string))
-            return new object[] { code };
-        if (paramTypes.Length == 1 && paramTypes[0] == typeof(int))
-            return new object[] { gameId };
-        return null;
-    }
-
-    /// <summary>
-    /// Invokes a method that returns IEnumerator and starts it as a coroutine via reflection.
-    /// No IL2CPP compile-time types used.
-    /// </summary>
-    private bool TryInvokeCoroutine(object client, Type? clientType, string methodName, object[] args, Type[] argTypes)
-    {
-        if (clientType == null)
-        {
-            FileLogger.Error($"[LobbyJoiner] {methodName}: clientType is null");
-            return false;
-        }
-
         try
         {
-            var method = clientType.GetMethod(methodName,
-                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance,
-                null, argTypes, null);
-
-            if (method == null)
-            {
-                FileLogger.Info($"[LobbyJoiner] {methodName}({string.Join(",", argTypes.Select(t => t.Name))}) not found");
-                return false;
-            }
-
-            FileLogger.Info($"[LobbyJoiner] Invoking {methodName}...");
-            var enumerator = method.Invoke(client, args);
-
-            if (enumerator == null)
-            {
-                FileLogger.Warn($"[LobbyJoiner] {methodName} returned null");
-                return false;
-            }
-
-            FileLogger.Info($"[LobbyJoiner] {methodName} returned {enumerator.GetType().Name}");
-
-            // Try to start as coroutine via StartCoroutine
             var startMethod = FindMethod(clientType, "StartCoroutine", typeof(IEnumerator));
             if (startMethod == null)
             {
-                FileLogger.Warn($"[LobbyJoiner] StartCoroutine not found");
-                return false;
+                FileLogger.Warn("[LobbyJoiner] StartCoroutine not found");
+                return new JoinResult(false, "StartCoroutine not found");
             }
 
-            try
-            {
-                var coroutine = startMethod.Invoke(client, new object[] { enumerator });
-                FileLogger.Info($"[LobbyJoiner] StartCoroutine succeeded: {coroutine != null}");
-                return true;
-            }
-            catch (Exception ex)
-            {
-                FileLogger.Warn($"[LobbyJoiner] StartCoroutine failed: {ex.Message}");
-                return false;
-            }
+            var coroutine = startMethod.Invoke(client, new object[] { enumerator });
+            FileLogger.Info($"[LobbyJoiner] StartCoroutine succeeded: {coroutine != null}");
+            return new JoinResult(true, null);
         }
         catch (Exception ex)
         {
-            FileLogger.Error($"[LobbyJoiner] {methodName} failed: {ex.Message}");
-            if (ex.InnerException != null)
-                FileLogger.Error($"[LobbyJoiner] Inner: {ex.InnerException.Message}");
-            return false;
+            FileLogger.Warn($"[LobbyJoiner] StartCoroutine failed: {ex.Message}");
+            return new JoinResult(false, $"StartCoroutine failed: {ex.Message}");
         }
     }
 
