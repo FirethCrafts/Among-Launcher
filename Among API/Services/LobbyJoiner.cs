@@ -312,10 +312,39 @@ public class LobbyJoiner : IDisposable
     {
         try
         {
-            var startMethod = FindMethod(clientType, "StartCoroutine", typeof(IEnumerator));
+            // Search entire inheritance chain for StartCoroutine
+            Type? current = clientType;
+            MethodInfo? startMethod = null;
+            while (current != null && startMethod == null)
+            {
+                startMethod = current.GetMethod("StartCoroutine",
+                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance,
+                    null, new[] { typeof(IEnumerator) }, null);
+                if (startMethod != null)
+                {
+                    FileLogger.Info($"[LobbyJoiner] Found StartCoroutine on {current.Name}");
+                    break;
+                }
+                current = current.BaseType;
+            }
+
             if (startMethod == null)
             {
-                FileLogger.Warn("[LobbyJoiner] StartCoroutine not found");
+                // Also try the Il2Cpp MonoBehaviour type
+                var monoBehaviourType = GameAssembly.Type("UnityEngine.MonoBehaviour");
+                if (monoBehaviourType != null)
+                {
+                    startMethod = monoBehaviourType.GetMethod("StartCoroutine",
+                        BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance,
+                        null, new[] { typeof(IEnumerator) }, null);
+                    if (startMethod != null)
+                        FileLogger.Info($"[LobbyJoiner] Found StartCoroutine on MonoBehaviour");
+                }
+            }
+
+            if (startMethod == null)
+            {
+                FileLogger.Warn("[LobbyJoiner] StartCoroutine not found anywhere in hierarchy");
                 return new JoinResult(false, "StartCoroutine not found");
             }
 
