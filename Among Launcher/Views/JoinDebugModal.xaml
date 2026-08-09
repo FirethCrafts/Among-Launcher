@@ -4,7 +4,7 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              mc:Ignorable="d"
-             d:DesignHeight="420" d:DesignWidth="450">
+              d:DesignHeight="420" d:DesignWidth="450">
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="*"/>
@@ -13,7 +13,7 @@
 
         <Border Grid.Row="0" Background="#0DFFFFFF" CornerRadius="8"
                 BorderBrush="{StaticResource GlassBorder}" BorderThickness="1"
-                Padding="16" Margin="0,0,0,4">
+                Padding="16" Margin="0,0,0,8">
             <ScrollViewer x:Name="LogScrollViewer"
                           VerticalScrollBarVisibility="Auto">
                 <TextBlock x:Name="StatusTextBlock" Text=""
@@ -22,12 +22,28 @@
             </ScrollViewer>
         </Border>
 
-        <Button x:Name="PlayButton" Content="PLAY" Visibility="Collapsed"
+        <Button x:Name="PlayButton" Content="▶  PLAY" Visibility="Collapsed"
                 Click="PlayButton_Click"
-                Height="40" Padding="30,8" FontSize="16" FontWeight="Bold"
-                HorizontalAlignment="Right" VerticalAlignment="Bottom"
-                Margin="0,8,0,0"
-                Background="#10B981" Foreground="White" BorderThickness="0"
-                Cursor="Hand"/>
+                Height="44" Padding="32,8" FontSize="16" FontWeight="Bold"
+                HorizontalAlignment="Stretch" VerticalAlignment="Bottom"
+                Cursor="Hand">
+            <Button.Template>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="B" Background="#10B981" CornerRadius="10"
+                            SnapsToDevicePixels="True" UseLayoutRounding="True">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
+                                          Margin="{TemplateBinding Padding}"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="B" Property="Background" Value="#059669"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="B" Property="Background" Value="#6B7280"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Button.Template>
+        </Button>
     </Grid>
 </UserControl>

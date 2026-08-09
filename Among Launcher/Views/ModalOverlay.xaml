@@ -12,7 +12,7 @@
         
         <!-- Centered Modal Card -->
         <Border x:Name="ModalCard" Background="{StaticResource GlassSurfaceStrong}" BorderBrush="{StaticResource GlassEdgeBorder}" BorderThickness="1"
-                CornerRadius="14" Padding="24" MaxWidth="500"
+                CornerRadius="14" Padding="24" MaxWidth="520"
                 HorizontalAlignment="Center" VerticalAlignment="Center"
                 MouseLeftButtonDown="Card_Click"
                 SnapsToDevicePixels="True" UseLayoutRounding="True"

@@ -1,6 +1,7 @@
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using AmongLauncher.Config;
 using AmongLauncher.Services;
 
@@ -11,17 +12,14 @@ public record LobbyBotPayload(
     string Region,
     string Host,
     string Mod,
-    string RoleId,
-    string[] AppliedTags);
+    [property: JsonPropertyName("role_id")] string RoleId,
+    [property: JsonPropertyName("applied_tags")] string[] AppliedTags);
 
 public record LobbyBotResponse(bool Ok, string? Error);
 
 public class LobbyBotClient
 {
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-    };
+    private static readonly JsonSerializerOptions JsonOptions = new();
 
     private ClientWebSocket? _ws;
     private CancellationTokenSource _cts = new();

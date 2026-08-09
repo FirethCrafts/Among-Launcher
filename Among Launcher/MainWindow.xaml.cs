@@ -118,7 +118,10 @@ public partial class MainWindow
             var rawHost = p.TryGetProperty("host", out var h) ? h.GetString() : "";
             var host = !string.IsNullOrWhiteSpace(_config.UserName)
                 ? _config.UserName
-                : (!string.IsNullOrWhiteSpace(rawHost) && rawHost != "UNKNOWN" ? rawHost : "Host");
+                : (!string.IsNullOrWhiteSpace(rawHost) && !rawHost.Equals("UNKNOWN", StringComparison.OrdinalIgnoreCase) ? rawHost : "Host");
+            var maxPlayers = p.TryGetProperty("maxPlayers", out var mp) && mp.GetInt32() > 0
+                ? mp.GetInt32()
+                : 15;
             var info = new LobbyInfo
             {
                 Code = p.GetProperty("code").GetString() ?? "",
@@ -127,7 +130,8 @@ public partial class MainWindow
                 RegionPort = regionPort,
                 ModSet = await GetInstalledModSetAsync(),
                 HostUserId = _userId,
-                Host = host
+                Host = host,
+                MaxPlayers = maxPlayers
             };
             _activeLobby = info;
             _lobbyPlayerNames.Clear();
@@ -147,9 +151,10 @@ public partial class MainWindow
 
             if (_config.AutoPostLobby)
             {
-                await _backend.CreateLobbyAsync(new CreateLobbyRequest(info.Code, info.Region, info.Host, "modded", modEntries), CancellationToken.None);
+                await _backend.CreateLobbyAsync(new CreateLobbyRequest(info.Code, info.Region, info.Host, "modded", modEntries, info.MaxPlayers), CancellationToken.None);
                 _lobbyPostedToBackend = true;
                 _postedLobbyCode = info.Code;
+                _ = _backend.HeartbeatAsync(info.Code, _userId, CancellationToken.None);
                 StartHeartbeat(info.Code);
                 _ = _ws.ConnectAsync(info.Code, CancellationToken.None);
             }
@@ -329,15 +334,14 @@ public partial class MainWindow
                 Dispatcher.Invoke(() => ModalOverlay.Show($"Joining Lobby: {code}", debugModal));
                 debugModal.AppendLine($"Joining Lobby: {code}", bold: true);
                 debugModal.AppendLine("");
-                debugModal.AppendLine("**Searching for lobby in backend...**", bold: true);
+                debugModal.AppendStatus("🔍", "Searching for lobby in backend...", "", JoinDebugModal.StatusKind.Info);
             }
 
             if (!Services.Lobby.LobbyBackendClient.IsConfigured(_config))
             {
                 if (debug)
                 {
-                    debugModal?.AppendLine("Backend not configured!", bold: true);
-                    debugModal?.AppendLine("Set the server URL in Settings.");
+                    debugModal?.AppendStatus("❌", "Backend not configured", "Set the server URL in Settings.", JoinDebugModal.StatusKind.Error);
                 }
                 else
                 {
@@ -352,9 +356,7 @@ public partial class MainWindow
             {
                 if (debug)
                 {
-                    debugModal?.AppendLine("**Not Found**", bold: true);
-                    debugModal?.AppendLine($"Lobby '{code}' was not found on the server.");
-                    debugModal?.AppendLine("It may have closed, or the host hasn't created it yet.");
+                    debugModal?.AppendStatus("❌", "Not Found", $"Lobby '{code}' was not found on the server. It may have closed, or the host hasn't created it yet.", JoinDebugModal.StatusKind.Error);
                 }
                 else
                 {
@@ -366,23 +368,23 @@ public partial class MainWindow
 
             if (debug)
             {
-                debugModal?.AppendLine("**Found**", bold: true);
+                debugModal?.AppendStatus("✓", "Lobby Found", "", JoinDebugModal.StatusKind.Success);
                 debugModal?.AppendLine("");
-                debugModal?.AppendLine("**Info:**", bold: true);
-                debugModal?.AppendLine($"  Region: {lobby.Region}");
-                debugModal?.AppendLine($"  Host: {lobby.Host}");
-                debugModal?.AppendLine($"  Players: {lobby.PlayerCount}");
-                debugModal?.AppendLine($"  Code: {lobby.Code}");
+                debugModal?.AppendStatus("ℹ", "Lobby Info", "", JoinDebugModal.StatusKind.Info);
+                debugModal?.AppendLine($"    Region:  {lobby.Region}");
+                debugModal?.AppendLine($"    Host:    {lobby.Host}");
+                debugModal?.AppendLine($"    Players: {lobby.PlayerCount}");
+                debugModal?.AppendLine($"    Code:    {lobby.Code}");
 
                 var modType = lobby.ModSet.Count > 0 ? "Modded" : "Vanilla";
-                debugModal?.AppendLine($"  Type: {modType}");
+                debugModal?.AppendLine($"    Type:    {modType}");
 
                 if (lobby.ModSet.Count > 0)
                 {
                     debugModal?.AppendLine("");
-                    debugModal?.AppendLine("  Mods:");
+                    debugModal?.AppendLine("    Mods:");
                     foreach (var mod in lobby.ModSet)
-                        debugModal?.AppendLine($"    > {mod.FileName}");
+                        debugModal?.AppendLine($"      → {mod.FileName}");
                 }
                 debugModal?.AppendLine("");
             }
@@ -392,7 +394,7 @@ public partial class MainWindow
                 var synced = await JoinPipelineAsync(lobby, debugModal, debug, autoLaunch: false);
                 if (synced)
                 {
-                    debugModal?.AppendLine("**Ready to launch!**", bold: true);
+                    debugModal?.AppendStatus("🎮", "Ready to launch!", "", JoinDebugModal.StatusKind.Success);
                     var capturedCode = code;
                     var capturedLobby = lobby;
                     debugModal?.ShowPlayButton(() =>
@@ -402,7 +404,7 @@ public partial class MainWindow
                 }
                 else
                 {
-                    debugModal?.AppendLine("**Sync failed.**", bold: true);
+                    debugModal?.AppendStatus("⚠", "Sync failed", "Could not sync mods with the lobby.", JoinDebugModal.StatusKind.Error);
                 }
             }
             else
@@ -419,7 +421,7 @@ public partial class MainWindow
             LogDebug($"[Launcher] Join failed with exception: {ex}");
             if (debug)
             {
-                debugModal?.AppendLine($"**Error:** {ex.Message}", bold: true);
+                debugModal?.AppendStatus("❌", "Error", ex.Message, JoinDebugModal.StatusKind.Error);
             }
             else
             {
@@ -486,7 +488,7 @@ public partial class MainWindow
             LogDebug("[Launcher] Join aborted: modded Among Us not installed");
             if (debug)
             {
-                debugModal?.AppendLine("Modded Among Us is not installed. Run one-click setup first.", bold: true);
+                debugModal?.AppendStatus("❌", "Not Installed", "Run one-click setup first.", JoinDebugModal.StatusKind.Error);
             }
             else
             {
@@ -514,9 +516,9 @@ public partial class MainWindow
         {
             if (debug)
             {
-                debugModal?.AppendLine("**Loading mods**", bold: true);
+                debugModal?.AppendStatus("📦", "Syncing Mods", $"{missing.Count} mod(s) to download", JoinDebugModal.StatusKind.Info);
                 foreach (var mod in missing)
-                    debugModal?.AppendLine($"  > Loading {mod.FileName}...");
+                    debugModal?.AppendLine($"    ↓ {mod.FileName}...");
             }
 
             await StopGameAndWaitAsync();
@@ -525,7 +527,7 @@ public partial class MainWindow
             if (debug)
             {
                 foreach (var mod in missing)
-                    debugModal?.AppendLine($"  > Loaded {mod.FileName}");
+                    debugModal?.AppendStatus("✓", "Downloaded", mod.FileName, JoinDebugModal.StatusKind.Success);
                 debugModal?.AppendLine("");
             }
         }

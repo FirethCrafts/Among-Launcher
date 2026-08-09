@@ -1,6 +1,6 @@
 namespace AmongApi.Services;
 
-public record LobbyInfo(string Code, string Region, string RegionIp, int RegionPort, string Host, int PlayerCount);
+public record LobbyInfo(string Code, string Region, string RegionIp, int RegionPort, string Host, int PlayerCount, int MaxPlayers = 15);
 public record PlayerInfo(string PlayerName, int PlayerCount);
 
 /// <summary>
@@ -103,11 +103,13 @@ public class GameStateTracker : IDisposable
                 {
                     var region = "UNKNOWN";
                     var host = "UNKNOWN";
+                    int maxPlayers = 15;
                     try { region = GameAssembly.CurrentRegionName(); } catch { }
                     try { host = GameAssembly.LocalPlayerName(); } catch { }
-                    _log.LogInfo($"[GameStateTracker] Lobby created (code {code}, region {region}, host {host}, players {count}).");
+                    try { maxPlayers = MaxPlayers(); } catch { }
+                    _log.LogInfo($"[GameStateTracker] Lobby created (code {code}, region {region}, host {host}, players {count}, maxPlayers {maxPlayers}).");
                     _lastPlayerCount = count >= 0 ? count : -1;
-                    LobbyCreated?.Invoke(this, new LobbyInfo(code, region, "", 0, host, count));
+                    LobbyCreated?.Invoke(this, new LobbyInfo(code, region, "", 0, host, count, maxPlayers));
                 }
                 else
                 {
@@ -228,5 +230,28 @@ public class GameStateTracker : IDisposable
         if (instance == null)
             return -1;
         return GameAssembly.ToInt(GameAssembly.GetInstanceProp(instance, "PlayerCount"));
+    }
+
+    private static int MaxPlayers()
+    {
+        var client = GameAssembly.AmongUsClient();
+        if (client == null)
+            return 15;
+
+        var gameOptions = GameAssembly.GetInstanceProp(client, "GameHostOpts");
+        if (gameOptions != null)
+        {
+            var max = GameAssembly.ToInt(GameAssembly.GetInstanceProp(gameOptions, "MaxPlayers"));
+            if (max > 0) return max;
+        }
+
+        var normalOptions = GameAssembly.GetInstanceProp(client, "NormalOptions");
+        if (normalOptions != null)
+        {
+            var max = GameAssembly.ToInt(GameAssembly.GetInstanceProp(normalOptions, "MaxPlayers"));
+            if (max > 0) return max;
+        }
+
+        return 15;
     }
 }

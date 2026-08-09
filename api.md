@@ -139,7 +139,8 @@ The host entered or created a lobby in-game. The launcher mirrors the lobby to t
     "regionIp": "127.0.0.1",
     "regionPort": 22023,
     "host": "PlayerName",
-    "playerCount": 1
+    "playerCount": 1,
+    "maxPlayers": 15
   }
 }
 ```
@@ -334,7 +335,7 @@ REST + WebSocket contract implemented by the self-hosted `Among Backend` server.
 
 | Method | Endpoint | Body | Purpose |
 |--------|----------|------|---------|
-| POST | `/lobby` | `{ code, region, regionIp, regionPort, modSet, hostUserId }` | Create/register a lobby. If the host previously ran a lobby with connected launchers and the mod set differs, pushes `rejoin` to the old lobby's guests. Re-POSTing an existing code refreshes it. |
+| POST | `/lobby` | `{ code, region, regionIp, regionPort, modSet, hostUserId, maxPlayers }` | Create/register a lobby. If the host previously ran a lobby with connected launchers and the mod set differs, pushes `rejoin` to the old lobby's guests. Re-POSTing an existing code refreshes it. |
 | GET | `/lobby/{code}` | � | Fetch a lobby ? `{ code, region, regionIp, regionPort, modSet, hostUserId, playerCount }`. 404 if not found. |
 | POST | `/lobby/{code}/repost` | � | Refresh the Discord embed. |
 | POST | `/lobby/{code}/kick` | — | Push `kick` to the lobby's connected launchers over WebSocket (forces them to leave). |

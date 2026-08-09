@@ -1,86 +1,343 @@
-# Launcher Spec
+# Launcher Specification
 
-Exact technical details of how the **Among Launcher** accepts deep-links, how its local IPC server is configured, and the JSON handshake it expects from the in-game **Among API** mod.
+Technical specification of the **Among Launcher** WPF desktop application, the **Among API** BepInEx IL2CPP mod, and all communication protocols between them.
 
-> **Note on transport:** the internal local IPC is **not** TCP. It uses **Windows Named Pipes** on `localhost` (the `\\.\pipe\` namespace). There are two separate named pipes with distinct roles:
-> - `AmongLauncher.IPC` — the bidirectional control channel between launcher and the in-game mod.
-> - `AmongLauncher.Redirect` — used only for single-instance deep-link forwarding between two launcher processes.
->
-> No socket port is used anywhere; there is no TCP port to configure.
+> **Transport note:** All local IPC uses **Windows Named Pipes** (`\\.\pipe\` namespace), not TCP. There are two separate pipes:
+> - `AmongLauncher.IPC` — bidirectional control channel between launcher and in-game mod
+> - `AmongLauncher.Redirect` — single-instance deep-link forwarding between launcher processes
 
 ---
 
-## 1. Deep-Links
+## 1. Architecture Overview
 
-The launcher registers **two** URI schemes in the registry (`HKCU\Software\Classes\<scheme>`) via `DeepLinkHandler.RegisterProtocol()` (see `Among Launcher\Services\DeepLinkHandler.cs:64`). Both schemes point the shell's open command at the launcher EXE (`"<exe>" "%1"`).
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Among Launcher (WPF)                      │
+│  ┌─────────┐ ┌──────────┐ ┌──────────┐ ┌────────────────┐  │
+│  │ Auth    │ │ Config   │ │ Game     │ │ IPC            │  │
+│  │ (OAuth) │ │ (JSON)   │ │ Process  │ │ (PipeServer)   │  │
+│  └─────────┘ └──────────┘ └──────────┘ └────────────────┘  │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │ Lobby Services                                        │   │
+│  │ BackendClient · WebSocket · Heartbeat · JoinPipeline  │   │
+│  │ ModSetSync · ModCleanup · ProfileManager · BotClient  │   │
+│  └──────────────────────────────────────────────────────┘   │
+│  ┌──────────┐ ┌──────────┐ ┌──────────────────────────┐   │
+│  │ Installer│ │ Steam/   │ │ Views                    │   │
+│  │ BepInEx  │ │ Epic/    │ │ Main·Settings·Welcome·   │   │
+│  │ GameCopy │ │ Xbox     │ │ HostPanel·Modals         │   │
+│  └──────────┘ └──────────┘ └──────────────────────────┘   │
+└─────────────────────────────────────────────────────────────┘
+         │ Named Pipe (AmongLauncher.IPC)
+         ▼
+┌─────────────────────────────────────────────────────────────┐
+│              Among API (BepInEx IL2CPP Plugin)               │
+│  ┌──────────┐ ┌──────────────┐ ┌──────────────────────┐   │
+│  │ PipeClient│ │ GameState    │ │ LobbyJoiner          │   │
+│  │ (IPC)    │ │ Tracker      │ │ (main thread dispatch)│   │
+│  └──────────┘ └──────────────┘ └──────────────────────┘   │
+│  ┌──────────────────┐ ┌────────────────────────────────┐   │
+│  │ GameAssembly     │ │ ChatCommandHandler             │   │
+│  │ (Reflection)     │ │ /repost · /disband · /postlobby│   │
+│  └──────────────────┘ └────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────┘
+         │ HTTP REST + WebSocket
+         ▼
+┌─────────────────────────────────┐
+│  Python Backend (FastAPI)        │
+│  Lobby store · Discord embeds    │
+│  WebSocket hub · Mod storage     │
+└─────────────────────────────────┘
+```
 
-### 1.1 Mod install deep-link
+### Component Dependencies
 
-- **Scheme:** `amongus-launcher`
-- **Host:** `install`
-- **Format:**
-  ```
-  amongus-launcher://install?mods=<url1>,<url2>,<url3>
-  ```
-- **`mods`:** a comma-separated list of URL-encoded absolute HTTP(S) URLs to mod DLLs. See `DeepLinkHandler.Parse` (`DeepLinkHandler.cs:16`).
-- **Behavior:** Downloads each listed DLL into `BepInEx/plugins/` (each `url` → the file named after the URL's path component), then launches the game via the main view. Handled by `MainWindow.HandleDeepLink`/`ShowDownloadModsModal` (`MainWindow.xaml.cs:518`).
-- If the modded install / BepInEx is not present, a confirmation modal is shown instead of downloading.
-
-### 1.2 Lobby join deep-link
-
-- **Scheme:** `amonglauncher`
-- **Host:** `join`
-- **Format:**
-  ```
-  amonglauncher://join?code=ABCDEF
-  ```
-- **`code`:** the 6-character lobby code. Parsed by `DeepLinkHandler.TryParseJoin` (`DeepLinkHandler.cs:47`), which uppercases, trims, URL-decodes it, and validates length 4–8.
-- **Behavior:** The full join pipeline (`MainWindow.HandleJoinLinkAsync` at `MainWindow.xaml.cs:213`):
-  1. Fetch the lobby (`GET /lobby/{code}`) from the configured backend. If unconfigured or not found, an error modal is shown.
-  2. Verify the modded install exists (`winhttp.dll` present in the modded folder).
-  3. Sync the lobby's `modSet` into `BepInEx/plugins/`, downloading any missing DLLs.
-  4. Kill any running game, launch Among Us, and wait up to 90s for the mod's `game_ready`.
-  5. Broadcast `join_lobby` over the IPC pipe with `{ code, region, regionIp, regionPort }`.
-  6. Connect the lobby WebSocket (`<BackendWssUrl>?code=...`).
-
-### 1.3 Single-instance routing
-
-A second instance launched with a deep-link argument forwards the raw deep-link string to the already-running primary instance using the **`AmongLauncher.Redirect`** pipe (`SingleInstance.cs`):
-- Primary creates a global mutex `Global\AmongLauncher.SingleInstance`; only it runs `StartRedirectServer`, which listens on `AmongLauncher.Redirect` (inbound pipe) and reads one UTF-8 line per connection.
-- Secondary instances call `ForwardDeepLink(deepLink)`: connect write-only to `AmongLauncher.Redirect` (2s connect timeout) and write the deep-link as a single line, then exit.
-- On the primary, the received link fires `App.DeepLinkReceived`, which is dispatched to `MainWindow.HandleDeepLink`.
+| Component | Depends On | Communicates Via |
+|-----------|-----------|-----------------|
+| Launcher → Among API | Named Pipe `AmongLauncher.IPC` | Length-prefixed JSON |
+| Launcher → Backend | HTTP REST (`api/v1/`) | JSON + Bearer auth |
+| Launcher → Bot | WebSocket (`BotWsEndpoint`) | JSON |
+| Among API → Launcher | Named Pipe (client side) | Length-prefixed JSON |
+| Among API → Backend | HTTP POST (direct, autopost) | JSON |
+| Among API → Game | Reflection (IL2CPP) | Runtime type access |
 
 ---
 
-## 2. Local IPC Server Configuration
+## 2. Configuration
 
-### 2.1 The control pipe (`AmongLauncher.IPC`)
+**File:** `%LocalAppData%\AmongLauncher\config.json`
+**Persistence:** `LauncherConfig.Load()` / `LauncherConfig.Save()` — both swallow all exceptions.
 
-Implemented by `PipeServer` (`Among Launcher\Ipc\PipeServer.cs:7`).
+### Fields
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `Storefront` | `Storefront?` | `null` | Selected storefront (Steam/Epic/MicrosoftStore). Null = auto-detect. |
+| `ServerUrl` | `string` | `"https://yourserver.com/api"` | Backend REST base URL. Launcher considers backend unconfigured if this contains `"yourserver.com"`. |
+| `BackendWssUrl` | `string` | `"wss://yourserver.com/ws"` | Backend WebSocket URL. |
+| `BotWsEndpoint` | `string` | `"ws://127.0.0.1:8080"` | Discord bot WebSocket endpoint. |
+| `ModdedRoleId` | `string` | `""` | Discord role ID for modded lobby announcements. |
+| `VanillaRoleId` | `string` | `""` | Discord role ID for vanilla lobby announcements. |
+| `ModdedInstallPath` | `string` | `%LocalAppData%\AmongLauncher\ModdedAmongUs` | Path to the modded game copy. |
+| `AvatarUrl` | `string` | `""` | Discord avatar URL (cached). |
+| `UserName` | `string` | `""` | Discord username / display name (cached). |
+| `DiscordAccessToken` | `string` | `""` | Discord OAuth2 bearer token. |
+| `Profiles` | `List<ModProfile>` | `[]` | Saved mod profiles. |
+| `Library` | `List<LibraryEntry>` | `[]` | Mod library entries. |
+| `DebugMode` | `bool` | `false` | Enables debug join modal with detailed status. |
+| `AutoPostLobby` | `bool` | `false` | Auto-creates lobby on backend when hosting. |
+
+---
+
+## 3. Deep-Links
+
+### 3.1 URI Scheme Registration
+
+Both schemes registered in `HKCU\Software\Classes\<scheme>` via `DeepLinkHandler.RegisterProtocol()`.
+
+| Scheme | Purpose |
+|--------|---------|
+| `amongus-launcher` | Mod install |
+| `amonglauncher` | Lobby join |
+
+Shell command: `"<exe>" "%1"` — the launcher receives the URI as a process argument.
+
+### 3.2 Mod Install Deep-Link
+
+**Format:** `amongus-launcher://install?mods=<url1>,<url2>,<url3>`
+
+- **`mods`:** Comma-separated list of URL-encoded absolute HTTP(S) URLs to mod DLLs.
+- **Parsing:** `DeepLinkHandler.Parse()` splits on `,`, URL-decodes each, extracts filename from URL path.
+- **Behavior:** Downloads each DLL into `BepInEx/plugins/` via `ModDownloader`, then launches the game.
+- **Guard:** If modded install is not set up, shows a confirmation modal instead of downloading.
+
+### 3.3 Lobby Join Deep-Link
+
+**Format:** `amonglauncher://join?code=ABCDEF`
+
+- **`code`:** 4–8 character alphanumeric lobby code. Trimmed, uppercased, URL-decoded, validated against regex `^[A-Za-z0-9]{4,8}$`.
+- **Parsing:** `DeepLinkHandler.TryParseJoin()` handles both query param (`?code=X`) and path (`/X`) formats.
+- **Full join pipeline** (`HandleJoinLinkAsync` at `MainWindow.xaml.cs:213`):
+  1. Refresh config from disk
+  2. Validate backend is configured (ServerUrl not containing `yourserver.com`)
+  3. `GET /api/v1/lobbies/{code}` — fetch lobby from backend
+  4. Verify modded install exists (`winhttp.dll` present)
+  5. `ModSetSync.DiffAsync()` — diff lobby's mod set against local plugins
+  6. `ModSetSync.InstallAsync()` — download missing DLLs (with SHA-256 verification)
+  7. `ModCleanupEngine.QuarantineAsync()` — move non-required mods to `.disabled/`
+  8. Kill any running game
+  9. Launch Among Us with launch args (including `--server-url`, `--autopost`/`--no-autopost`)
+  10. `WaitForGameReadyAsync()` — up to 90s timeout, racing TCS + process exit
+  11. Broadcast `join_lobby` over IPC pipe: `{ code, region, regionIp, regionPort }`
+  12. `LobbyWebSocketClient.ConnectAsync()` — connect to backend WebSocket
+  13. Return join outcome
+
+### 3.4 Debug Mode Join
+
+When `DebugMode` is enabled:
+- A `JoinDebugModal` is shown instead of auto-launching
+- Displays real-time status: lobby info, mod sync progress, errors
+- Green PLAY button appears when everything is ready
+- Clicking PLAY starts the game, waits for `game_ready`, sends `join_lobby`
+
+---
+
+## 4. Single-Instance Routing
+
+**Mutex:** `Global\AmongLauncher.SingleInstance`
+
+- Primary instance creates the global mutex and starts `SingleInstance.StartRedirectServer()`.
+- Redirect pipe: `AmongLauncher.Redirect` — listens for one UTF-8 line per connection (the raw deep-link string).
+- Secondary instances call `SingleInstance.ForwardDeepLink(deepLink)`: connect write-only to the redirect pipe (2s timeout), write the deep-link as a single line, then exit.
+- On the primary, the received link fires `App.DeepLinkReceived`, dispatched to `MainWindow.HandleDeepLink()`.
+
+---
+
+## 5. Discord OAuth2 Authentication
+
+**Service:** `DiscordAuthService`
+
+### Constants
+
+| Constant | Value |
+|----------|-------|
+| `ClientId` | `1533706803748147240` |
+| `ClientSecret` | `Um7wPIDVkCS9ro-0ZltYrs1NUI2q2LLh` |
+| `RedirectUri` | `http://localhost:5000/callback/` |
+| `AuthorizeUrl` | `https://discord.com/oauth2/authorize?client_id=...&response_type=code&redirect_uri=...&scope=identify` |
+| Scopes | `identify` |
+
+### OAuth Flow
+
+1. `LoginAsync()` starts `HttpListener` on `localhost:5000`
+2. Opens browser to Discord OAuth2 authorize URL
+3. Waits for callback (up to 5 minutes)
+4. Exchanges authorization code for access token via `POST https://discord.com/api/v10/oauth2/token`
+5. Fetches user profile via `GET https://discord.com/api/v10/users/@me` (Bearer token)
+6. Returns `DiscordUserProfile(Id, Username, GlobalName, AvatarUrl)`
+7. Launcher saves avatar URL, username, and token to config
+8. Avatar displayed in sidebar as circle-clipped image
+
+---
+
+## 6. Game Detection & Installation
+
+### 6.1 Storefront Detection
+
+**Enum:** `Storefront { Steam, Epic, MicrosoftStore }`
+
+**Steam** (`SteamFinder.cs`):
+- Registry: `HKLM\SOFTWARE\WOW6432Node\Valve\Steam\InstallPath`
+- Parses `libraryfolders.vdf` for additional Steam library paths
+- Searches each library for `steamapps\common\Among Us\Among Us.exe`
+- Fallback paths: `C:\Program Files (x86)\Steam`, `D:\SteamLibrary`, etc.
+
+**Epic** (`GameFinder.cs`):
+- Parses `*.item` manifest files in `ProgramData\Epic\EpicGamesLauncher\Data\Manifests`
+- Checks `GameUserSettings.ini` in `%LocalAppData%\Among Us\Game\Settings`
+- Fallback paths: `C:\Program Files\Epic Games\Among Us`, etc.
+
+**Microsoft Store / Xbox** (`GameFinder.cs`):
+- Scans all fixed drives for `Among Us\Among Us.exe` or `Among Us\Content\Among Us.exe`
+- Checks `Program Files\WindowsApps\Innersloth*`
+- Checks `%LocalAppData%\Packages\InnerSloth.LLC-*`
+
+**Auto-detection:** Tries Steam → Epic → Xbox in order, returns first found.
+
+### 6.2 Installation Flow
+
+1. **Copy game:** `GameCopier.CopyGameAsync()` copies all files (except `.pdb`) from vanilla to `%LocalAppData%\AmongLauncher\ModdedAmongUs`
+2. **Install BepInEx:** `BepInExInstaller.InstallAsync()` — local dir or download from GitHub releases; different builds for Steam vs Epic/MS Store
+3. **Write `steam_appid.txt`:** for Steam (app ID `945360`)
+4. **Install AmongApi.dll:** Downloads from `https://github.com/FirethCrafts/Among-Launcher/releases/latest/download/AmongApi.dll`
+
+---
+
+## 7. Game Process Management
+
+**Service:** `GameProcessManager`
+
+| Method | Behavior |
+|--------|----------|
+| `LaunchGame(exePath, arguments?)` | Starts `Process`, hooks `Exited` event |
+| `KillGame()` | `CloseMainWindow()` → wait 15s → `Kill()` → wait 15s |
+| `IsGameRunning()` | Returns `!HasExited` |
+
+**Event:** `GameExited`
+
+### Launch Arguments
+
+| Argument | Condition |
+|----------|-----------|
+| `-EpicPortal` | Epic storefront |
+| `--autopost` | `AutoPostLobby` is true |
+| `--no-autopost` | `AutoPostLobby` is false |
+| `--server-url=<url>` | Always sent (from `config.ServerUrl`) |
+
+---
+
+## 8. Mod Management
+
+### 8.1 Installed Mods
+
+Scans `BepInEx/plugins/*.dll` → returns `List<ModInfo>` with name, description, and file path.
+
+### 8.2 Import Local Mod
+
+File dialog → copies selected `.dll` to `BepInEx/plugins/` with overwrite-conflict handling.
+
+### 8.3 GitHub Preset Mods
+
+`PresetModLibraryModal` hardcoded presets:
+
+| Name | Repository | Preferred Asset |
+|------|-----------|----------------|
+| EHR (Endless Host Roles) | `Gurge44/EndlessHostRoles` | `EHR.dll` |
+| AUnlocker | `astra1dev/AUnlocker` | (any `.dll`) |
+| Town of Us Mira | `AU-Avengers/TOU-Mira` | `TownOfUsMira.dll` |
+| Town of Us Reactivated | `badzyn/TOU-Mira` | `TownOfUsMira.dll` |
+| Lotus | `Lotus-AU/LotusContinued` | `Lotus.dll` |
+
+**Install flow:** Fetch GitHub releases API → find `.dll` asset → download via `ModDownloader`.
+
+### 8.4 Mod Downloader
+
+`ModDownloader.DownloadToFileAsync()`: skips if file exists and non-empty; retries on `IOException` with backoff `[250, 500, 1000, 2000, 4000]` ms.
+
+### 8.5 SHA-256 Verification
+
+`Sha256Helper.HashFileAsync()` — lowercase hex SHA-256. Used during mod-set sync.
+
+---
+
+## 9. Mod Profiles
+
+**Service:** `ModProfileManager`
+
+```csharp
+class ModProfile {
+    string Name;
+    List<ModSetEntry> Mods; // FileName, DownloadUrl, Sha256?, Version?
+}
+```
+
+| Operation | Behavior |
+|-----------|----------|
+| `LoadProfiles()` | Returns `_config.Profiles` |
+| `SaveProfile(name, mods)` | Upserts profile by name, saves config |
+
+**Apply profile:** Diff against installed → download missing → move extras to library.
+
+---
+
+## 10. Mod Library
+
+**Service:** `LibraryManager`
+**Library dir:** `%LocalAppData%\AmongLauncher\Library`
+
+| Operation | Behavior |
+|-----------|----------|
+| `LoadLibrary()` | Returns config entries, prunes missing files |
+| `AddToLibrary(sourceFilePath, downloadUrl?, version?)` | Copies DLL to library, records in config |
+| `InstallToPlugins(fileName, pluginsDir)` | Copies from library to plugins |
+| `RemoveFromLibrary(fileName)` | Deletes file + config entry |
+| `MoveNonListedToLibrary(pluginsDir, keepFileNames)` | Moves non-listed DLLs to library |
+
+---
+
+## 11. Mod Cleanup
+
+**Service:** `ModCleanupEngine`
+
+**Whitelist** (never quarantined): `AmongApi.dll`, `AUnlocker.dll`, `helper_mod.dll`, `aunlocker`
+
+**Behavior:** `QuarantineAsync(requiredFileNames, ct)` moves non-whitelisted, non-required DLLs/dirs to `BepInEx/plugins/.disabled/`. Never hard-deleted.
+
+---
+
+## 12. Named Pipe IPC Protocol
+
+### 12.1 Pipe Server
 
 | Setting | Value |
 |---------|-------|
-| Type | **Windows Named Pipe** (server) |
 | Pipe name | `AmongLauncher.IPC` |
 | Direction | `InOut` (bidirectional) |
 | Max instances | `1` |
 | Transmission mode | `Byte` |
 | Options | `Asynchronous` |
-| Head-of-line capacity | single connection at a time (server loops: accept → handle → dispose → accept) |
 
-The server is started once with `PipeServer.Start()` in `MainWindow`'s constructor (`MainWindow.xaml.cs:161`). It listens on `localhost`: client connects to `\\.\pipe\AmongLauncher.IPC`. Name resolution on the client side uses the local machine (`"."`) — see `PipeClient.ConnectAsync` (`Among API\Services\PipeClient.cs:44`).
+Accepts one client at a time. Started in `MainWindow` constructor.
 
-### 2.2 Wire / frame format
-
-Every frame is length-prefixed UTF-8 JSON:
+### 12.2 Wire Format
 
 ```
 [ 4 bytes: payload length (int32, little-endian) ][ N bytes: JSON payload ]
-ReadMessage: BitConverter.ToInt32(header) → validate 0 < len ≤ 1 MB → read exactly len bytes.
-SendMessage: BitConverter.GetBytes(data.Length) → write header → write payload → Flush().
 ```
 
-### 2.3 JSON message envelope
+Max payload: **1 MB**. `ReadMessage` validates `0 < len ≤ 1 MB`.
+
+### 12.3 JSON Message Envelope
 
 ```json
 {
@@ -91,213 +348,328 @@ SendMessage: BitConverter.GetBytes(data.Length) → write header → write paylo
 }
 ```
 
-| Field | Type | Notes |
-|-------|------|-------|
-| `type` | string | required; routed to the registered handler |
-| `id` | string | random 8-char hex, used to correlate request/response |
-| `timestamp` | long | Unix epoch ms |
-| `payload` | object | optional; omitted when `null` |
+**Response asymmetry:**
+- Mod → Launcher: mod sends with `id`/`timestamp`, launcher serializes handler return directly (no echo).
+- Launcher → Mod: launcher sends with `id`/`timestamp`, mod echoes `id` in `<type>_ack`.
 
-Messages sent by the launcher (launcher → mod) are built with `timestamp` and an `id`; the mod's responses (`<type>_ack`) echo the request `id`. Messages sent by the mod (mod → launcher) also carry `id`/`timestamp`, but the launcher's response handling does **not** echo them — see §4.
+### 12.4 Message Types
+
+#### Launcher → Among API
+
+| Type | Payload | Description |
+|------|---------|-------------|
+| `launcher_ready` | _(none)_ | Handshake on window load |
+| `set_server_url` | `{ url }` | Sends backend URL to plugin |
+| `join_lobby` | `{ code, region, regionIp, regionPort }` | Ask plugin to join lobby |
+
+#### Among API → Launcher
+
+| Type | Payload | Response |
+|------|---------|----------|
+| `game_ready` | _(none)_ | `{ type: "game_ready_ack", restart: false }` |
+| `lobby_created` | `{ code, region, regionIp, regionPort, host, playerCount, maxPlayers }` | `{ type: "lobby_created_ack" }` |
+| `lobby_closed` | `{ code, reason }` | `{ type: "lobby_closed_ack" }` |
+| `player_joined` | `{ playerName, playerCount }` | _(none)_ |
+| `player_left` | `{ playerName, playerCount }` | _(none)_ |
+| `join_lobby_result` | `{ success, error? }` | _(none)_ |
+
+### 12.5 Launcher Handler Details
+
+#### `lobby_created`
+
+1. Reads IPC payload: `code`, `region`, `regionIp`, `regionPort`, `host`, `playerCount`, `maxPlayers`
+2. Resolves host name: `_config.UserName` > IPC `host` (if not "UNKNOWN") > `"Host"`
+3. Builds `LobbyInfo` with `HostUserId = _userId`, `MaxPlayers = maxPlayers`
+4. Scans installed mods via `GetInstalledModSetAsync()`
+5. Uploads each mod DLL to backend via `POST /api/v1/mods`
+6. If `AutoPostLobby`: `POST /api/v1/lobbies` → immediate heartbeat → start heartbeat service (30s) → connect WebSocket
+7. Shows `HostControlPanelView` if user is host
+8. Detects lobby type via `LobbyTypeDetector`
+9. Sends bot announcement via `LobbyBotClient`
+
+#### `lobby_closed`
+
+`DELETE /api/v1/lobbies/{code}` → stop heartbeat → disconnect WebSocket → disconnect bot → clear `_activeLobby`.
 
 ---
 
-## 3. Handler Registration (server side)
+## 13. Among API Plugin
 
-The launcher registers message-type handlers with `RegisterHandler(type, handler)` in the `MainWindow` constructor (`MainWindow.xaml.cs:83`–`159`). When a frame arrives, `PipeServer.HandleConnectionAsync` (`PipeServer.cs:86`) reads `type`, looks up the handler, calls `handler(rootElement)`, and — **if the handler returns a non-null object** — serializes that object **directly** as the response frame (no special envelope wrapper, no `id`/`timestamp` echo).
+### 13.1 Plugin Lifecycle
 
-The launcher's server-side handlers:
+1. **Load:** Parse CLI args (`--autopost`, `--no-autopost`, `--server-url=`)
+2. **RunAsync:** Wait for game init (up to 30s, 500ms polling), connect `PipeClient`
+3. Send `game_ready`
+4. Start `GameStateTracker` (500ms polling)
+5. Register handlers: `set_server_url`, `join_lobby`
+6. Start `ChatCommandHandler` (500ms polling)
+7. On disconnect: stop tracker, stop commands, dispose joiner
 
-| `type` | Payload | Response |
-|--------|---------|----------|
-| `game_ready` | _(none sent by the mod today)_ | `{ "type": "game_ready_ack", "restart": false }` |
-| `lobby_created` | `{ code, region }` | `{ "type": "lobby_created_ack" }` |
-| `lobby_closed` | `{ code, reason }` | `{ "type": "lobby_closed_ack" }` |
-| `player_joined` | `{ playerName, playerCount }` | none |
-| `player_left` | `{ playerName, playerCount }` | none |
-| `join_lobby_result` | `{ success, error? }` | none |
+### 13.2 GameAssembly Reflection Bridge
 
-`region` in `lobby_created` is the display name only (e.g. `"NA"`, `"EU"`, `"ASIA"`, or a custom server label). The launcher does **not** send `regionIp` or `regionPort` upstream to the backend — those are internal to the IPC join flow.
+Lazy, cached reflection over `Assembly-CSharp` IL2CPP interop. Zero compile-time game references.
+
+**Assembly resolution chain:** Loaded assemblies → `BepInEx/interop/Assembly-CSharp.dll` → All loaded assemblies → `Il2CppInterop.Runtime.dll`
+
+**Key methods:** `Type()`, `GetStaticProp()`, `GetInstanceProp()`, `GetInstanceMember()`, `GetStaticMember()`, `CallStaticMethod()`, `CallInstanceMethod()`, `InLobby()`, `AmongUsClient()`, `CurrentRegionName()`, `LocalPlayerName()`
+
+**Error handling:** All failures → `null` + log; never throw.
+
+### 13.3 Game State Tracker
+
+500ms polling. State machine:
+
+| Transition | Condition | Event |
+|-----------|-----------|-------|
+| Not in → In lobby | `IsHost()` | `LobbyCreated` |
+| In → Not in lobby | Was host | `LobbyClosed` |
+| Player count ↑ | In lobby | `PlayerJoined` |
+| Player count ↓ | In lobby | `PlayerLeft` |
+
+**Host detection:** `AmHost` property → `InnerNetClient.AmHost` static → `HostId == CurrentClient` fallback.
+
+**Max players:** `AmongUsClient.GameHostOpts.MaxPlayers` or `NormalOptions.MaxPlayers`, default 15.
+
+### 13.4 Lobby Joiner
+
+Background queue pump. Dispatches to Unity main thread via `SynchronizationContext.Post`.
+
+**Join sequence:**
+1. Construct `ServerInfo` + `StaticHttpRegionInfo` for custom regions
+2. `GameCode.GameNameToInt(code)`
+3. `AmongUsClient.CoJoinOnlineGameFromCode(gameId, false)`
+4. `AmongUsClient.StartCoroutine(enumerator)`
+
+Timeouts: 30s dispatch, 15s main-thread completion.
+
+### 13.5 Chat Commands
+
+| Command | Action | IPC |
+|---------|--------|-----|
+| `/repost` | Resend lobby to backend | `lobby_created` |
+| `/disband` | Leave lobby + notify backend | `lobby_closed` (reason: `"disband"`) |
+| `/postlobby` | Post lobby to backend | _(direct HTTP)_ |
+
+### 13.6 Auto-Post
+
+When `--autopost`: plugin calls `PostLobbyToBackend()` directly on lobby creation.
+`POST {serverUrl}/api/v1/lobbies` with `{ code, region, host, mod_type: "modded", mods: [], max_players }`.
+
+### 13.7 Lobby Leave
+
+`AmongUsClient.Instance.ExitGame(DisconnectReasons.ExitGame)` via reflection.
+
+### 13.8 Logging
+
+**File:** `BepInEx/AmongApi.log`
+**Format:** `[yyyy-MM-dd HH:mm:ss] [LEVEL] message`
 
 ---
 
-## 4. Handshake Expected From the In-Game Mod
+## 14. Lobby Lifecycle
 
-The launcher expects the Among API mod to act **as the IPC client** and to perform the following sequence (see `Among API\Plugin.cs:20` and `MainWindow`'s pipe handlers):
+### Host Creates Lobby
 
-### 4.1 Connect
-
-The mod connects a `NamedPipeClientStream` to `\\.\pipe\AmongLauncher.IPC` (pipe name `AmongLauncher.IPC`, `InOut`, async). The `PipeClient.ConnectAsync` logic retries up to 5 attempts with a 2s delay between failures (`PipeClient.cs:36`).
-
-### 4.2 Announce readiness — `game_ready`
-
-Immediately after connecting, the mod must send:
-
-```json
-{
-  "type": "game_ready",
-  "id": "8_char_hex",
-  "timestamp": 1735689600000
-}
+```
+1. Player enters lobby in-game (host detected by GameStateTracker)
+2. Plugin fires LobbyCreated event
+3. Plugin sends "lobby_created" IPC to launcher
+4. Plugin optionally calls PostLobbyToBackend() (autopost)
+5. Launcher receives "lobby_created":
+   a. Resolves host name
+   b. Scans installed mods
+   c. Uploads mods to backend
+   d. Creates lobby on backend (POST /api/v1/lobbies)
+   e. Sends immediate heartbeat
+   f. Starts heartbeat service (every 30s)
+   g. Connects WebSocket
+   h. Shows host control panel
+   i. Sends bot announcement
 ```
 
-**Expected launcher behavior:** sets the `_gameReadyTcs` used to unblock the join pipeline's 90s `WaitForGameReady` wait, updates the UI status to `"Game loaded — AmongAPI active"`, and replies with a frame whose serialized body is:
+### Guest Joins Lobby
 
-```json
-{ "type": "game_ready_ack", "restart": false }
+```
+1. Deep link amonglauncher://join?code=X received
+2. Launcher fetches lobby from backend (GET /api/v1/lobbies/{code})
+3. Launcher diffs mod set against local plugins
+4. Downloads missing mods (SHA-256 verified)
+5. Quarantines extra mods to .disabled/
+6. Kills running game
+7. Launches Among Us with --server-url and --no-autopost
+8. Waits up to 90s for "game_ready" from plugin
+9. Sends "join_lobby" IPC with { code, region, regionIp, regionPort }
+10. Plugin joins in-game via reflection
+11. Plugin sends "join_lobby_result"
+12. Launcher connects WebSocket
 ```
 
-> This is the critical handshake for join requests: the launcher releases the join pipeline only when `game_ready` is received (or the 90s timeout / process-crash guard fires).
+### Host Disbands Lobby
 
-### 4.3 Report lobby state transitions (host only)
-
-The mod polls game state (see `GameStateTracker.cs`) and sends these event messages up the pipe, **only for the local client that is the host**:
-
-- **Lobby created / reposted:**
-  ```json
-  {
-    "type": "lobby_created",
-    "id": "8_char_hex",
-    "timestamp": 1735689600000,
-    "payload": { "code": "ABCDEF", "region": "NA" }
-  }
-  ```
-  The launcher mirrors the lobby to the backend (using `region` as the display name), starts the heartbeat, opens the lobby WebSocket, and (if the signed-in user is the host) shows the host control panel. `regionIp`/`regionPort` are not sent upstream; they are internal to the IPC `join_lobby` flow.
-
-- **Lobby closed / disbanded:**
-  ```json
-  {
-    "type": "lobby_closed",
-    "id": "8_char_hex",
-    "timestamp": 1735689600000,
-    "payload": { "code": "ABCDEF", "reason": "" }
-  }
-  ```
-  `reason` is `""` for a normal leave and `"disband"` for the in-game `/disband` chat command. The launcher disbands the lobby on the backend and tears down heartbeat/WebSocket/host panel.
-
-- **Player joined / left:**
-  ```json
-  {
-    "type": "player_joined",
-    "id": "8_char_hex",
-    "timestamp": 1735689600000,
-    "payload": { "playerName": "<unknown>", "playerCount": 4 }
-  }
-  ```
-  `playerName` is currently `"<unknown>"` because the tracker cannot read names; the launcher keys its live player list off `playerCount`. Same shape for `player_left`.
-
-### 4.4 Handle commands from the launcher
-
-The mod must register a handler for **`join_lobby`** and execute it:
-
-- Launcher sends:
-  ```json
-  {
-    "type": "join_lobby",
-    "id": "8_char_hex",
-    "timestamp": 1735689600000,
-    "payload": { "code": "ABCDEF", "region": "NA", "regionIp": "127.0.0.1", "regionPort": 22023 }
-  }
-  ```
-- Mod should join the lobby in-game and reply with a handler result `{ success, error }` (sent as the `<type>_ack` frame echoing the request `id`), and also broadcast `join_lobby_result`:
-  ```json
-  {
-    "type": "join_lobby_result",
-    "id": "8_char_hex",
-    "timestamp": 1735689600000,
-    "payload": { "success": true, "error": null }
-  }
-  ```
-  The launcher's `join_lobby_result` handler surfaces `error` in the UI when `success` is false.
-
-### 4.5 Disconnect
-
-When the game closes, the mod's `PipeClient` read loop exits and fires `Disconnected`; the launcher's server sees the stream end, disposes the connection, updates the connection status to disconnected, and listens for the next client.
+```
+1. Host clicks Disband or types /disband
+2. Confirmation modal shown (if UI)
+3. DELETE /api/v1/lobbies/{code}
+4. Stop heartbeat service
+5. Disconnect WebSocket
+6. Disconnect bot client
+7. Plugin calls AmongUsClient.ExitGame()
+8. Clear _activeLobby
+```
 
 ---
 
-## 5. Key Behaviors / Edge Cases
+## 15. Lobby Backend REST API
 
-- **Port fallback in `join_lobby`:** the IPC `join_lobby` message includes `regionIp`/`regionPort` for the in-game joiner; the mod falls back to port `22023` when `regionPort` is missing or `<= 0`.
-- **Response asymmetry:** the mod always gets an `id`-echoed `<type>_ack` for its own sends, but launcher responses back to the mod do **not** echo `id`/`timestamp` (they are the handler's raw serialized object). The mod therefore ignores reply bodies and returns `null` after a send.
-- **1 MB cap:** frames larger than 1,048,576 bytes are rejected.
-- **Single connection:** the `AmongLauncher.IPC` server accepts one client at a time (max instances = 1).
-- **Deep-link availability guards:** joins require a signed-in/configured backend (`ServerUrl` not containing `yourserver.com`) and an installed modded copy with `winhttp.dll`.
-- Two schemes are registered; only `amonglauncher://join` and `amongus-launcher://install` are meaningful to the parser. Anything else is ignored.
-- **Debug Mode:** When `DebugMode` is enabled in `LauncherConfig`, joining a lobby via deep link shows a `JoinDebugModal` with real-time status (lobby info, mod sync, errors). The game does not auto-launch; a green PLAY button appears when everything is ready. Clicking PLAY starts the game, waits for `game_ready`, and sends `join_lobby`.
+**Base URL:** `config.ServerUrl` (default `https://yourserver.com/api`)
+**Auth:** `Authorization: Bearer <DiscordAccessToken>` when token is non-empty.
+**Timeout:** 8 seconds per request.
 
----
+| Method | Endpoint | Body | Response |
+|--------|----------|------|----------|
+| `POST` | `api/v1/lobbies` | `{ code, region, host, mod_type, mods[], max_players }` | `bool` (success) |
+| `GET` | `api/v1/lobbies/{code}` | — | `LobbyResponse` → `LobbyInfo` |
+| `POST` | `api/v1/lobbies/{code}/heartbeat` | — | `bool` |
+| `POST` | `api/v1/lobbies/{code}/repost` | — | `bool` |
+| `POST` | `api/v1/lobbies/{code}/kick` | `{ player_id }` | `bool` |
+| `DELETE` | `api/v1/lobbies/{code}` | — | `bool` |
+| `POST` | `api/v1/mods` | `multipart/form-data` (file, name) | `ModInfoEntry?` |
+| `GET` | `api/v1/mods/{id}/download` | — | Binary file |
 
-## 6. Cross-Service Contract
+### Data Shapes
 
-The launcher communicates with two external services. This section documents the data shapes the launcher sends/receives so other services can align.
-
-### 6.1 Python Backend (FastAPI — `backend-spec.md`)
-
-The launcher's `LobbyBackendClient` sends requests to `ServerUrl` (e.g. `https://yourserver.com/api/v1/`).
-
-**Create / refresh lobby (`POST /api/v1/lobbies`):**
-
-Before creating the lobby, the launcher uploads each mod DLL to the backend via `POST /api/v1/mods` and includes the returned `id` and `file_hash` (SHA-256) in the lobby payload.
-
-The launcher sends:
+**CreateLobbyRequest:**
 ```json
 {
   "code": "ABCD",
   "region": "NA",
   "host": "Alice",
   "mod_type": "modded",
-  "mods": [{"name": "ExampleMod", "version": "1.0.0", "file_hash": "9f86d08..."}]
+  "mods": [{"name": "ExampleMod", "version": "1.0.0", "file_hash": "9f86d08..."}],
+  "max_players": 15
 }
 ```
 
-| Field | Type | Notes |
-|-------|------|-------|
-| `code` | string | Lobby code (uppercase) |
-| `region` | string | Region display name |
-| `host` | string | Host player's display name (from Discord auth or config) |
-| `mod_type` | string | Always `"modded"` (launcher only creates modded lobbies) |
-| `mods` | array | Installed mod DLLs; `name` = file name, `version`/`file_hash` may be null |
-
-The Python backend returns:
+**LobbyResponse:**
 ```json
 {
   "code": "ABCD",
   "region": "NA",
   "host": "Alice",
   "mod_type": "modded",
-  "mods": [{"id": "abc123", "name": "ExampleMod", "version": "1.0.0", "file_hash": "...", "size": 2048, "url": "/api/v1/mods/abc123/download"}],
+  "mods": [{"name": "ExampleMod", "version": "1.0.0", "file_hash": "..."}],
   "players": [{"id": "host", "name": "Alice", "is_host": true}],
-  "last_heartbeat": "2026-08-05T12:34:56.789012+00:00"
+  "max_players": 15
 }
 ```
 
-The launcher maps `mods` → internal `ModSetEntry` list (for mod-set sync) and uses `players.Count` for the player count.
+---
 
-**Fetch lobby (`GET /api/v1/lobbies/{code}`):** returns a single `LobbyResponse` (same shape). Used for mod-set sync during join. The launcher converts `mods[].name` → `ModSetEntry.FileName` and `mods[].file_hash` → `ModSetEntry.Sha256`. After downloading missing mods from `GET /api/v1/mods/{id}/download`, the launcher validates the SHA-256 hash and deletes the file on mismatch.
+## 16. Lobby WebSocket
 
-**Heartbeat (`POST /api/v1/lobbies/{code}/heartbeat`):** no body. Response: `{ "ok": true, "error": null }`.
+**Endpoint:** `config.BackendWssUrl?code={lobbyCode}`
+**Auth:** `Authorization: Bearer <DiscordAccessToken>` header.
+**Reconnect:** Exponential backoff, 2s × min(5, attempt).
 
-**Repost (`POST /api/v1/lobbies/{code}/repost`):** no body. Response: `{ "ok": true, "error": null }`.
+### Incoming Messages
 
-**Kick (`POST /api/v1/lobbies/{code}/kick`):**
+| Action | Payload | Launcher Behavior |
+|--------|---------|-------------------|
+| `kick` | `{ reason }` | Kill the game |
+| `rejoin` | `{ lobbyCode, modSet, region, regionIp, regionPort }` | Install new mod set, relaunch, rejoin |
+
+---
+
+## 17. Heartbeat System
+
+**Service:** `LobbyHeartbeatService`
+
+- Sends `POST /api/v1/lobbies/{code}/heartbeat` every **30 seconds**
+- No request body
+- Immediate heartbeat sent after lobby creation (before 30s interval starts)
+- Stopped on: lobby close, disband, or kick
+- Backend auto-expires lobbies after grace period (default 90s) without heartbeat
+
+---
+
+## 18. Discord Bot Integration
+
+**Client:** `LobbyBotClient`
+**Endpoint:** `config.BotWsEndpoint` (default `ws://127.0.0.1:8080`)
+
+**Lobby creation payload:**
 ```json
-{ "player_id": "discord_user_id" }
+{
+  "code": "ABCD",
+  "region": "NA",
+  "host": "Alice",
+  "mod": "modded",
+  "role_id": "1234567890",
+  "applied_tags": []
+}
 ```
-Response: `{ "ok": true, "error": null }`.
 
-**Disband (`DELETE /api/v1/lobbies/{code}`):** no body. Response: `{ "ok": true, "error": null }`.
+Lobby type detected by `LobbyTypeDetector`: scans plugins for non-excluded DLLs → `"modded"` or `"vanilla"`. Excluded: `AmongApi.dll`, `0Harmony.dll`, `AsmResolver.dll`, `BepInEx.*.dll`.
 
-**Mod upload (`POST /api/v1/mods`):** `multipart/form-data` with `name` (string) and `file` (binary). Returns `ModInfoEntry` with `id`, `name`, `version`, `file_hash`, `size`, `url`. Auth required.
+---
 
-**Mod download (`GET /api/v1/mods/{id}/download`):** public, returns binary file with `Content-Disposition` filename.
+## 19. UI Architecture
 
-**WebSocket (`WS /api/v1/ws/{code}?client_id={id}`):** the launcher connects with optional `Authorization: Bearer <token>` header. Incoming messages:
-- `{"action":"kick","payload":{"target_id":"...","reason":"..."}}` → launcher kills the game.
-- `{"action":"disband","payload":{"code":"..."}}` → launcher tears down lobby state.
+### Views
 
-**Auth:** all lobby REST routes require `Authorization: Bearer <DiscordAccessToken>` when `AUTH_TOKEN` is configured on the backend. The launcher sends this when `config.DiscordAccessToken` is non-empty.
+| View | Purpose |
+|------|---------|
+| `WelcomeView` | Login screen with Discord OAuth button, ambient bloom animation |
+| `MainView` | Game status, mod list, install/play buttons, profiles, mod import |
+| `SettingsView` | Game path, server URL, bot endpoint, role IDs, debug/auto-post toggles |
+| `LibraryView` | Mod library with install/remove actions |
+| `HostControlPanelView` | Live player list, lobby code, region, repost/kick/disband |
 
-### 6.2 Frontend / Discord Bot (`frontend-spec.md`)
+### Modals
 
-The Discord bot and frontend handle their own integration (forum thread creation, role pings, tag application). The launcher does not interact with them directly — the backend bridges the data.
+| Modal | Purpose |
+|-------|---------|
+| `ConfirmationModal` | Generic confirm/cancel with danger option |
+| `DownloadModsModal` | Sequential mod downloads with progress bars |
+| `JoinDebugModal` | Real-time join status with PLAY button |
+| `LogViewerModal` | IPC log viewer with copy/refresh/clear |
+| `PresetModLibraryModal` | GitHub preset mod library |
+| `MsStoreAccessModal` | MS Store/Epic permission guidance |
+| `StorefrontPickerModal` | Multiple install picker |
+| `LibraryPickerModal` | Library mod picker |
+
+### Navigation
+
+Sidebar with Home, Library, Lobby (hidden when no lobby), Settings, Logout. Discord avatar in sidebar. Content swapped via `ContentControl`.
+
+### Title Bar
+
+Custom borderless with `WindowChrome`. Status badge: red indicator + "No Game Running" / "Among Us — Running" + STOP button.
+
+---
+
+## 20. Theming & Accessibility
+
+### Color Palette
+
+| Key | Value | Usage |
+|-----|-------|-------|
+| `AmbientBgColor` | `#0B0B0E` | Window background |
+| `GlassSurfaceColor` | `#C9151518` | Card backgrounds |
+| `GlassSurfaceStrongColor` | `#E6151518` | Stronger glass |
+| `GlassSurfaceWeakColor` | `#A6151518` | Weaker glass |
+| `GlassBorderColor` | `#2EFFFFFF` | Card borders |
+| `AccentColor` | `#5865F2` | Discord blurple |
+| `PlayColor` | `#10B981` | Green (play/success) |
+| `StopColor` | `#DC2626` | Red (stop/danger) |
+
+### Animations
+
+- `HoverEnterGlow` / `HoverExitGlow` — DropShadowEffect glow on hover
+- `PressScale` / `ReleaseScale` — ScaleTransform on press
+- Bloom breathe on welcome screen (80s/90s oscillation)
+- Modal scale/translate entrance
+
+### Accessibility
+
+`ReduceMotion` — reads `SystemParameters.ClientAreaAnimation`. When true, skips all storyboard animations (bloom, hover glow, press scale, modal entrance).

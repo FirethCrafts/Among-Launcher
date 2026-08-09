@@ -81,10 +81,7 @@
                 <!-- Add Mod Menu (Popup) -->
                 <Popup x:Name="AddModPopup" PlacementTarget="{Binding ElementName=AddModButton}"
                        Placement="Bottom" StaysOpen="False" AllowsTransparency="True">
-                    <Border x:Name="AddModPopupContent" Background="{StaticResource GlassSurfaceWeak}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1"
-                            CornerRadius="10" Padding="8" Margin="0,4,0,0"
-                            SnapsToDevicePixels="True" UseLayoutRounding="True" Opacity="0"
-                            RenderTransformOrigin="0.5,0.5">
+                     <Border x:Name="AddModPopupContent" Background="{StaticResource GlassSurfaceStrong}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1" CornerRadius="8" Padding="4" SnapsToDevicePixels="True" UseLayoutRounding="True" Opacity="0" RenderTransformOrigin="0.5,0.5">
                         <Border.RenderTransform>
                             <ScaleTransform x:Name="AddModPopupScale" ScaleX="0.95" ScaleY="0.95"/>
                         </Border.RenderTransform>

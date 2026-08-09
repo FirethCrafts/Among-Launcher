@@ -57,7 +57,8 @@ public class LobbyBackendClient
                     .Select(m => new ModSetEntry { FileName = m.Name, Version = m.Version, Sha256 = m.FileHash })
                     .ToList(),
                 Host = body.Host,
-                PlayerCount = body.Players?.Count ?? 0
+                PlayerCount = body.Players?.Count ?? 0,
+                MaxPlayers = body.MaxPlayers > 0 ? body.MaxPlayers : 15
             };
         }
         catch (TaskCanceledException) when (!ct.IsCancellationRequested)
@@ -98,19 +99,19 @@ public class LobbyBackendClient
         catch { return null; }
     }
 
-    public string GetModDownloadUrl(string modId) => $"api/v1/mods/{modId}/download";
+        public string GetModDownloadUrl(string modId) => $"api/v1/mods/{modId}/download";
 
-    public Task<bool> RepostAsync(string code, CancellationToken ct) =>
-        PostNoContent($"api/v1/lobbies/{code}/repost", ct);
+        public Task<bool> RepostAsync(string code, CancellationToken ct) =>
+            PostNoContent($"api/v1/lobbies/{code}/repost", ct);
 
-    public Task<bool> KickAsync(string code, string targetUserId, CancellationToken ct) =>
-        PostNoContent($"api/v1/lobbies/{code}/kick", ct, new { player_id = targetUserId });
+        public Task<bool> KickAsync(string code, string targetUserId, CancellationToken ct) =>
+            PostNoContent($"api/v1/lobbies/{code}/kick", ct, new { player_id = targetUserId });
 
-    public Task<bool> DisbandAsync(string code, CancellationToken ct) =>
-        DeleteNoContent($"api/v1/lobbies/{code}", ct);
+        public Task<bool> DisbandAsync(string code, CancellationToken ct) =>
+            DeleteNoContent($"api/v1/lobbies/{code}", ct);
 
-    public Task<bool> HeartbeatAsync(string code, string hostUserId, CancellationToken ct) =>
-        PostNoContent($"api/v1/lobbies/{code}/heartbeat", ct);
+        public Task<bool> HeartbeatAsync(string code, string hostUserId, CancellationToken ct) =>
+            PostNoContent($"api/v1/lobbies/{code}/heartbeat", ct);
 
     private async Task<bool> PostNoContent(string path, CancellationToken ct, object? body = null)
     {

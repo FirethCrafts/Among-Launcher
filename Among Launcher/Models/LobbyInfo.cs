@@ -10,4 +10,5 @@ public class LobbyInfo
     public string? HostUserId { get; set; }
     public string Host { get; set; } = "Host";
     public int PlayerCount { get; set; }
+    public int MaxPlayers { get; set; } = 15;
 }

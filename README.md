@@ -13,7 +13,6 @@ A modern Among Us mod launcher built with WPF (.NET 10), featuring Discord OAuth
 - **Deep-Link Lobby Join** — `amonglauncher://join?code=ABCDEF` links sync the lobby's mod set, launch the game, and join in-game automatically
 - **Single-Instance Routing** — Deep links sent to an already-running instance are forwarded to it instead of launching a second copy
 - **Host Control Panel** — Live player list with repost, kick, and disband controls while hosting
-- **Self-Hosted Backend** — Optional lobby backend integration: create/fetch/repost/kick/disband and heartbeat, plus WebSocket-driven kick and rejoin
 - **Custom Modals** — Dark-themed overlay system for confirmations and preset mod library
 - **AmongAPI IPC** — Named pipe communication between the launcher and the in-game mod
 - **Dark Matte Theme** — Premium UI with glow effects, animated buttons, and status pill
@@ -36,11 +35,6 @@ AmongLauncher/          WPF application
 Among API/              BepInEx IL2CPP plugin (runs inside Among Us)
 ├── Services/           Pipe client, game-state tracker, lobby joiner, chat commands
 └── Plugin.cs           BepInEx plugin entry point
-
-Among Backend/          Self-hosted lobby backend (ASP.NET Core)
-├── Services/           Lobby store, WebSocket hub, Discord embed notifier, heartbeat expiry
-├── Models/             Lobby / mod-set models
-└── Program.cs          REST + WebSocket endpoints
 ```
 
 ## Getting Started
@@ -80,24 +74,6 @@ The launcher communicates with the in-game AmongAPI plugin via named pipes. See 
 - Transport: Length-prefixed JSON over Windows Named Pipes
 - Bidirectional — either side can send messages at any time
 
-## Among Backend
-
-The self-hosted lobby backend lives in `Among Backend/` (ASP.NET Core, .NET 10). It stores lobby state in memory, exposes the REST + WebSocket contract the launcher consumes, and can post/update/remove a live Discord invite embed via a webhook.
-
-```bash
-dotnet run --project "Among Backend/Among Backend.csproj"
-```
-
-By default it listens on **`http://localhost:5013`** (see `Among Backend/Properties/launchSettings.json`).
-
-- Point the launcher's **Server URL** setting at the backend root — e.g. `http://localhost:5013` when running locally (the REST routes live at `/lobby`, `/ws`, etc.; do **not** append `/api` — the backend has no such prefix). For a real deployment use `https://yourserver.com`.
-- Point the **Bot WS Endpoint** at `ws://localhost:5013/ws` locally, or `wss://yourserver.com/ws` for a real deployment.
-- Set `Discord:WebhookUrl` in `Among Backend/appsettings.json` to enable the invite embed; leave it empty to run without Discord.
-- `Lobby:HeartbeatGraceSeconds` (default 90) controls how long a host can stop heartbeating before the backend expires its lobby.
-- To run the backend on a different port: `dotnet run --project "Among Backend/Among Backend.csproj" --urls http://localhost:8000` — then use that port in the launcher's Server URL instead.
-
-Full REST + WebSocket contract: see [api.md](api.md).
-
 ## Tech Stack
 
 | Component | Technology |
@@ -108,7 +84,6 @@ Full REST + WebSocket contract: see [api.md](api.md).
 | Auth | Discord OAuth2 |
 | Mod Source | GitHub Releases API |
 | Plugin | BepInEx 6 IL2CPP (.NET 6) |
-| Backend | ASP.NET Core (.NET 10) |
 
 ## License
 

@@ -392,11 +392,44 @@ public static class GameAssembly
             return "UNKNOWN";
 
         var data = GetInstanceProp(localPlayer, "Data");
-        if (data == null)
-            return "UNKNOWN";
+        if (data != null)
+        {
+            var name = ToStr(GetInstanceProp(data, "PlayerName"));
+            if (!string.IsNullOrEmpty(name))
+                return name;
+        }
 
-        var name = ToStr(GetInstanceProp(data, "PlayerName"));
-        return string.IsNullOrEmpty(name) ? "UNKNOWN" : name;
+        var directName = ToStr(GetInstanceProp(localPlayer, "PlayerName"));
+        if (!string.IsNullOrEmpty(directName))
+            return directName;
+
+        try
+        {
+            var gameDataType = Type("GameData");
+            var gameDataInstance = GetStaticProp(gameDataType, "Instance");
+            if (gameDataInstance != null)
+            {
+                var allPlayers = GetInstanceProp(gameDataInstance, "AllPlayers");
+                if (allPlayers is System.Collections.IList list)
+                {
+                    var clientId = ToInt(GetStaticMember(Type("InnerNet.InnerNetClient"), "CurrentClient"));
+                    foreach (var playerInfo in list)
+                    {
+                        if (playerInfo == null) continue;
+                        var ownerId = ToInt(GetInstanceProp(playerInfo, "OwnerId"));
+                        if (ownerId == clientId)
+                        {
+                            var pname = ToStr(GetInstanceProp(playerInfo, "PlayerName"));
+                            if (!string.IsNullOrEmpty(pname))
+                                return pname;
+                        }
+                    }
+                }
+            }
+        }
+        catch { }
+
+        return "UNKNOWN";
     }
 
     private static PropertyInfo? ResolveProperty(Type type, string name, bool isStatic)
