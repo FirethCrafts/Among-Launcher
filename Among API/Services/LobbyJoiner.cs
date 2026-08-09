@@ -233,33 +233,37 @@ public class LobbyJoiner : IDisposable
 
     private JoinResult TryJoinViaReflection(object client, int gameId, string code)
     {
-        Type? clientType = client.GetType();
-        FileLogger.Info($"[LobbyJoiner] Client type: {clientType?.FullName ?? "unknown"}");
+        // Use GameAssembly to get the actual AmongUsClient type, not the IL2CPP runtime type
+        var realType = GameAssembly.Type("AmongUsClient");
+        var runtimeType = client.GetType();
+        FileLogger.Info($"[LobbyJoiner] Runtime type: {runtimeType?.FullName ?? "unknown"}");
+        FileLogger.Info($"[LobbyJoiner] GameAssembly type: {realType?.FullName ?? "null"}");
 
-        // Log all methods for debugging
-        var allMethods = clientType.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-        var methodNames = allMethods.Select(m => $"{m.Name}({string.Join(",", m.GetParameters().Select(p => p.ParameterType.Name))})");
-        FileLogger.Info($"[LobbyJoiner] Available methods: {string.Join(" | ", methodNames)}");
-
-        // Try various join method names and signatures
-        string[][] joinAttempts = new[] {
-            new[] { "CoJoinOnlineGameFromCode", "int,bool" },
-            new[] { "JoinGame", "string" },
-            new[] { "JoinGame", "int" },
-            new[] { "CoJoinOnline", "string" },
-            new[] { "CoJoinOnline", "int" },
-            new[] { "JoinOnlineGame", "string" },
-            new[] { "JoinOnlineGame", "int" },
-            new[] { "StartGame", "string" },
-            new[] { "StartGame", "int" },
-        };
-
-        foreach (var attempt in joinAttempts)
+        // Try runtime type first, then GameAssembly type
+        Type? joinType = runtimeType;
+        if (joinType == null) joinType = realType;
+        if (joinType == null)
         {
-            var methodName = attempt[0];
-            var paramSig = attempt[1];
+            FileLogger.Error("[LobbyJoiner] No type found");
+            return new JoinResult(false, "Cannot resolve client type");
+        }
 
-            var methods = allMethods.Where(m => m.Name == methodName).ToList();
+        // Log all methods
+        var allMethods = joinType.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static);
+        var methodNames = allMethods.Select(m => $"{m.Name}({string.Join(",", m.GetParameters().Select(p => p.ParameterType.Name))})");
+        FileLogger.Info($"[LobbyJoiner] Methods on {joinType.Name}: {string.Join(" | ", methodNames)}");
+
+        // If GameAssembly type has methods, use that for method lookup
+        // But invoke on the runtime instance
+        Type? methodType = realType ?? runtimeType;
+
+        // Try various join methods
+        string[] joinMethodNames = { "CoJoinOnlineGameFromCode", "JoinGame", "CoJoinOnline", "JoinOnlineGame", "StartGame", "CoStartHost" };
+
+        foreach (var methodName in joinMethodNames)
+        {
+            var methods = methodType!.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
+                .Where(m => m.Name == methodName).ToList();
             if (methods.Count == 0) continue;
 
             FileLogger.Info($"[LobbyJoiner] Found {methods.Count} overload(s) of {methodName}");
@@ -268,35 +272,16 @@ public class LobbyJoiner : IDisposable
             {
                 var parameters = method.GetParameters();
                 var paramTypes = parameters.Select(p => p.ParameterType).ToArray();
-                var paramTypeNames = string.Join(",", paramTypes.Select(t => t.Name));
-                FileLogger.Info($"[LobbyJoiner]   {methodName}({paramTypeNames})");
+                FileLogger.Info($"[LobbyJoiner]   {methodName}({string.Join(",", paramTypes.Select(t => t.Name))})");
 
-                // Build args based on parameter types
-                object?[]? args = null;
-                Type[]? argTypes = null;
-
-                if (paramTypes.Length == 2 && paramTypes[0] == typeof(int) && paramTypes[1] == typeof(bool))
-                {
-                    args = new object[] { gameId, false };
-                    argTypes = new[] { typeof(int), typeof(bool) };
-                }
-                else if (paramTypes.Length == 1 && paramTypes[0] == typeof(string))
-                {
-                    args = new object[] { code };
-                    argTypes = new[] { typeof(string) };
-                }
-                else if (paramTypes.Length == 1 && paramTypes[0] == typeof(int))
-                {
-                    args = new object[] { gameId };
-                    argTypes = new[] { typeof(int) };
-                }
-                else
+                object?[]? args = BuildArgs(paramTypes, gameId, code);
+                if (args == null)
                 {
                     FileLogger.Info($"[LobbyJoiner]   Skipping unsupported signature");
                     continue;
                 }
 
-                if (TryInvokeCoroutine(client, clientType, methodName, args, argTypes))
+                if (TryInvokeCoroutine(client, methodType, methodName, args, paramTypes))
                 {
                     return new JoinResult(true, null);
                 }
@@ -305,6 +290,17 @@ public class LobbyJoiner : IDisposable
 
         FileLogger.Error("[LobbyJoiner] All join methods failed");
         return new JoinResult(false, "No working join method found");
+    }
+
+    private static object?[]? BuildArgs(Type[] paramTypes, int gameId, string code)
+    {
+        if (paramTypes.Length == 2 && paramTypes[0] == typeof(int) && paramTypes[1] == typeof(bool))
+            return new object[] { gameId, false };
+        if (paramTypes.Length == 1 && paramTypes[0] == typeof(string))
+            return new object[] { code };
+        if (paramTypes.Length == 1 && paramTypes[0] == typeof(int))
+            return new object[] { gameId };
+        return null;
     }
 
     /// <summary>
