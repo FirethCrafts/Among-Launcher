@@ -5,6 +5,7 @@
     <AssemblyName>AmongApi</AssemblyName>
     <Product>Among API</Product>
     <Version>1.0.1</Version>
+    <FileVersion>1.0.1</FileVersion>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
