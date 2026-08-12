@@ -33,7 +33,6 @@
         <Compile Include="..\Among Launcher\Services\Sha256Helper.cs" Link="Source\Services\Sha256Helper.cs" />
         <Compile Include="..\Among Launcher\Services\ModDownloader.cs" Link="Source\Services\ModDownloader.cs" />
         <Compile Include="..\Among Launcher\Services\LauncherLog.cs" Link="Source\Services\LauncherLog.cs" />
-        <Compile Include="..\Among Launcher\Services\Lobby\LobbyBotClient.cs" Link="Source\Services\Lobby\LobbyBotClient.cs" />
         <Compile Include="..\Among Launcher\Services\Lobby\LobbyWebSocketClient.cs" Link="Source\Services\Lobby\LobbyWebSocketClient.cs" />
         <Compile Include="..\Among Launcher\Services\Lobby\LobbyCommandService.cs" Link="Source\Services\Lobby\LobbyCommandService.cs" />
         <Compile Include="..\Among Launcher\Models\BackendModels.cs" Link="Source\Models\BackendModels.cs" />

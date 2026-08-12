@@ -221,34 +221,4 @@ public class BackendIntegrationTests : IDisposable
             try { await _backendClient.DisbandAsync(code, CancellationToken.None); } catch { /* best-effort */ }
         }
     }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // WebSocket Connection
-    // ─────────────────────────────────────────────────────────────────────────
-
-    [Fact]
-    public async Task WebSocket_ConnectsToExistingLobby()
-    {
-        if (IsBackendUnavailable()) return;
-        var code = GenerateLobbyCode();
-        await _backendClient.CreateLobbyAsync(MakeRequest(code), CancellationToken.None);
-
-        try
-        {
-            // Spec: WS /api/v1/ws/{code}?client_id={id}
-            var wsUrl = $"wss://among-us.mel-homes.com/api/v1/ws/{code}?client_id=test";
-            var botClient = new LobbyBotClient();
-
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-            await botClient.ConnectAsync(wsUrl);
-
-            // Allow handshake to settle, then cleanly disconnect
-            await Task.Delay(1500, cts.Token).ContinueWith(_ => { });
-            botClient.Disconnect();
-        }
-        finally
-        {
-            try { await _backendClient.DisbandAsync(code, CancellationToken.None); } catch { /* best-effort */ }
-        }
-    }
 }

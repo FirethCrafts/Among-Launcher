@@ -24,7 +24,6 @@ public partial class MainWindow
     private Services.Lobby.LobbyBackendClient _backend;
     private Services.Lobby.LobbyWebSocketClient _ws;
     private Services.Lobby.LobbyCommandService _commands;
-    private readonly Services.Lobby.LobbyBotClient _botClient = new();
     private Services.Lobby.LobbyHeartbeatService? _heartbeat;
     private Config.LauncherConfig _config;
     private string _userId = "";
@@ -199,23 +198,6 @@ public partial class MainWindow
                 Dispatcher.Invoke(() => ShowHostPanel(info));
             }
 
-            var mod = Services.Lobby.LobbyTypeDetector.DetectLobbyType(moddedPath!);
-            var roleId = mod == "modded" ? _config.ModdedRoleId : _config.VanillaRoleId;
-
-            if (string.IsNullOrWhiteSpace(_config.BotWsEndpoint))
-            {
-                return new { type = "lobby_created_ack" };
-            }
-
-            if (string.IsNullOrEmpty(roleId) || !System.Text.RegularExpressions.Regex.IsMatch(roleId, @"^\d{17,20}$"))
-            {
-                Services.LauncherLog.Write("Skipping lobby bot announce: invalid or missing role ID");
-                return new { type = "lobby_created_ack" };
-            }
-
-            var payload = new Services.Lobby.LobbyBotPayload(info.Code, info.Region, host, mod, roleId, System.Array.Empty<string>());
-            await _botClient.SendLobbyCreatedAsync(payload);
-
             return new { type = "lobby_created_ack" };
         });
 
@@ -231,7 +213,6 @@ public partial class MainWindow
                 _lobbyPostedToBackend = false;
                 _postedLobbyCode = "";
             }
-            _botClient.Disconnect();
             _activeLobby = null;
             _hostPanel = null;
             Dispatcher.Invoke(() => LobbyButton.Visibility = Visibility.Collapsed);
@@ -477,7 +458,6 @@ public partial class MainWindow
         _pipeServer.Stop();
         StopHeartbeat();
         _ws.Disconnect();
-        _botClient.Disconnect();
 
         ShowInTaskbar = true;
         Closing -= (_, _) => SaveWindowState();

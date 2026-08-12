@@ -14,38 +14,12 @@
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
         <TextBlock Grid.Row="0" Text="Settings" Style="{StaticResource PageTitle}"/>
 
-        <!-- Theme -->
-        <Border Grid.Row="1" Style="{StaticResource GlassCard}">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="Auto"/>
-                </Grid.ColumnDefinitions>
-                <StackPanel Grid.Column="0">
-                    <TextBlock Text="THEME" Style="{StaticResource CardHeader}"/>
-                    <TextBlock Text="Switch between dark and light appearance"
-                               FontSize="12" Foreground="{StaticResource TextMuted}"/>
-                </StackPanel>
-                <ToggleButton Grid.Column="1" x:Name="ThemeToggle"
-                              Checked="ThemeToggle_Changed"
-                              Unchecked="ThemeToggle_Changed"
-                              IsChecked="True"
-                              Style="{StaticResource GlassToggle}"
-                              VerticalAlignment="Center" Margin="8,0,0,0"/>
-            </Grid>
-        </Border>
-
         <!-- Game Path -->
-        <Border Grid.Row="2" Style="{StaticResource GlassCard}">
+        <Border Grid.Row="1" Style="{StaticResource GlassCard}">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
@@ -71,7 +45,7 @@
         </Border>
 
         <!-- Server URL -->
-        <Border Grid.Row="3" Style="{StaticResource GlassCard}">
+        <Border Grid.Row="2" Style="{StaticResource GlassCard}">
             <StackPanel>
                 <TextBlock Text="SERVER URL" Style="{StaticResource CardHeader}"/>
                 <Grid>
@@ -91,7 +65,7 @@
         </Border>
 
         <!-- Modded Install Path -->
-        <Border Grid.Row="4" Style="{StaticResource GlassCard}">
+        <Border Grid.Row="3" Style="{StaticResource GlassCard}">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
@@ -111,38 +85,8 @@
             </Grid>
         </Border>
 
-        <!-- Bot WS Endpoint -->
-        <Border Grid.Row="5" Style="{StaticResource GlassCard}">
-            <StackPanel>
-                <TextBlock Text="BOT WS ENDPOINT" Style="{StaticResource CardHeader}"/>
-                <TextBox x:Name="BotWsEndpointTextBox"
-                         TextChanged="BotWsEndpointTextBox_TextChanged"
-                         Style="{StaticResource GlassInput}"/>
-            </StackPanel>
-        </Border>
-
-        <!-- Modded Role ID -->
-        <Border Grid.Row="6" Style="{StaticResource GlassCard}">
-            <StackPanel>
-                <TextBlock Text="MODDED ROLE ID" Style="{StaticResource CardHeader}"/>
-                <TextBox x:Name="ModdedRoleIdTextBox"
-                         TextChanged="ModdedRoleIdTextBox_TextChanged"
-                         Style="{StaticResource GlassInput}"/>
-            </StackPanel>
-        </Border>
-
-        <!-- Vanilla Role ID -->
-        <Border Grid.Row="7" Style="{StaticResource GlassCard}">
-            <StackPanel>
-                <TextBlock Text="VANILLA ROLE ID" Style="{StaticResource CardHeader}"/>
-                <TextBox x:Name="VanillaRoleIdTextBox"
-                         TextChanged="VanillaRoleIdTextBox_TextChanged"
-                         Style="{StaticResource GlassInput}"/>
-            </StackPanel>
-        </Border>
-
         <!-- Debug Mode -->
-        <Border Grid.Row="8" Style="{StaticResource GlassCard}">
+        <Border Grid.Row="4" Style="{StaticResource GlassCard}">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
@@ -163,7 +107,7 @@
         </Border>
 
         <!-- Auto-Post Lobby -->
-        <Border Grid.Row="9" Style="{StaticResource GlassCard}">
+        <Border Grid.Row="5" Style="{StaticResource GlassCard}">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>

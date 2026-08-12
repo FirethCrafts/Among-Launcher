@@ -25,7 +25,6 @@ public class ConfigTests : IDisposable
     {
         var config = new LauncherConfig();
 
-        Assert.Equal("ws://127.0.0.1:8080", config.BotWsEndpoint);
         Assert.Equal("https://yourserver.com/api", config.ServerUrl);
         Assert.Equal("wss://yourserver.com/ws", config.BackendWssUrl);
         Assert.Equal(string.Empty, config.DiscordAccessToken);
@@ -66,8 +65,7 @@ public class ConfigTests : IDisposable
     {
         var config = new LauncherConfig
         {
-            ServerUrl = "https://save-test.com/api",
-            BotWsEndpoint = "ws://save-test:9090"
+            ServerUrl = "https://save-test.com/api"
         };
 
         var json = JsonSerializer.Serialize(config, new JsonSerializerOptions { WriteIndented = true });
@@ -75,7 +73,6 @@ public class ConfigTests : IDisposable
 
         Assert.NotNull(parsed);
         Assert.Equal("https://save-test.com/api", parsed!.ServerUrl);
-        Assert.Equal("ws://save-test:9090", parsed.BotWsEndpoint);
     }
 
     [Fact]
@@ -150,7 +147,6 @@ public class ConfigTests : IDisposable
 
         Assert.NotNull(loaded);
         Assert.Equal("https://partial.com/api", loaded!.ServerUrl);
-        Assert.Equal("ws://127.0.0.1:8080", loaded.BotWsEndpoint);
     }
 
     [Fact]

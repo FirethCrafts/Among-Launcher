@@ -373,10 +373,30 @@ public static class GameAssembly
         if (playerInfo == null) return 0;
         try
         {
-            var level = GetInstanceProp(playerInfo, "PlayerLevel");
-            if (level != null) return ToInt(level);
-            level = GetInstanceMember(playerInfo, "Level");
-            if (level != null) return ToInt(level);
+            foreach (var name in new[] { "PlayerLevel", "Level", "playerLevel", "level" })
+            {
+                try
+                {
+                    var prop = ResolveProperty(playerInfo.GetType(), name, isStatic: false);
+                    if (prop != null)
+                    {
+                        var val = prop.GetValue(playerInfo);
+                        if (val != null) return ToInt(val);
+                    }
+                }
+                catch { }
+
+                try
+                {
+                    var field = ResolveField(playerInfo.GetType(), name, isStatic: false);
+                    if (field != null)
+                    {
+                        var val = field.GetValue(playerInfo);
+                        if (val != null) return ToInt(val);
+                    }
+                }
+                catch { }
+            }
         }
         catch (Exception ex)
         {
@@ -390,10 +410,30 @@ public static class GameAssembly
         if (playerInfo == null) return 0;
         try
         {
-            var ping = GetInstanceProp(playerInfo, "Ping");
-            if (ping != null) return ToInt(ping);
-            ping = GetInstanceMember(playerInfo, "Ping");
-            if (ping != null) return ToInt(ping);
+            foreach (var name in new[] { "Ping", "PlayerPing", "ping", "playerPing" })
+            {
+                try
+                {
+                    var prop = ResolveProperty(playerInfo.GetType(), name, isStatic: false);
+                    if (prop != null)
+                    {
+                        var val = prop.GetValue(playerInfo);
+                        if (val != null) return ToInt(val);
+                    }
+                }
+                catch { }
+
+                try
+                {
+                    var field = ResolveField(playerInfo.GetType(), name, isStatic: false);
+                    if (field != null)
+                    {
+                        var val = field.GetValue(playerInfo);
+                        if (val != null) return ToInt(val);
+                    }
+                }
+                catch { }
+            }
         }
         catch (Exception ex)
         {
@@ -559,15 +599,22 @@ public static class GameAssembly
             
             for (int i = 0; i < count; i++)
             {
-                var playerInfo = CallInstanceMethod(allPlayers, "get_Item", new object[] { i }, new[] { typeof(int) });
-                if (playerInfo == null) continue;
-                
-                var isLocal = ToBool(GetInstanceProp(playerInfo, "IsLocal"));
-                if (isLocal)
+                try
                 {
-                    var name = ToStr(GetInstanceProp(playerInfo, "PlayerName"));
-                    FileLogger.Info($"[GameAssembly] TryGetLocalPlayerFromGameData: Found local player at index {i}: '{name}'");
-                    return name;
+                    var playerInfo = CallInstanceMethod(allPlayers, "get_Item", new object[] { i }, new[] { typeof(int) });
+                    if (playerInfo == null) continue;
+                    
+                    var isLocal = ToBool(GetInstanceProp(playerInfo, "IsLocal"));
+                    if (isLocal)
+                    {
+                        var name = ToStr(GetInstanceProp(playerInfo, "PlayerName"));
+                        FileLogger.Info($"[GameAssembly] TryGetLocalPlayerFromGameData: Found local player at index {i}: '{name}'");
+                        return name;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    FileLogger.Warn($"[GameAssembly] TryGetLocalPlayerFromGameData: player[{i}] failed: {ex.Message}");
                 }
             }
         }
@@ -596,15 +643,22 @@ public static class GameAssembly
             
             for (int i = 0; i < count; i++)
             {
-                var playerInfo = CallInstanceMethod(allPlayers, "get_Item", new object[] { i }, new[] { typeof(int) });
-                if (playerInfo == null) continue;
-                
-                var id = ToInt(GetInstanceProp(playerInfo, "PlayerId"));
-                if (id == playerId)
+                try
                 {
-                    var name = ToStr(GetInstanceProp(playerInfo, "PlayerName"));
-                    FileLogger.Info($"[GameAssembly] TryGetPlayerNameById: Found player {playerId}: '{name}'");
-                    return name;
+                    var playerInfo = CallInstanceMethod(allPlayers, "get_Item", new object[] { i }, new[] { typeof(int) });
+                    if (playerInfo == null) continue;
+                    
+                    var id = ToInt(GetInstanceProp(playerInfo, "PlayerId"));
+                    if (id == playerId)
+                    {
+                        var name = ToStr(GetInstanceProp(playerInfo, "PlayerName"));
+                        FileLogger.Info($"[GameAssembly] TryGetPlayerNameById: Found player {playerId}: '{name}'");
+                        return name;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    FileLogger.Warn($"[GameAssembly] TryGetPlayerNameById: player[{i}] failed: {ex.Message}");
                 }
             }
         }

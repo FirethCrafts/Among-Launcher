@@ -1,5 +1,4 @@
 using System.Windows;
-using AmongLauncher.Config;
 using AmongLauncher.Services;
 
 namespace AmongLauncher;
@@ -16,8 +15,6 @@ public partial class App
     protected override void OnStartup(StartupEventArgs e)
     {
         ReduceMotion = !SystemParameters.ClientAreaAnimation;
-
-        ThemeManager.LoadSavedTheme();
 
         var deepLink = DeepLinkHandler.FindDeepLinkArgument();
 
