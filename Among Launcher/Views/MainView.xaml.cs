@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using System.Threading;
 using System.Windows;
@@ -8,9 +9,12 @@ using AmongLauncher.Game;
 using AmongLauncher.Installer;
 using AmongLauncher.Models;
 using AmongLauncher.GameDetection;
+using AmongLauncher.Services;
 using AmongLauncher.Services.Lobby;
 
 namespace AmongLauncher.Views;
+
+public record AmongApiUpdateInfo(string LatestVersion, string? DownloadUrl);
 
 public partial class MainView
 {
@@ -20,6 +24,9 @@ public partial class MainView
     private Storefront? _storefront;
 
     public event EventHandler<bool>? GameStateChanged;
+    public event EventHandler? AmongApiUpdateRequested;
+    public event EventHandler<AmongApiUpdateInfo>? AmongApiUpdateWithChangelogRequested;
+    public bool UpdateAvailable { get; private set; }
 
     public MainView()
     {
@@ -42,8 +49,9 @@ public partial class MainView
         GameStatusText.Text = "Searching for Among Us installation...";
 
         var locator = new AmongUsLocator();
-        var storefront = Config.LauncherConfig.Load().Storefront;
-        var gamePath = locator.FindAmongUsForStorefront(storefront).Path;
+        var config = Config.LauncherConfig.Load();
+        _storefront = config.Storefront;
+        var gamePath = locator.FindAmongUsForStorefront(_storefront).Path;
 
         if (gamePath == null)
         {
@@ -189,7 +197,7 @@ public partial class MainView
         await stream.CopyToAsync(fileStream);
     }
 
-    private void PlayButton_Click(object sender, RoutedEventArgs e)
+    private async void PlayButton_Click(object sender, RoutedEventArgs e)
     {
         if (_gameManager.IsGameRunning())
         {
@@ -202,6 +210,25 @@ public partial class MainView
             if (TryShowUnavailableInstall()) return;
             return;
         }
+
+        PlayButton.IsEnabled = false;
+        ModStatusText.Text = "Checking for AmongAPI updates...";
+
+        var (updateAvailable, latestVersion, downloadUrl) =
+            await VersionChecker.CheckForUpdateAsync(_httpClient, _moddedPath);
+
+        if (updateAvailable)
+        {
+            UpdateAvailable = true;
+            PlayButton.IsEnabled = true;
+            ShowUpdateAmongApiButton(latestVersion);
+            AmongApiUpdateWithChangelogRequested?.Invoke(this, new AmongApiUpdateInfo(latestVersion?.ToString() ?? "", downloadUrl));
+            return;
+        }
+
+        UpdateAvailable = false;
+        HideUpdateAmongApiButton();
+        PlayButton.IsEnabled = true;
 
         var exePath = System.IO.Path.Combine(_moddedPath, "Among Us.exe");
         if (!System.IO.File.Exists(exePath))
@@ -252,7 +279,7 @@ public partial class MainView
         var args = new List<string>(safeArgs);
 
         if (_storefront == Storefront.Epic)
-            args.Add("-EpicPortal");
+            args.Add("--epicportal");
 
         var config = Config.LauncherConfig.Load();
         args.Add(config.AutoPostLobby ? "--autopost" : "--no-autopost");
@@ -587,7 +614,7 @@ public partial class MainView
         var buttons = new StackPanel
         {
             Orientation = Orientation.Horizontal,
-            HorizontalAlignment = HorizontalAlignment.Right
+            HorizontalAlignment = System.Windows.HorizontalAlignment.Right
         };
         buttons.Children.Add(cancelButton);
         buttons.Children.Add(saveButton);
@@ -782,9 +809,26 @@ public partial class MainView
 
         foreach (var dllFile in Directory.GetFiles(pluginsDir, "*.dll"))
         {
+            var fileName = Path.GetFileNameWithoutExtension(dllFile);
+            var name = fileName;
+
+            if (string.Equals(fileName, "AmongApi", StringComparison.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    var versionInfo = FileVersionInfo.GetVersionInfo(dllFile);
+                    if (!string.IsNullOrEmpty(versionInfo.FileVersion) && Version.TryParse(versionInfo.FileVersion, out var ver))
+                        name = $"AmongApi.dll (v{ver.Major}.{ver.Minor}.{ver.Build})";
+                }
+                catch
+                {
+                    // Version info unavailable; keep name as-is
+                }
+            }
+
             mods.Add(new ModInfo
             {
-                Name = Path.GetFileNameWithoutExtension(dllFile),
+                Name = name,
                 Description = $"Size: {new FileInfo(dllFile).Length / 1024} KB",
                 FilePath = dllFile
             });
@@ -796,5 +840,27 @@ public partial class MainView
     public void UpdateModStatusText(string text)
     {
         ModStatusText.Text = text;
+    }
+
+    public void ShowUpdateAmongApiButton(Version? latestVersion)
+    {
+        UpdateAvailable = true;
+        UpdateAmongApiButton.Content = latestVersion != null
+            ? $"UPDATE AmongAPI ({latestVersion})"
+            : "UPDATE AmongAPI";
+        UpdateAmongApiButton.Visibility = Visibility.Visible;
+        PlayButton.Visibility = Visibility.Collapsed;
+    }
+
+    public void HideUpdateAmongApiButton()
+    {
+        UpdateAvailable = false;
+        UpdateAmongApiButton.Visibility = Visibility.Collapsed;
+        PlayButton.Visibility = Visibility.Visible;
+    }
+
+    private void UpdateAmongApiButton_Click(object sender, RoutedEventArgs e)
+    {
+        AmongApiUpdateRequested?.Invoke(this, EventArgs.Empty);
     }
 }
