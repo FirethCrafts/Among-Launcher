@@ -149,7 +149,7 @@ public partial class MainWindow
             };
             _activeLobby = info;
             _lobbyPlayerNames.Clear();
-            if (!string.IsNullOrWhiteSpace(host))
+            if (!string.IsNullOrWhiteSpace(host) && !host.Equals("UNKNOWN", StringComparison.OrdinalIgnoreCase))
                 _lobbyPlayerNames.Add(host);
             Services.LauncherLog.Write($"[Launcher] lobby_created handler started. Code={info.Code}, Region={info.Region}, Host={info.Host}, PlayerCount={info.PlayerCount}, MaxPlayers={info.MaxPlayers}");
 
@@ -166,10 +166,19 @@ public partial class MainWindow
                 modEntries.Add(uploaded ?? new ModInfoEntry(entry.FileName, entry.Version, entry.Sha256));
             }
 
+            int? hostLevel = p.TryGetProperty("playerLevels", out var plArr) && plArr.GetArrayLength() > 0
+                ? plArr[0].GetInt32() : null;
+            int? hostPing = p.TryGetProperty("playerPings", out var ppArr) && ppArr.GetArrayLength() > 0
+                ? ppArr[0].GetInt32() : null;
+            var players = new List<PlayerInfoEntry>
+            {
+                new(_userId, host, true, hostLevel, hostPing)
+            };
+
             if (_config.AutoPostLobby)
             {
                 Services.LauncherLog.Write($"[Launcher] Creating lobby on backend. Host={host}, MaxPlayers={info.MaxPlayers}");
-                var createResult = await _backend.CreateLobbyAsync(new CreateLobbyRequest(info.Code, info.Region, info.Host, "modded", modEntries, info.MaxPlayers, info.GameVersion, info.MapName, info.Language, info.ChatType), CancellationToken.None);
+                var createResult = await _backend.CreateLobbyAsync(new CreateLobbyRequest(info.Code, info.Region, info.Host, "modded", modEntries, info.MaxPlayers, info.GameVersion, info.MapName, info.Language, info.ChatType, players), CancellationToken.None);
                 Services.LauncherLog.Write($"[Launcher] Backend response: {createResult}");
                 _lobbyPostedToBackend = true;
                 _postedLobbyCode = info.Code;
@@ -971,7 +980,7 @@ public partial class MainWindow
         if (_activeLobby != null && playerCount >= 0)
             _activeLobby.PlayerCount = playerCount;
 
-        if (!string.IsNullOrEmpty(playerName))
+        if (!string.IsNullOrEmpty(playerName) && !playerName.Equals("UNKNOWN", StringComparison.OrdinalIgnoreCase))
         {
             if (joined && !_lobbyPlayerNames.Contains(playerName))
                 _lobbyPlayerNames.Add(playerName);

@@ -12,7 +12,8 @@ public record CreateLobbyRequest(
     [property: JsonPropertyName("game_version")] string? GameVersion = null,
     [property: JsonPropertyName("map_name")] string? MapName = null,
     [property: JsonPropertyName("language")] string? Language = null,
-    [property: JsonPropertyName("chat_type")] string? ChatType = null);
+    [property: JsonPropertyName("chat_type")] string? ChatType = null,
+    List<PlayerInfoEntry>? Players = null);
 
 public record LobbyResponse(
     string Code,
