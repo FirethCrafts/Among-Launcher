@@ -62,10 +62,10 @@ public static class VersionChecker
             var versionStr = tag.StartsWith('v') ? tag[1..] : tag;
             Services.LauncherLog.Write($"[VersionCheck] Version string: {versionStr}");
             
-            if (!Version.TryParse(versionStr, out var latest))
+            Version? latest = null;
+            if (!Version.TryParse(versionStr, out latest))
             {
-                Services.LauncherLog.Write($"[VersionCheck] Failed to parse version: {versionStr}");
-                return (false, null, null);
+                Services.LauncherLog.Write($"[VersionCheck] Tag is not a semver, checking for assets...");
             }
             
             Services.LauncherLog.Write($"[VersionCheck] Latest version: {latest}");
@@ -86,14 +86,27 @@ public static class VersionChecker
 
             Services.LauncherLog.Write($"[VersionCheck] Download URL: {downloadUrl ?? "null"}");
 
+            if (latest == null)
+            {
+                if (downloadUrl != null)
+                {
+                    Services.LauncherLog.Write($"[VersionCheck] Tag unparsable, but asset found - update available");
+                    return (true, null, downloadUrl);
+                }
+                Services.LauncherLog.Write($"[VersionCheck] No parseable version and no asset");
+                return (false, null, null);
+            }
+
             if (current == null)
             {
                 Services.LauncherLog.Write($"[VersionCheck] No current version, update available: {downloadUrl != null}");
                 return (downloadUrl != null, latest, downloadUrl);
             }
 
-            Services.LauncherLog.Write($"[VersionCheck] Comparing: latest={latest}, current={current}, update={latest > current}");
-            if (latest <= current) return (false, null, null);
+            var latestNorm = NormalizeVersion(latest);
+            var currentNorm = NormalizeVersion(current);
+            Services.LauncherLog.Write($"[VersionCheck] Comparing: latest={latestNorm}, current={currentNorm}, update={latestNorm > currentNorm}");
+            if (latestNorm <= currentNorm) return (false, null, null);
 
             return (true, latest, downloadUrl);
         }
@@ -102,6 +115,13 @@ public static class VersionChecker
             Services.LauncherLog.Write($"[VersionCheck] Error: {ex.Message}");
             return (false, null, null);
         }
+    }
+
+    private static Version NormalizeVersion(Version v)
+    {
+        return v.Revision >= 0
+            ? v
+            : new Version(v.Major, v.Minor, v.Build >= 0 ? v.Build : 0, 0);
     }
 
     public static async Task<bool> DownloadAndUpdateAsync(HttpClient http, string downloadUrl, string moddedPath)
