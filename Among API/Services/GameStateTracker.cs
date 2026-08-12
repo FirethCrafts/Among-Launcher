@@ -70,7 +70,7 @@ public class GameStateTracker : IDisposable
             }
             catch (Exception ex)
             {
-                _log.LogWarning($"[GameStateTracker] Tick failed: {ex.Message}");
+                _log.LogWarning($"[GameStateTracker] Tick failed: {ex}");
             }
             try
             {
@@ -105,7 +105,7 @@ public class GameStateTracker : IDisposable
             }
             catch (Exception ex)
             {
-                _log.LogWarning($"[GameStateTracker] State read failed: {ex.Message}");
+                _log.LogWarning($"[GameStateTracker] State read failed: {ex}");
                 return;
             }
 
@@ -130,7 +130,9 @@ public class GameStateTracker : IDisposable
                             try { host = GameAssembly.LocalPlayerName(); } catch { }
                             try { maxPlayers = MaxPlayers(); } catch { }
                             try { playerNames = GameAssembly.GetAllPlayerNames(); } catch { }
+                            FileLogger.Info($"[GameStateTracker] Tick: Calling GetAllPlayerLevels...");
                             try { playerLevels = GetAllPlayerLevels(); } catch { }
+                            FileLogger.Info($"[GameStateTracker] Tick: Calling GetAllPlayerPings...");
                             try { playerPings = GetAllPlayerPings(); } catch { }
 
                             var gameVersion = "";
@@ -192,13 +194,13 @@ public class GameStateTracker : IDisposable
                 }
                 catch (Exception ex)
                 {
-                    _log.LogWarning($"[GameStateTracker] Tick lock block failed: {ex.Message}");
+                    _log.LogWarning($"[GameStateTracker] Tick lock block failed: {ex}");
                 }
             }
         }
         catch (Exception ex)
         {
-            _log.LogWarning($"[GameStateTracker] Tick failed: {ex.Message}");
+            _log.LogWarning($"[GameStateTracker] Tick failed: {ex}");
         }
     }
 
@@ -386,74 +388,100 @@ public class GameStateTracker : IDisposable
     private static List<int> GetAllPlayerLevels()
     {
         var levels = new List<int>();
+        FileLogger.Info("[GameStateTracker] GetAllPlayerLevels: Starting");
         try
         {
             var gameDataType = GameAssembly.Type("GameData");
+            FileLogger.Info($"[GameStateTracker] GetAllPlayerLevels: GameData type={gameDataType?.FullName ?? "null"}");
+
             var gameDataInstance = gameDataType != null ? GameAssembly.GetStaticProp(gameDataType, "Instance") : null;
-            if (gameDataInstance == null) return levels;
+            FileLogger.Info($"[GameStateTracker] GetAllPlayerLevels: GameData.Instance={gameDataInstance?.GetType().FullName ?? "null"}");
+            if (gameDataInstance == null) { FileLogger.Warn("[GameStateTracker] GetAllPlayerLevels: GameData.Instance is null, returning"); return levels; }
 
             var allPlayers = GameAssembly.GetInstanceProp(gameDataInstance, "AllPlayers");
-            if (allPlayers == null) return levels;
+            FileLogger.Info($"[GameStateTracker] GetAllPlayerLevels: AllPlayers={allPlayers?.GetType().FullName ?? "null"}");
+            if (allPlayers == null) { FileLogger.Warn("[GameStateTracker] GetAllPlayerLevels: AllPlayers is null, returning"); return levels; }
 
             var count = GameAssembly.ToInt(GameAssembly.GetInstanceProp(allPlayers, "Count"));
-            if (count <= 0 || count > 15) return levels;
+            FileLogger.Info($"[GameStateTracker] GetAllPlayerLevels: AllPlayers.Count={count}");
+            if (count <= 0 || count > 15) { FileLogger.Warn($"[GameStateTracker] GetAllPlayerLevels: count {count} out of range, returning"); return levels; }
 
             for (int i = 0; i < count; i++)
             {
                 try
                 {
+                    FileLogger.Info($"[GameStateTracker] GetAllPlayerLevels: Getting player {i} via get_Item...");
                     var playerInfo = GameAssembly.CallInstanceMethod(allPlayers, "get_Item", new object[] { i }, new[] { typeof(int) });
-                    if (playerInfo == null) continue;
-                    levels.Add(GameAssembly.GetPlayerLevel(playerInfo));
+                    FileLogger.Info($"[GameStateTracker] GetAllPlayerLevels: Player {i}={playerInfo?.GetType().FullName ?? "null"}");
+                    if (playerInfo == null) { FileLogger.Warn($"[GameStateTracker] GetAllPlayerLevels: player {i} is null, skipping"); continue; }
+
+                    FileLogger.Info($"[GameStateTracker] GetAllPlayerLevels: Getting level for player {i}...");
+                    var level = GameAssembly.GetPlayerLevel(playerInfo);
+                    FileLogger.Info($"[GameStateTracker] GetAllPlayerLevels: Player {i} level={level}");
+                    levels.Add(level);
                 }
                 catch (Exception ex)
                 {
-                    FileLogger.Warn($"[GameStateTracker] GetAllPlayerLevels: player[{i}] failed: {ex.Message}");
+                    FileLogger.Error($"[GameStateTracker] GetAllPlayerLevels: player[{i}] FAILED: {ex}");
                     levels.Add(0);
                 }
             }
         }
         catch (Exception ex)
         {
-            FileLogger.Warn($"[GameStateTracker] GetAllPlayerLevels failed: {ex.Message}");
+            FileLogger.Error($"[GameStateTracker] GetAllPlayerLevels FAILED: {ex}");
         }
+        FileLogger.Info($"[GameStateTracker] GetAllPlayerLevels: Done, returning {levels.Count} levels");
         return levels;
     }
 
     private static List<int> GetAllPlayerPings()
     {
         var pings = new List<int>();
+        FileLogger.Info("[GameStateTracker] GetAllPlayerPings: Starting");
         try
         {
             var gameDataType = GameAssembly.Type("GameData");
+            FileLogger.Info($"[GameStateTracker] GetAllPlayerPings: GameData type={gameDataType?.FullName ?? "null"}");
+
             var gameDataInstance = gameDataType != null ? GameAssembly.GetStaticProp(gameDataType, "Instance") : null;
-            if (gameDataInstance == null) return pings;
+            FileLogger.Info($"[GameStateTracker] GetAllPlayerPings: GameData.Instance={gameDataInstance?.GetType().FullName ?? "null"}");
+            if (gameDataInstance == null) { FileLogger.Warn("[GameStateTracker] GetAllPlayerPings: GameData.Instance is null, returning"); return pings; }
 
             var allPlayers = GameAssembly.GetInstanceProp(gameDataInstance, "AllPlayers");
-            if (allPlayers == null) return pings;
+            FileLogger.Info($"[GameStateTracker] GetAllPlayerPings: AllPlayers={allPlayers?.GetType().FullName ?? "null"}");
+            if (allPlayers == null) { FileLogger.Warn("[GameStateTracker] GetAllPlayerPings: AllPlayers is null, returning"); return pings; }
 
             var count = GameAssembly.ToInt(GameAssembly.GetInstanceProp(allPlayers, "Count"));
-            if (count <= 0 || count > 15) return pings;
+            FileLogger.Info($"[GameStateTracker] GetAllPlayerPings: AllPlayers.Count={count}");
+            if (count <= 0 || count > 15) { FileLogger.Warn($"[GameStateTracker] GetAllPlayerPings: count {count} out of range, returning"); return pings; }
 
             for (int i = 0; i < count; i++)
             {
                 try
                 {
+                    FileLogger.Info($"[GameStateTracker] GetAllPlayerPings: Getting player {i} via get_Item...");
                     var playerInfo = GameAssembly.CallInstanceMethod(allPlayers, "get_Item", new object[] { i }, new[] { typeof(int) });
-                    if (playerInfo == null) continue;
-                    pings.Add(GameAssembly.GetPlayerPing(playerInfo));
+                    FileLogger.Info($"[GameStateTracker] GetAllPlayerPings: Player {i}={playerInfo?.GetType().FullName ?? "null"}");
+                    if (playerInfo == null) { FileLogger.Warn($"[GameStateTracker] GetAllPlayerPings: player {i} is null, skipping"); continue; }
+
+                    FileLogger.Info($"[GameStateTracker] GetAllPlayerPings: Getting ping for player {i}...");
+                    var ping = GameAssembly.GetPlayerPing(playerInfo);
+                    FileLogger.Info($"[GameStateTracker] GetAllPlayerPings: Player {i} ping={ping}");
+                    pings.Add(ping);
                 }
                 catch (Exception ex)
                 {
-                    FileLogger.Warn($"[GameStateTracker] GetAllPlayerPings: player[{i}] failed: {ex.Message}");
+                    FileLogger.Error($"[GameStateTracker] GetAllPlayerPings: player[{i}] FAILED: {ex}");
                     pings.Add(0);
                 }
             }
         }
         catch (Exception ex)
         {
-            FileLogger.Warn($"[GameStateTracker] GetAllPlayerPings failed: {ex.Message}");
+            FileLogger.Error($"[GameStateTracker] GetAllPlayerPings FAILED: {ex}");
         }
+        FileLogger.Info($"[GameStateTracker] GetAllPlayerPings: Done, returning {pings.Count} pings");
         return pings;
     }
 }
