@@ -11,7 +11,7 @@
                        TextWrapping="Wrap" Text="You're now running a newer version!"/>
         </Border>
 
-        <Border Background="{StaticResource GlassSurfaceWeak}" CornerRadius="8">
+        <Border x:Name="ChangelogBorder" Background="{StaticResource GlassSurfaceWeak}" CornerRadius="8">
             <ScrollViewer MaxHeight="300" VerticalScrollBarVisibility="Auto" Padding="16">
                 <TextBlock x:Name="ChangelogContent" FontSize="13"
                            Foreground="{StaticResource TextBody}" TextWrapping="Wrap"
@@ -25,6 +25,11 @@
                     Background="#5865F2" Foreground="White" FontWeight="SemiBold"
                     BorderThickness="0" Cursor="Hand" HorizontalContentAlignment="Center"
                     Height="36" Padding="20,8"
+                    Visibility="Collapsed"/>
+            <Button x:Name="ViewChangelogButton" Content="Changelog"
+                    Click="ViewChangelogButton_Click"
+                    Style="{StaticResource SecondaryButton}"
+                    Height="36" Padding="20,8" Margin="8,0,0,0"
                     Visibility="Collapsed"/>
             <Button x:Name="CloseButton" Content="Got it"
                     Click="CloseButton_Click"

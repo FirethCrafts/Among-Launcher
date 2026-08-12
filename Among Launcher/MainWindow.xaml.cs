@@ -327,7 +327,7 @@ public partial class MainWindow
                 _config.Save();
             }
         };
-        ModalOverlay.Show("What's New", modal);
+        ModalOverlay.Show("Update Available", modal);
     }
 
     private static string LoadChangelogSince(string lastSeenVersion)
