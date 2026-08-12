@@ -89,102 +89,116 @@ public class GameStateTracker : IDisposable
 
     private void Tick()
     {
-        bool inLobby;
-        string code;
-        int count;
-        bool isHost;
-
         try
         {
-            inLobby = IsInLobby();
-            code = LobbyCode();
-            count = PlayerCount();
-            isHost = IsHost();
+            bool inLobby;
+            string code;
+            int count;
+            bool isHost;
+
+            try
+            {
+                inLobby = IsInLobby();
+                code = LobbyCode();
+                count = PlayerCount();
+                isHost = IsHost();
+            }
+            catch (Exception ex)
+            {
+                _log.LogWarning($"[GameStateTracker] State read failed: {ex.Message}");
+                return;
+            }
+
+            lock (_lock)
+            {
+                try
+                {
+                    if (inLobby)
+                        _lastWasHost = isHost;
+
+                    if (inLobby && !_wasInLobby)
+                    {
+                        if (_lastWasHost)
+                        {
+                            var region = "UNKNOWN";
+                            var host = "UNKNOWN";
+                            int maxPlayers = 15;
+                            List<string>? playerNames = null;
+                            List<int>? playerLevels = null;
+                            List<int>? playerPings = null;
+                            try { region = GameAssembly.CurrentRegionName(); } catch { }
+                            try { host = GameAssembly.LocalPlayerName(); } catch { }
+                            try { maxPlayers = MaxPlayers(); } catch { }
+                            try { playerNames = GameAssembly.GetAllPlayerNames(); } catch { }
+                            try { playerLevels = GetAllPlayerLevels(); } catch { }
+                            try { playerPings = GetAllPlayerPings(); } catch { }
+
+                            var gameVersion = "";
+                            var mapName = "";
+                            var language = "";
+                            var chatType = "";
+                            try { gameVersion = GameAssembly.GameVersion(); } catch { }
+                            try { mapName = GameAssembly.MapName(); } catch { }
+                            try { language = GameAssembly.Language(); } catch { }
+                            try { chatType = GameAssembly.ChatType(); } catch { }
+
+                            _log.LogInfo($"[GameStateTracker] Lobby created (code {code}, region {region}, host {host}, players {count}, maxPlayers {maxPlayers}).");
+                            _lastPlayerCount = count >= 0 ? count : -1;
+                            try { LobbyCreated?.Invoke(this, new LobbyInfo(code, region, "", 0, host, count, maxPlayers, playerNames, playerLevels, playerPings, gameVersion, mapName, language, chatType)); } catch { }
+                        }
+                        else
+                        {
+                            _log.LogInfo("[GameStateTracker] Entered a lobby as a non-host; skipping lobby_created.");
+                        }
+                    }
+                    else if (!inLobby && _wasInLobby)
+                    {
+                        if (_lastWasHost)
+                        {
+                            _log.LogInfo("[GameStateTracker] Lobby closed.");
+                            _lastPlayerCount = -1;
+                            try { LobbyClosed?.Invoke(this, ""); } catch { }
+                        }
+                        else
+                        {
+                            _log.LogInfo("[GameStateTracker] Left a lobby as a non-host; skipping lobby_closed.");
+                        }
+                        _lastWasHost = false;
+                    }
+
+                    if (inLobby && count >= 0)
+                    {
+                        if (_lastPlayerCount < 0)
+                        {
+                            _lastPlayerCount = count;
+                        }
+                        else if (count != _lastPlayerCount)
+                        {
+                            if (count > _lastPlayerCount)
+                            {
+                                _log.LogInfo($"[GameStateTracker] Player joined (count {count}).");
+                                try { PlayerJoined?.Invoke(this, new PlayerInfo("<unknown>", count)); } catch { }
+                            }
+                            else
+                            {
+                                _log.LogInfo($"[GameStateTracker] Player left (count {count}).");
+                                try { PlayerLeft?.Invoke(this, new PlayerInfo("<unknown>", count)); } catch { }
+                            }
+                            _lastPlayerCount = count;
+                        }
+                    }
+
+                    _wasInLobby = inLobby;
+                }
+                catch (Exception ex)
+                {
+                    _log.LogWarning($"[GameStateTracker] Tick lock block failed: {ex.Message}");
+                }
+            }
         }
         catch (Exception ex)
         {
-            _log.LogWarning($"[GameStateTracker] State read failed: {ex.Message}");
-            return;
-        }
-
-        lock (_lock)
-        {
-            if (inLobby)
-                _lastWasHost = isHost;
-
-            if (inLobby && !_wasInLobby)
-            {
-                if (_lastWasHost)
-                {
-                    var region = "UNKNOWN";
-                    var host = "UNKNOWN";
-                    int maxPlayers = 15;
-                    List<string>? playerNames = null;
-                    List<int>? playerLevels = null;
-                    List<int>? playerPings = null;
-                    try { region = GameAssembly.CurrentRegionName(); } catch { }
-                    try { host = GameAssembly.LocalPlayerName(); } catch { }
-                    try { maxPlayers = MaxPlayers(); } catch { }
-                    try { playerNames = GameAssembly.GetAllPlayerNames(); } catch { }
-                    try { playerLevels = GetAllPlayerLevels(); } catch { }
-                    try { playerPings = GetAllPlayerPings(); } catch { }
-
-                    var gameVersion = "";
-                    var mapName = "";
-                    var language = "";
-                    var chatType = "";
-                    try { gameVersion = GameAssembly.GameVersion(); } catch { }
-                    try { mapName = GameAssembly.MapName(); } catch { }
-                    try { language = GameAssembly.Language(); } catch { }
-                    try { chatType = GameAssembly.ChatType(); } catch { }
-
-                    _log.LogInfo($"[GameStateTracker] Lobby created (code {code}, region {region}, host {host}, players {count}, maxPlayers {maxPlayers}, playerNames [{string.Join(", ", playerNames ?? new())}], playerLevels [{string.Join(", ", playerLevels ?? new())}], playerPings [{string.Join(", ", playerPings ?? new())}], gameVersion {gameVersion}, mapName {mapName}, language {language}, chatType {chatType}).");
-                    _lastPlayerCount = count >= 0 ? count : -1;
-                    LobbyCreated?.Invoke(this, new LobbyInfo(code, region, "", 0, host, count, maxPlayers, playerNames, playerLevels, playerPings, gameVersion, mapName, language, chatType));
-                }
-                else
-                {
-                    _log.LogInfo("[GameStateTracker] Entered a lobby as a non-host; skipping lobby_created.");
-                }
-            }
-            else if (!inLobby && _wasInLobby)
-            {
-                if (_lastWasHost)
-                {
-                    _log.LogInfo("[GameStateTracker] Lobby closed.");
-                    _lastPlayerCount = -1;
-                    LobbyClosed?.Invoke(this, "");
-                }
-                else
-                {
-                    _log.LogInfo("[GameStateTracker] Left a lobby as a non-host; skipping lobby_closed.");
-                }
-                _lastWasHost = false;
-            }
-
-            if (inLobby && count >= 0)
-            {
-                if (_lastPlayerCount < 0)
-                {
-                    _lastPlayerCount = count;
-                }
-                else if (count != _lastPlayerCount)
-                {
-                    if (count > _lastPlayerCount)
-                    {
-                        _log.LogInfo($"[GameStateTracker] Player joined (count {count}).");
-                        PlayerJoined?.Invoke(this, new PlayerInfo("<unknown>", count));
-                    }
-                    else
-                    {
-                        _log.LogInfo($"[GameStateTracker] Player left (count {count}).");
-                        PlayerLeft?.Invoke(this, new PlayerInfo("<unknown>", count));
-                    }
-                    _lastPlayerCount = count;
-                }
-            }
-
-            _wasInLobby = inLobby;
+            _log.LogWarning($"[GameStateTracker] Tick failed: {ex.Message}");
         }
     }
 

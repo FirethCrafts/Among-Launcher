@@ -750,34 +750,24 @@ public static class GameAssembly
 
             for (int i = 0; i < count; i++)
             {
-                var playerInfo = CallInstanceMethod(allPlayers, "get_Item", new object[] { i }, new[] { typeof(int) });
-                if (playerInfo == null)
+                try
                 {
-                    FileLogger.Warn($"[GameAssembly] GetAllPlayerNames: player[{i}] is null");
-                    continue;
-                }
+                    var playerInfo = CallInstanceMethod(allPlayers, "get_Item", new object[] { i }, new[] { typeof(int) });
+                    if (playerInfo == null)
+                    {
+                        FileLogger.Warn($"[GameAssembly] GetAllPlayerNames: player[{i}] is null");
+                        continue;
+                    }
 
-                FileLogger.Info($"[GameAssembly] GetAllPlayerNames: player[{i}] type={playerInfo.GetType().FullName}");
-                
-                // Debug: List all properties and fields on playerInfo (only for first player to avoid spam)
-                if (i == 0)
-                {
-                    DebugObjectProperties(playerInfo, $"AllPlayers[{i}]");
+                    var playerName = ToStr(GetInstanceProp(playerInfo, "PlayerName"));
+                    if (!string.IsNullOrEmpty(playerName))
+                    {
+                        names.Add(playerName);
+                    }
                 }
-                
-                var playerName = ToStr(GetInstanceProp(playerInfo, "PlayerName"));
-                var isLocal = ToBool(GetInstanceProp(playerInfo, "IsLocal"));
-                var playerId = ToInt(GetInstanceProp(playerInfo, "PlayerId"));
-                
-                FileLogger.Info($"[GameAssembly] GetAllPlayerNames: player[{i}] PlayerName='{playerName}', IsLocal={isLocal}, PlayerId={playerId}");
-                
-                if (!string.IsNullOrEmpty(playerName))
+                catch (Exception ex)
                 {
-                    names.Add(playerName);
-                }
-                else
-                {
-                    FileLogger.Warn($"[GameAssembly] GetAllPlayerNames: player[{i}] has empty PlayerName");
+                    FileLogger.Warn($"[GameAssembly] GetAllPlayerNames: player[{i}] failed: {ex.Message}");
                 }
             }
             
