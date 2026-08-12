@@ -93,6 +93,7 @@ Complete feature documentation for the **Among Launcher** (WPF desktop app) and 
 - **Mod-set sync:** Diffs the lobby's mod set against local `BepInEx/plugins/`, downloads any missing DLLs with SHA-256 verification, quarantines extras.
 - **In-game chat commands:** `/repost` and `/disband` from the mod surface into the launcher's host flow via IPC.
 - **Max players:** Sent as `max_players` in lobby creation requests; read from the game via `AmongUsClient.GameHostOpts.MaxPlayers` or `NormalOptions.MaxPlayers` (default 15).
+- **✅ Auto-post now sends actual mods** — `GetInstalledMods()` scans `BepInEx/plugins/*.dll`, computes SHA-256 hashes, filters out system DLLs, and includes the full active mod list.
 
 ### Deep-Link Lobby Join
 
@@ -108,6 +109,11 @@ Complete feature documentation for the **Among Launcher** (WPF desktop app) and 
   8. Wait up to 90s for `game_ready` from the in-game mod
   9. Send `join_lobby` IPC message with lobby details
   10. Connect WebSocket for live updates
+- **✅ STATUS: WORKING** - Fixed issues:
+  - MainThreadDispatcher context capture moved to Plugin.Load() for proper Unity main thread dispatch
+  - StartCoroutine now searches for any 1-parameter method and accepts IL2CPP enumerators
+  - SetRegion now checks existing built-in regions first before creating custom ones
+  - Reflection access updated to include NonPublic and traverse base class hierarchies
 - **Single-instance routing:** A second instance forwards the deep link to the already-running primary via the `AmongLauncher.Redirect` named pipe, then exits.
 - **Mod install deep-link:** `amongus-launcher://install?mods=<url1>,<url2>` — downloads and installs mods, then launches the game.
 
@@ -124,6 +130,7 @@ Complete feature documentation for the **Among Launcher** (WPF desktop app) and 
 - **IPC log viewer modal:** Reads `%LocalAppData%\AmongLauncher\AmongLauncher_ipc.log`, with copy/refresh/clear actions.
 - **Persistence:** `config.json` stores storefront, server URLs, Discord token/avatar/username, profiles, library, bot WS endpoint, role IDs, debug mode, auto-post toggle.
 - **Config reload:** Re-read from disk at the start of join pipeline to pick up settings changes.
+- **✅ FIXED: Deep-link join IPC now works** — Fixed MainThreadDispatcher context capture, StartCoroutine parameter types, and SetRegion reflection issues.
 
 ---
 
@@ -190,9 +197,10 @@ Complete feature documentation for the **Among Launcher** (WPF desktop app) and 
 ### Auto-Post
 
 - When `--autopost` is passed as a launch argument, the plugin directly calls `PostLobbyToBackend()` on lobby creation.
-- `POST {serverUrl}/api/v1/lobbies` with `{ code, region, host, mod_type: "modded", mods: [], max_players }`.
+- `POST {serverUrl}/api/v1/lobbies` with `{ code, region, host, mod_type: "modded"|"vanilla", mods: [...], max_players }`.
 - Timeout: 15 seconds.
 - Host name resolved with fallback: raw IPC host → `"Host"` if "UNKNOWN".
+- **✅ FIXED: Now sends actual mods** — `GetInstalledMods()` scans `BepInEx/plugins/*.dll`, computes SHA-256 hashes, filters out system DLLs, and includes the full active mod list. `mod_type` is set dynamically based on whether mods are present.
 
 ### Lobby Leave
 
@@ -214,6 +222,7 @@ Complete feature documentation for the **Among Launcher** (WPF desktop app) and 
 
 - Global mutex `Global\AmongLauncher.SingleInstance` ensures only one launcher runs.
 - Secondary instances forward deep links via the `AmongLauncher.Redirect` named pipe and exit.
+- **✅ FIXED: Deep-link join IPC now works** — Fixed MainThreadDispatcher context capture, StartCoroutine parameter types, and SetRegion reflection issues.
 
 ### Error Resilience
 

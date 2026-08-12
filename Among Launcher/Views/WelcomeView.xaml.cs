@@ -82,16 +82,27 @@ public partial class WelcomeView : UserControl
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"Login failed:\n{ex.Message}", "Discord Login", MessageBoxButton.OK, MessageBoxImage.Error);
+            ShowError($"Login failed:\n{ex.Message}");
             return;
         }
 
         if (profile is null)
         {
-            MessageBox.Show("Login was cancelled (you closed the browser or denied access).", "Discord Login", MessageBoxButton.OK, MessageBoxImage.Warning);
+            ShowError("Login was cancelled (you closed the browser or denied access).");
             return;
         }
 
         LoginCompleted?.Invoke(this, profile);
+    }
+
+    private void ShowError(string message)
+    {
+        var mainWindow = Window.GetWindow(this) as MainWindow;
+        if (mainWindow == null) return;
+
+        var errorModal = new ConfirmationModal();
+        errorModal.Configure(message, "OK");
+        errorModal.Confirmed += (_, _) => mainWindow.ModalOverlayControl.Hide();
+        mainWindow.ModalOverlayControl.Show("Error", errorModal);
     }
 }

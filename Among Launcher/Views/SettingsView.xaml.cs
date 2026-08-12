@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Windows;
 using System.Windows.Controls;
 using Microsoft.Win32;
+using AmongLauncher.Config;
 using AmongLauncher.GameDetection;
 
 namespace AmongLauncher.Views;
@@ -41,6 +42,7 @@ public partial class SettingsView
         VanillaRoleIdTextBox.Text = config.VanillaRoleId;
         DebugModeToggle.IsChecked = config.DebugMode;
         AutoPostToggle.IsChecked = config.AutoPostLobby;
+        ThemeToggle.IsChecked = config.Theme != "Light";
 
         _isInitializing = true;
         if (StorefrontCombo.Items.Count == 0)
@@ -99,6 +101,15 @@ public partial class SettingsView
         var config = Config.LauncherConfig.Load();
         config.AutoPostLobby = AutoPostToggle.IsChecked == true;
         config.Save();
+    }
+
+    private void ThemeToggle_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_isInitializing || !IsLoaded) return;
+        var config = Config.LauncherConfig.Load();
+        config.Theme = ThemeToggle.IsChecked == true ? "Dark" : "Light";
+        config.Save();
+        ThemeManager.ApplyTheme(config.Theme);
     }
 
     private void StorefrontCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)

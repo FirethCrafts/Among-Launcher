@@ -213,7 +213,8 @@ public static class GameFinder
                 var candidates = new[]
                 {
                     Path.Combine(root, gameFolder, AmongUsExe),
-                    Path.Combine(root, gameFolder, "Content", AmongUsExe)
+                    Path.Combine(root, gameFolder, "Content", AmongUsExe),
+                    Path.Combine(root, "XboxGames", gameFolder, "Content", AmongUsExe)
                 };
 
                 foreach (var candidate in candidates)
@@ -258,6 +259,31 @@ public static class GameFinder
             if (IsAmongUsInstalledFromMsStore())
             {
                 return new GameSearchResult { Storefront = Storefront.MicrosoftStore, DetectedButUnavailable = true };
+            }
+        }
+        catch { }
+
+        try
+        {
+            var packagesDir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "Packages");
+
+            if (Directory.Exists(packagesDir))
+            {
+                var amongPackages = Directory.GetDirectories(packagesDir, "InnerSloth.LLC-*");
+                foreach (var pkg in amongPackages.OrderByDescending(d => new DirectoryInfo(d).LastWriteTime))
+                {
+                    var gamePath = Path.Combine(pkg, "LocalCache", "Local", "Microsoft", "WindowsApps", AmongUsExe);
+                    if (File.Exists(gamePath))
+                    {
+                        return new GameSearchResult
+                        {
+                            Path = Path.GetDirectoryName(gamePath),
+                            Storefront = Storefront.MicrosoftStore
+                        };
+                    }
+                }
             }
         }
         catch { }

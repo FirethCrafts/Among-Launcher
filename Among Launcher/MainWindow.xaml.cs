@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
@@ -28,9 +29,12 @@ public partial class MainWindow
     private Config.LauncherConfig _config;
     private string _userId = "";
     private LobbyInfo? _activeLobby;
+    private bool _amongApiUpdateAvailable;
+    private string? _amongApiDownloadUrl;
     private Views.HostControlPanelView? _hostPanel;
     private readonly List<string> _lobbyPlayerNames = new();
     private TaskCompletionSource<bool>? _gameReadyTcs;
+    private System.Windows.Forms.NotifyIcon? _trayIcon;
     private bool _joining;
     private bool _lobbyPostedToBackend;
     private string _postedLobbyCode = "";
@@ -59,6 +63,8 @@ public partial class MainWindow
             rejoin: cmd => RejoinAsync(cmd));
 
         _mainView.GameStateChanged += OnGameStateChanged;
+        _mainView.AmongApiUpdateRequested += OnAmongApiUpdateRequested;
+        _mainView.AmongApiUpdateWithChangelogRequested += OnAmongApiUpdateWithChangelogRequested;
         _welcomeView.LoginCompleted += OnLoginCompleted;
 
         _pipeServer.ClientConnected += (_, _) =>
@@ -110,18 +116,22 @@ public partial class MainWindow
         // Handler: lobby_created
         _pipeServer.RegisterHandler("lobby_created", async element =>
         {
-            LogDebug("[Launcher] lobby_created received from mod");
             var p = element.GetProperty("payload");
+            var lobbyCode = p.TryGetProperty("code", out var codeProp) ? codeProp.GetString() ?? "" : "";
             var regionPort = p.TryGetProperty("regionPort", out var rp) && rp.GetInt32() > 0
                 ? rp.GetInt32()
                 : 22023;
             var rawHost = p.TryGetProperty("host", out var h) ? h.GetString() : "";
-            var host = !string.IsNullOrWhiteSpace(_config.UserName)
-                ? _config.UserName
-                : (!string.IsNullOrWhiteSpace(rawHost) && !rawHost.Equals("UNKNOWN", StringComparison.OrdinalIgnoreCase) ? rawHost : "Host");
+            var host = !string.IsNullOrWhiteSpace(rawHost) && !rawHost.Equals("UNKNOWN", StringComparison.OrdinalIgnoreCase)
+                ? rawHost
+                : (!string.IsNullOrWhiteSpace(_config.UserName) ? _config.UserName : "Host");
             var maxPlayers = p.TryGetProperty("maxPlayers", out var mp) && mp.GetInt32() > 0
                 ? mp.GetInt32()
                 : 15;
+            var gameVersion = p.TryGetProperty("gameVersion", out var gv) ? gv.GetString() : null;
+            var mapName = p.TryGetProperty("mapName", out var mn) ? mn.GetString() : null;
+            var language = p.TryGetProperty("language", out var lg) ? lg.GetString() : null;
+            var chatType = p.TryGetProperty("chatType", out var ct) ? ct.GetString() : null;
             var info = new LobbyInfo
             {
                 Code = p.GetProperty("code").GetString() ?? "",
@@ -131,10 +141,17 @@ public partial class MainWindow
                 ModSet = await GetInstalledModSetAsync(),
                 HostUserId = _userId,
                 Host = host,
-                MaxPlayers = maxPlayers
+                MaxPlayers = maxPlayers,
+                GameVersion = gameVersion,
+                MapName = mapName,
+                Language = language,
+                ChatType = chatType
             };
             _activeLobby = info;
             _lobbyPlayerNames.Clear();
+            if (!string.IsNullOrWhiteSpace(host))
+                _lobbyPlayerNames.Add(host);
+            Services.LauncherLog.Write($"[Launcher] lobby_created handler started. Code={info.Code}, Region={info.Region}, Host={info.Host}, PlayerCount={info.PlayerCount}, MaxPlayers={info.MaxPlayers}");
 
             var modEntries = new List<ModInfoEntry>();
             var moddedPath = GetModdedPath();
@@ -144,20 +161,30 @@ public partial class MainWindow
                 if (!File.Exists(filePath)) continue;
 
                 var uploaded = await _backend.UploadModAsync(
-                    File.OpenRead(filePath), entry.FileName, CancellationToken.None);
+                    File.OpenRead(filePath), entry.FileName, entry.Version, CancellationToken.None);
 
                 modEntries.Add(uploaded ?? new ModInfoEntry(entry.FileName, entry.Version, entry.Sha256));
             }
 
             if (_config.AutoPostLobby)
             {
-                await _backend.CreateLobbyAsync(new CreateLobbyRequest(info.Code, info.Region, info.Host, "modded", modEntries, info.MaxPlayers), CancellationToken.None);
+                Services.LauncherLog.Write($"[Launcher] Creating lobby on backend. Host={host}, MaxPlayers={info.MaxPlayers}");
+                var createResult = await _backend.CreateLobbyAsync(new CreateLobbyRequest(info.Code, info.Region, info.Host, "modded", modEntries, info.MaxPlayers, info.GameVersion, info.MapName, info.Language, info.ChatType), CancellationToken.None);
+                Services.LauncherLog.Write($"[Launcher] Backend response: {createResult}");
                 _lobbyPostedToBackend = true;
                 _postedLobbyCode = info.Code;
-                _ = _backend.HeartbeatAsync(info.Code, _userId, CancellationToken.None);
-                StartHeartbeat(info.Code);
-                _ = _ws.ConnectAsync(info.Code, CancellationToken.None);
             }
+            // Always send heartbeat and start periodic heartbeat when we are the host
+            if (string.IsNullOrEmpty(_userId))
+            {
+                Services.LauncherLog.Write($"[Launcher] WARNING: _userId is empty when sending heartbeat for lobby {info.Code}. Heartbeat may be rejected by backend.");
+            }
+            Services.LauncherLog.Write($"[Launcher] Sending heartbeat. Code={info.Code}, UserId={_userId}");
+            var heartbeatResult = await _backend.HeartbeatAsync(info.Code, _userId, CancellationToken.None);
+            Services.LauncherLog.Write($"[Launcher] Heartbeat response: {heartbeatResult}");
+            Services.LauncherLog.Write($"[Launcher] Starting periodic heartbeat for {info.Code}");
+            StartHeartbeat(info.Code);
+            _ = _ws.ConnectAsync(info.Code, CancellationToken.None);
             if (string.IsNullOrEmpty(_userId) || _userId == info.HostUserId)
             {
                 Dispatcher.Invoke(() => ShowHostPanel(info));
@@ -235,9 +262,217 @@ public partial class MainWindow
         App.DeepLinkReceived += link => Dispatcher.Invoke(() => HandleDeepLink(link));
         Loaded += async (_, _) =>
         {
+            RestoreWindowState();
             await _pipeServer.BroadcastMessageAsync("launcher_ready");
             HandleDeepLink(deepLink);
+            await CheckAmongApiUpdatesAsync();
+            await CheckAndShowChangelogAsync();
+            SetupTrayIcon();
         };
+
+        Closing += (_, _) => SaveWindowState();
+    }
+
+    private static string GetCurrentVersion()
+    {
+        var version = FileVersionInfo.GetVersionInfo(System.Reflection.Assembly.GetEntryAssembly()?.Location ?? "").ProductVersion;
+        return version ?? "1.0.0";
+    }
+
+    private async Task CheckAndShowChangelogAsync()
+    {
+        var currentVersion = GetCurrentVersion();
+        if (string.IsNullOrEmpty(currentVersion)) return;
+
+        var showUpdateButtons = _amongApiUpdateAvailable;
+
+        if (!showUpdateButtons && _config.LastSeenVersion == currentVersion) return;
+
+        var changelog = LoadChangelogSince(_config.LastSeenVersion);
+        if (string.IsNullOrEmpty(changelog) && !showUpdateButtons)
+        {
+            _config.LastSeenVersion = currentVersion;
+            _config.Save();
+            return;
+        }
+
+        var modal = new ChangelogModal();
+        modal.Configure(currentVersion, string.IsNullOrEmpty(changelog) ? "No new changes." : changelog);
+
+        if (showUpdateButtons)
+        {
+            modal.ShowUpdateButtons();
+            modal.UpdateRequested += (_, _) =>
+            {
+                ModalOverlay.Hide();
+                OnAmongApiUpdateRequested(this, EventArgs.Empty);
+            };
+        }
+
+        modal.Closed += (_, _) =>
+        {
+            ModalOverlay.Hide();
+            if (!showUpdateButtons)
+            {
+                _config.LastSeenVersion = currentVersion;
+                _config.Save();
+            }
+        };
+        ModalOverlay.Show("What's New", modal);
+    }
+
+    private static string LoadChangelogSince(string lastSeenVersion)
+    {
+        try
+        {
+            var changelogPath = Path.Combine(
+                AppDomain.CurrentDomain.BaseDirectory, "CHANGELOG.md");
+            if (!File.Exists(changelogPath))
+                return string.Empty;
+
+            var lines = File.ReadAllLines(changelogPath);
+            var collecting = string.IsNullOrEmpty(lastSeenVersion);
+            var result = new List<string>();
+
+            foreach (var line in lines)
+            {
+                if (line.StartsWith("## "))
+                {
+                    var version = line.Substring(3).Trim();
+                    if (collecting)
+                        break;
+                    if (version == lastSeenVersion)
+                    {
+                        collecting = false;
+                        continue;
+                    }
+                    collecting = true;
+                    result.Add(line);
+                    result.Add("");
+                }
+                else if (collecting)
+                {
+                    result.Add(line);
+                }
+            }
+
+            return string.Join("\n", result).Trim();
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
+
+    private void RestoreWindowState()
+    {
+        if (_config.WindowWidth is { } w && w > 0)
+            Width = w;
+        if (_config.WindowHeight is { } h && h > 0)
+            Height = h;
+
+        var screenW = SystemParameters.PrimaryScreenWidth;
+        var screenH = SystemParameters.PrimaryScreenHeight;
+
+        if (_config.WindowLeft is { } left && _config.WindowTop is { } top)
+        {
+            if (left + Width > 0 && left < screenW && top + Height > 0 && top < screenH)
+            {
+                Left = left;
+                Top = top;
+            }
+            else
+            {
+                Left = (screenW - Width) / 2;
+                Top = (screenH - Height) / 2;
+            }
+        }
+        else
+        {
+            Left = (screenW - Width) / 2;
+            Top = (screenH - Height) / 2;
+        }
+
+        if (_config.IsMaximized)
+            WindowState = WindowState.Maximized;
+    }
+
+    private void SaveWindowState()
+    {
+        if (WindowState == WindowState.Maximized)
+        {
+            _config.IsMaximized = true;
+            _config.WindowLeft = RestoreBounds.Left;
+            _config.WindowTop = RestoreBounds.Top;
+            _config.WindowWidth = RestoreBounds.Width;
+            _config.WindowHeight = RestoreBounds.Height;
+        }
+        else
+        {
+            _config.IsMaximized = false;
+            _config.WindowLeft = Left;
+            _config.WindowTop = Top;
+            _config.WindowWidth = Width;
+            _config.WindowHeight = Height;
+        }
+
+        _config.Save();
+    }
+
+    private void SetupTrayIcon()
+    {
+        var icon = System.Drawing.Icon.ExtractAssociatedIcon(
+            System.Reflection.Assembly.GetExecutingAssembly().Location);
+
+        var menu = new System.Windows.Forms.ContextMenuStrip();
+        menu.Items.Add("Show", null, (_, _) => Dispatcher.Invoke(ShowFromTray));
+        menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
+        menu.Items.Add("Exit", null, (_, _) => ExitTray());
+
+        _trayIcon = new System.Windows.Forms.NotifyIcon
+        {
+            Text = "Among Launcher",
+            Icon = icon,
+            ContextMenuStrip = menu,
+            Visible = true
+        };
+
+        _trayIcon.DoubleClick += (_, _) => Dispatcher.Invoke(ShowFromTray);
+    }
+
+    private void ShowFromTray()
+    {
+        Show();
+        ShowInTaskbar = true;
+        WindowState = WindowState.Normal;
+        Activate();
+    }
+
+    protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
+    {
+        e.Cancel = true;
+        ShowInTaskbar = false;
+        WindowState = WindowState.Minimized;
+        Hide();
+    }
+
+    private void ExitTray()
+    {
+        if (_trayIcon != null)
+        {
+            _trayIcon.Visible = false;
+            _trayIcon.Dispose();
+            _trayIcon = null;
+        }
+
+        _pipeServer.Stop();
+        StopHeartbeat();
+        _ws.Disconnect();
+        _botClient.Disconnect();
+
+        ShowInTaskbar = true;
+        Closing -= (_, _) => SaveWindowState();
+        Close();
     }
 
     private void RefreshConfig()
@@ -256,6 +491,88 @@ public partial class MainWindow
                 return Task.CompletedTask;
             },
             rejoin: cmd => RejoinAsync(cmd));
+    }
+
+    private async Task CheckAmongApiUpdatesAsync()
+    {
+        var moddedPath = GetModdedPath();
+        var pathToCheck = string.IsNullOrEmpty(moddedPath) ? AppDomain.CurrentDomain.BaseDirectory : moddedPath;
+
+        var (updateAvailable, latestVersion, downloadUrl) =
+            await Services.VersionChecker.CheckForUpdateAsync(_httpClient, pathToCheck);
+
+        _amongApiUpdateAvailable = updateAvailable;
+        _amongApiDownloadUrl = downloadUrl;
+
+        Dispatcher.Invoke(() =>
+        {
+            if (_amongApiUpdateAvailable)
+            {
+                _mainView.ShowUpdateAmongApiButton(latestVersion);
+            }
+            else
+            {
+                _mainView.HideUpdateAmongApiButton();
+            }
+        });
+    }
+
+    private void OnAmongApiUpdateWithChangelogRequested(object? sender, AmongApiUpdateInfo? updateInfo)
+    {
+        if (updateInfo != null)
+        {
+            _amongApiUpdateAvailable = true;
+            _amongApiDownloadUrl = updateInfo.DownloadUrl;
+        }
+        _ = CheckAndShowChangelogAsync();
+    }
+
+    private async void OnAmongApiUpdateRequested(object? sender, EventArgs e)
+    {
+        if (!_amongApiUpdateAvailable || string.IsNullOrEmpty(_amongApiDownloadUrl))
+            return;
+
+        var moddedPath = GetModdedPath();
+        if (string.IsNullOrEmpty(moddedPath)) return;
+
+        var confirmModal = new ConfirmationModal();
+        confirmModal.Configure(
+            $"An AmongAPI update is available.\n\nUpdating will replace the current AmongApi.dll. The game will be stopped if running.\n\nProceed?",
+            "Update",
+            isDanger: false);
+
+        confirmModal.Confirmed += async (_, _) =>
+        {
+            ModalOverlay.Hide();
+            _mainView.StopGame();
+
+            var success = await Services.VersionChecker.DownloadAndUpdateAsync(
+                _httpClient, _amongApiDownloadUrl, moddedPath);
+
+            if (success)
+            {
+                _amongApiUpdateAvailable = false;
+                _amongApiDownloadUrl = null;
+                var currentVersion = GetCurrentVersion();
+                _config.LastSeenVersion = currentVersion;
+                _config.Save();
+                Dispatcher.Invoke(() => _mainView.HideUpdateAmongApiButton());
+                _mainView.UpdateModStatusText("AmongAPI updated successfully.");
+            }
+            else
+            {
+                Dispatcher.Invoke(() =>
+                {
+                    var errorModal = new ConfirmationModal();
+                    errorModal.Configure("Failed to update AmongAPI. Please try again later.", "OK");
+                    errorModal.Confirmed += (_, _) => ModalOverlay.Hide();
+                    ModalOverlay.Show("Update Failed", errorModal);
+                });
+            }
+        };
+
+        confirmModal.Cancelled += (_, _) => ModalOverlay.Hide();
+        ModalOverlay.Show("Update AmongAPI", confirmModal);
     }
 
     public void HandleDeepLink(string? deepLink)
@@ -671,7 +988,7 @@ public partial class MainWindow
     {
         var players = _lobbyPlayerNames.Select(n => new LobbyPlayer("", n, false)).ToList();
 
-        var hostName = _config.UserName;
+        var hostName = _activeLobby?.Host ?? _config.UserName;
         var hostIndex = players.FindIndex(p =>
             !string.IsNullOrEmpty(hostName) &&
             string.Equals(p.PlayerName, hostName, StringComparison.OrdinalIgnoreCase));
@@ -830,7 +1147,8 @@ public partial class MainWindow
         foreach (var file in Directory.GetFiles(pluginsDir, "*.dll"))
         {
             var hash = await Services.Sha256Helper.HashFileAsync(file);
-            entries.Add(new ModSetEntry { FileName = Path.GetFileName(file), Sha256 = hash });
+            var version = FileVersionInfo.GetVersionInfo(file).FileVersion ?? "";
+            entries.Add(new ModSetEntry { FileName = Path.GetFileName(file), Sha256 = hash, Version = version });
         }
         return entries;
     }
@@ -895,6 +1213,7 @@ public partial class MainWindow
         {
             var active = view == _mainView ? HomeButton
                        : view == _libraryView ? LibraryButton
+                       : view == _hostPanel ? LobbyButton
                        : SettingsButton;
             SetActiveNav(active);
         }
@@ -903,7 +1222,7 @@ public partial class MainWindow
     private void SetActiveNav(Button active)
     {
         var activeBg = new SolidColorBrush(Color.FromRgb(0x22, 0x22, 0x26));
-        foreach (var btn in new[] { HomeButton, LibraryButton, SettingsButton, LogoutButton })
+        foreach (var btn in new[] { HomeButton, LibraryButton, LobbyButton, SettingsButton, LogoutButton })
         {
             var isActive = btn == active;
             btn.Foreground = new SolidColorBrush(isActive ? Colors.White : (Color)FindResource("NavIconColor"));

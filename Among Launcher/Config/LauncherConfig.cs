@@ -30,6 +30,13 @@ public class LauncherConfig
     public List<LibraryEntry> Library { get; set; } = new();
     public bool DebugMode { get; set; }
     public bool AutoPostLobby { get; set; }
+    public string Theme { get; set; } = "Dark";
+    public string LastSeenVersion { get; set; } = string.Empty;
+    public double? WindowLeft { get; set; }
+    public double? WindowTop { get; set; }
+    public double? WindowWidth { get; set; }
+    public double? WindowHeight { get; set; }
+    public bool IsMaximized { get; set; }
 
     public static LauncherConfig Load()
     {

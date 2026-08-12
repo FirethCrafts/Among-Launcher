@@ -54,7 +54,15 @@ public class LobbyBackendClient
                 Code = body.Code,
                 Region = body.Region,
                 ModSet = (body.Mods ?? new List<ModInfoEntry>())
-                    .Select(m => new ModSetEntry { FileName = m.Name, Version = m.Version, Sha256 = m.FileHash })
+                    .Select(m => new ModSetEntry
+                    {
+                        FileName = m.Name,
+                        Version = m.Version,
+                        Sha256 = m.FileHash,
+                        DownloadUrl = !string.IsNullOrEmpty(m.DownloadUrl)
+                            ? m.DownloadUrl
+                            : GetModDownloadUrl(m.Name)
+                    })
                     .ToList(),
                 Host = body.Host,
                 PlayerCount = body.Players?.Count ?? 0,
@@ -73,6 +81,34 @@ public class LobbyBackendClient
         }
     }
 
+    public async Task<LobbyDetailedResponse?> GetLobbyDetailsAsync(string code, CancellationToken ct)
+    {
+        try
+        {
+            using var msg = new HttpRequestMessage(HttpMethod.Get, $"api/v1/lobby/{code}/details");
+            ApplyAuth(msg);
+            using var resp = await _http.SendAsync(msg, ct);
+
+            if (!resp.IsSuccessStatusCode)
+            {
+                Services.LauncherLog.Write($"[Backend] GET api/v1/lobby/{code}/details -> {(int)resp.StatusCode} {resp.ReasonPhrase}");
+                return null;
+            }
+
+            return await resp.Content.ReadFromJsonAsync<LobbyDetailedResponse>(cancellationToken: ct);
+        }
+        catch (TaskCanceledException) when (!ct.IsCancellationRequested)
+        {
+            Services.LauncherLog.Write($"[Backend] GET api/v1/lobby/{code}/details timed out.");
+            return null;
+        }
+        catch (HttpRequestException ex)
+        {
+            Services.LauncherLog.Write($"[Backend] GET api/v1/lobby/{code}/details failed: {ex.Message}");
+            return null;
+        }
+    }
+
     public async Task<bool> CreateLobbyAsync(CreateLobbyRequest req, CancellationToken ct)
     {
         using var msg = new HttpRequestMessage(HttpMethod.Post, "api/v1/lobbies") { Content = JsonContent.Create(req) };
@@ -81,13 +117,14 @@ public class LobbyBackendClient
         return resp.IsSuccessStatusCode;
     }
 
-    public async Task<ModInfoEntry?> UploadModAsync(Stream fileStream, string fileName, CancellationToken ct)
+    public async Task<ModInfoEntry?> UploadModAsync(Stream fileStream, string fileName, string? version, CancellationToken ct)
     {
         try
         {
             using var content = new MultipartFormDataContent();
             content.Add(new StreamContent(fileStream), "file", fileName);
             content.Add(new StringContent(Path.GetFileNameWithoutExtension(fileName)), "name");
+            content.Add(new StringContent(version ?? ""), "version");
 
             using var msg = new HttpRequestMessage(HttpMethod.Post, "api/v1/mods") { Content = content };
             ApplyAuth(msg);
@@ -111,7 +148,7 @@ public class LobbyBackendClient
             DeleteNoContent($"api/v1/lobbies/{code}", ct);
 
         public Task<bool> HeartbeatAsync(string code, string hostUserId, CancellationToken ct) =>
-            PostNoContent($"api/v1/lobbies/{code}/heartbeat", ct);
+            PostNoContent($"api/v1/lobbies/{code}/heartbeat", ct, new { host_user_id = hostUserId });
 
     private async Task<bool> PostNoContent(string path, CancellationToken ct, object? body = null)
     {

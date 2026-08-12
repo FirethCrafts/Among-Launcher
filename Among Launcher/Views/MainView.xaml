@@ -48,6 +48,11 @@
                             Click="PlayButton_Click"
                             Style="{StaticResource PlayButton}"
                             Margin="0,0,12,0" IsEnabled="False"/>
+                    <Button x:Name="UpdateAmongApiButton" Content="UPDATE AmongAPI"
+                            Click="UpdateAmongApiButton_Click"
+                            Style="{StaticResource PlayButton}"
+                            Margin="0,0,12,0" Visibility="Collapsed"
+                            Foreground="#FFD54F" Background="#3A3A44"/>
                     <Button x:Name="InstallButton" Content="INSTALL BEPINEX"
                             Click="InstallButton_Click"
                             Style="{StaticResource SecondaryButton}"

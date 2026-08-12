@@ -6,34 +6,6 @@
              mc:Ignorable="d"
              d:DesignHeight="560" d:DesignWidth="680">
     <UserControl.Resources>
-        <!-- GridView header style matching the glass palette -->
-        <Style TargetType="GridViewColumnHeader">
-            <Setter Property="Background" Value="{StaticResource GlassSurfaceStrong}"/>
-            <Setter Property="Foreground" Value="{StaticResource HeaderBrush}"/>
-            <Setter Property="BorderBrush" Value="{StaticResource GlassBorder}"/>
-            <Setter Property="BorderThickness" Value="0,0,1,1"/>
-            <Setter Property="FontSize" Value="11"/>
-            <Setter Property="FontWeight" Value="Bold"/>
-            <Setter Property="Padding" Value="10,6"/>
-            <Setter Property="HorizontalContentAlignment" Value="Left"/>
-        </Style>
-        <!-- ListView row style matching the glass theme -->
-        <Style TargetType="ListViewItem">
-            <Setter Property="Background" Value="Transparent"/>
-            <Setter Property="Foreground" Value="{StaticResource TextBody}"/>
-            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
-            <Setter Property="BorderThickness" Value="0"/>
-            <Setter Property="Padding" Value="0"/>
-            <Style.Triggers>
-                <Trigger Property="IsMouseOver" Value="True">
-                    <Setter Property="Background" Value="{StaticResource GlassSurfaceWeak}"/>
-                </Trigger>
-                <Trigger Property="IsSelected" Value="True">
-                    <Setter Property="Background" Value="#335865F2"/>
-                    <Setter Property="Foreground" Value="{StaticResource TextTitle}"/>
-                </Trigger>
-            </Style.Triggers>
-        </Style>
     </UserControl.Resources>
 
     <Grid Margin="10">
@@ -66,7 +38,11 @@
 
         <!-- Players card -->
         <Border Grid.Row="2" Style="{StaticResource GlassCard}">
-            <StackPanel>
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
                 <Grid Margin="0,0,0,12">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
@@ -76,59 +52,53 @@
                     <TextBlock x:Name="PlayersCountText" Grid.Column="1" Text="0 players"
                                FontSize="12" Foreground="{StaticResource TextMuted}"/>
                 </Grid>
-                <ListView x:Name="PlayersList" ItemsSource="{Binding Players}"
-                          Background="{StaticResource GlassSurfaceWeak}"
-                          BorderBrush="{StaticResource GlassBorder}" BorderThickness="1"
-                          Foreground="{StaticResource TextBody}"
-                          ScrollViewer.HorizontalScrollBarVisibility="Disabled">
-                    <ListView.View>
-                        <GridView>
-                            <GridViewColumn Header="Player" Width="220"
-                                            DisplayMemberBinding="{Binding PlayerName}"/>
-                            <GridViewColumn Header="Discord" Width="140"
-                                            DisplayMemberBinding="{Binding DiscordUserId}"/>
-                            <GridViewColumn Header="Host" Width="60">
-                                <GridViewColumn.CellTemplate>
-                                    <DataTemplate>
+                <ListBox Grid.Row="1" x:Name="PlayersList" ItemsSource="{Binding Players}"
+                         Background="Transparent" BorderThickness="0"
+                         Foreground="{StaticResource TextBody}"
+                         ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                         ScrollViewer.VerticalScrollBarVisibility="Auto"
+                         ItemContainerStyle="{StaticResource PlayerListItemStyle}">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <Border Background="{StaticResource GlassSurfaceWeak}"
+                                    BorderBrush="{StaticResource GlassBorder}" BorderThickness="1"
+                                    CornerRadius="8" Padding="14,10" Margin="0,0,0,4">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock FontSize="14" FontWeight="SemiBold"
+                                               Foreground="{StaticResource TextTitle}"
+                                               Text="{Binding PlayerName}"
+                                               VerticalAlignment="Center"/>
+                                    <Border Grid.Column="1" Background="#2210B981" CornerRadius="4"
+                                            Padding="8,3" Margin="10,0,0,0" VerticalAlignment="Center"
+                                            Visibility="{Binding IsHost, Converter={StaticResource BoolToVisibilityConverter}}">
                                         <TextBlock Text="HOST" FontSize="10" FontWeight="Bold"
-                                                   Foreground="#10B981">
-                                            <TextBlock.Style>
-                                                <Style TargetType="TextBlock">
-                                                    <Setter Property="Visibility" Value="Collapsed"/>
-                                                    <Style.Triggers>
-                                                        <DataTrigger Binding="{Binding IsHost}" Value="True">
-                                                            <Setter Property="Visibility" Value="Visible"/>
-                                                        </DataTrigger>
-                                                    </Style.Triggers>
-                                                </Style>
-                                            </TextBlock.Style>
-                                        </TextBlock>
-                                    </DataTemplate>
-                                </GridViewColumn.CellTemplate>
-                            </GridViewColumn>
-                            <GridViewColumn Header="" Width="80">
-                                <GridViewColumn.CellTemplate>
-                                    <DataTemplate>
-                                        <Button Content="Kick" Click="KickButton_Click"
-                                                Height="24" Padding="10,4" FontSize="11">
-                                            <Button.Style>
-                                                <Style TargetType="Button" BasedOn="{StaticResource SecondaryButton}">
-                                                    <Setter Property="Visibility" Value="Visible"/>
-                                                    <Style.Triggers>
-                                                        <DataTrigger Binding="{Binding IsHost}" Value="True">
-                                                            <Setter Property="Visibility" Value="Collapsed"/>
-                                                        </DataTrigger>
-                                                    </Style.Triggers>
-                                                </Style>
-                                            </Button.Style>
-                                        </Button>
-                                    </DataTemplate>
-                                </GridViewColumn.CellTemplate>
-                            </GridViewColumn>
-                        </GridView>
-                    </ListView.View>
-                </ListView>
-            </StackPanel>
+                                                   Foreground="#10B981"/>
+                                    </Border>
+                                    <Button Grid.Column="2" Content="Kick" Click="KickButton_Click"
+                                            Height="26" Padding="12,4" FontSize="11"
+                                            VerticalAlignment="Center">
+                                        <Button.Style>
+                                            <Style TargetType="Button" BasedOn="{StaticResource SecondaryButton}">
+                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsHost}" Value="False">
+                                                        <Setter Property="Visibility" Value="Visible"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Button.Style>
+                                    </Button>
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </Grid>
         </Border>
 
         <!-- Actions -->

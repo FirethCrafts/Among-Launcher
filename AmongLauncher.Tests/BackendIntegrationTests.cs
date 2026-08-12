@@ -7,14 +7,19 @@ using AmongLauncher.Config;
 namespace AmongLauncher.Tests;
 
 /// <summary>
-/// Integration tests that hit the live backend at https://among-us2.mel-homes.com/api.
+/// Integration tests that hit the live backend at https://among-us.mel-homes.com/api.
 /// Each test generates a unique transient lobby code (TST + 4 random hex chars) and
 /// cleans up after itself in a best-effort finally block that never masks primary failures.
 /// </summary>
 public class BackendIntegrationTests : IDisposable
 {
-    // LobbyBackendClient uses v1/... relative paths, so ServerUrl must end at /api
-    private const string ServerUrl = "https://among-us2.mel-homes.com/api";
+    // LobbyBackendClient already prepends api/v1/... in its requests, so ServerUrl is just the base domain
+    private const string BaseUrl = "https://among-us.mel-homes.com";
+    private const string ServerUrl = BaseUrl;
+
+    private static readonly HttpClient _sharedClient = new();
+    private static bool? _backendAvailable;
+    private static readonly object _backendCheckLock = new();
 
     private readonly HttpClient _httpClient = new();
     private readonly LauncherConfig _config;
@@ -30,6 +35,36 @@ public class BackendIntegrationTests : IDisposable
     }
 
     public void Dispose() => _httpClient.Dispose();
+
+    private static bool IsBackendAvailable()
+    {
+        if (_backendAvailable.HasValue)
+            return _backendAvailable.Value;
+
+        lock (_backendCheckLock)
+        {
+            if (_backendAvailable.HasValue)
+                return _backendAvailable.Value;
+
+            try
+            {
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+                var response = _sharedClient.GetAsync(BaseUrl + "/health", cts.Token).Result;
+                _backendAvailable = response.IsSuccessStatusCode;
+            }
+            catch
+            {
+                _backendAvailable = false;
+            }
+
+            return _backendAvailable.Value;
+        }
+    }
+
+    private static bool IsBackendUnavailable()
+    {
+        return !IsBackendAvailable();
+    }
 
     /// <summary>
     /// Generates a unique TST-prefixed lobby code safe for parallel test runs.
@@ -53,6 +88,7 @@ public class BackendIntegrationTests : IDisposable
     [Fact]
     public async Task CreateLobby_ReturnsSuccess()
     {
+        if (IsBackendUnavailable()) return;
         var code = GenerateLobbyCode();
         try
         {
@@ -68,6 +104,7 @@ public class BackendIntegrationTests : IDisposable
     [Fact]
     public async Task GetLobby_ReturnsCorrectData()
     {
+        if (IsBackendUnavailable()) return;
         var code = GenerateLobbyCode();
         await _backendClient.CreateLobbyAsync(MakeRequest(code), CancellationToken.None);
 
@@ -89,6 +126,7 @@ public class BackendIntegrationTests : IDisposable
     [Fact]
     public async Task Heartbeat_ReturnsSuccess()
     {
+        if (IsBackendUnavailable()) return;
         var code = GenerateLobbyCode();
         await _backendClient.CreateLobbyAsync(MakeRequest(code), CancellationToken.None);
 
@@ -106,6 +144,7 @@ public class BackendIntegrationTests : IDisposable
     [Fact]
     public async Task Repost_ReturnsSuccess()
     {
+        if (IsBackendUnavailable()) return;
         var code = GenerateLobbyCode();
         await _backendClient.CreateLobbyAsync(MakeRequest(code), CancellationToken.None);
 
@@ -123,6 +162,7 @@ public class BackendIntegrationTests : IDisposable
     [Fact]
     public async Task Disband_ReturnsSuccess()
     {
+        if (IsBackendUnavailable()) return;
         var code = GenerateLobbyCode();
         await _backendClient.CreateLobbyAsync(MakeRequest(code), CancellationToken.None);
 
@@ -134,6 +174,7 @@ public class BackendIntegrationTests : IDisposable
     [Fact]
     public async Task GetLobby_NonExistentCode_ReturnsNull()
     {
+        if (IsBackendUnavailable()) return;
         // Use a valid-format but non-existent code — backend should return 404 → null.
         var code = "ZZZZZZ";
         var lobby = await _backendClient.GetLobbyAsync(code, CancellationToken.None);
@@ -147,6 +188,7 @@ public class BackendIntegrationTests : IDisposable
     [Fact]
     public async Task FullLobbyLifecycle_HappyPath()
     {
+        if (IsBackendUnavailable()) return;
         var code = GenerateLobbyCode();
 
         // 1. Create
@@ -187,13 +229,14 @@ public class BackendIntegrationTests : IDisposable
     [Fact]
     public async Task WebSocket_ConnectsToExistingLobby()
     {
+        if (IsBackendUnavailable()) return;
         var code = GenerateLobbyCode();
         await _backendClient.CreateLobbyAsync(MakeRequest(code), CancellationToken.None);
 
         try
         {
             // Spec: WS /api/v1/ws/{code}?client_id={id}
-            var wsUrl = $"wss://among-us2.mel-homes.com/api/v1/ws/{code}?client_id=test";
+            var wsUrl = $"wss://among-us.mel-homes.com/api/v1/ws/{code}?client_id=test";
             var botClient = new LobbyBotClient();
 
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));

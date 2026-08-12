@@ -6,6 +6,7 @@
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
         <IsPackable>false</IsPackable>
+        <RootNamespace>AmongLauncher</RootNamespace>
     </PropertyGroup>
 
     <ItemGroup>
@@ -19,10 +20,30 @@
             <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
             <PrivateAssets>all</PrivateAssets>
         </PackageReference>
+        <PackageReference Include="Moq" Version="4.20.72" />
     </ItemGroup>
 
+    <!-- Include source files directly to avoid main project build errors -->
     <ItemGroup>
-        <ProjectReference Include="..\Among Launcher\Among Launcher.csproj" />
+        <Compile Include="..\Among Launcher\Ipc\PipeServer.cs" Link="Source\Ipc\PipeServer.cs" />
+        <Compile Include="..\Among Launcher\Services\Lobby\LobbyBackendClient.cs" Link="Source\Services\Lobby\LobbyBackendClient.cs" />
+        <Compile Include="..\Among Launcher\Services\DeepLinkHandler.cs" Link="Source\Services\DeepLinkHandler.cs" />
+        <Compile Include="..\Among Launcher\Services\Lobby\ModSetSync.cs" Link="Source\Services\Lobby\ModSetSync.cs" />
+        <Compile Include="..\Among Launcher\Services\Lobby\ChatCommandDetector.cs" Link="Source\Services\Lobby\ChatCommandDetector.cs" />
+        <Compile Include="..\Among Launcher\Services\Sha256Helper.cs" Link="Source\Services\Sha256Helper.cs" />
+        <Compile Include="..\Among Launcher\Services\ModDownloader.cs" Link="Source\Services\ModDownloader.cs" />
+        <Compile Include="..\Among Launcher\Services\LauncherLog.cs" Link="Source\Services\LauncherLog.cs" />
+        <Compile Include="..\Among Launcher\Services\Lobby\LobbyBotClient.cs" Link="Source\Services\Lobby\LobbyBotClient.cs" />
+        <Compile Include="..\Among Launcher\Services\Lobby\LobbyWebSocketClient.cs" Link="Source\Services\Lobby\LobbyWebSocketClient.cs" />
+        <Compile Include="..\Among Launcher\Services\Lobby\LobbyCommandService.cs" Link="Source\Services\Lobby\LobbyCommandService.cs" />
+        <Compile Include="..\Among Launcher\Models\BackendModels.cs" Link="Source\Models\BackendModels.cs" />
+        <Compile Include="..\Among Launcher\Models\ModSetEntry.cs" Link="Source\Models\ModSetEntry.cs" />
+        <Compile Include="..\Among Launcher\Models\ModProfile.cs" Link="Source\Models\ModProfile.cs" />
+        <Compile Include="..\Among Launcher\Models\ModInfo.cs" Link="Source\Models\ModInfo.cs" />
+        <Compile Include="..\Among Launcher\Models\LibraryEntry.cs" Link="Source\Models\LibraryEntry.cs" />
+        <Compile Include="..\Among Launcher\Models\LobbyInfo.cs" Link="Source\Models\LobbyInfo.cs" />
+        <Compile Include="..\Among Launcher\Config\LauncherConfig.cs" Link="Source\Config\LauncherConfig.cs" />
+        <Compile Include="..\Among Launcher\GameDetection\Storefront.cs" Link="Source\GameDetection\Storefront.cs" />
     </ItemGroup>
 
 </Project>

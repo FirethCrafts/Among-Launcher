@@ -356,6 +356,26 @@ public static class GameAssembly
 
     public static string ToStr(object? value) => value as string ?? "";
 
+    public static int GetPlayerLevel(object? playerInfo)
+    {
+        if (playerInfo == null) return 0;
+        var level = GetInstanceProp(playerInfo, "PlayerLevel");
+        if (level != null) return ToInt(level);
+        level = GetInstanceMember(playerInfo, "Level");
+        if (level != null) return ToInt(level);
+        return 0;
+    }
+
+    public static int GetPlayerPing(object? playerInfo)
+    {
+        if (playerInfo == null) return 0;
+        var ping = GetInstanceProp(playerInfo, "Ping");
+        if (ping != null) return ToInt(ping);
+        ping = GetInstanceMember(playerInfo, "Ping");
+        if (ping != null) return ToInt(ping);
+        return 0;
+    }
+
     public static bool InLobby()
     {
         var lobbyBehaviour = Type("LobbyBehaviour");
@@ -393,18 +413,53 @@ public static class GameAssembly
 
     public static string LocalPlayerName()
     {
+        FileLogger.Info("[GameAssembly] LocalPlayerName: Starting name resolution...");
+        
         var playerControlType = Type("PlayerControl");
-        var localPlayer = GetStaticMember(playerControlType, "LocalPlayer");
-        if (localPlayer == null)
+        FileLogger.Info($"[GameAssembly] LocalPlayerName: PlayerControl type resolved={playerControlType != null}");
+        
+        if (playerControlType == null)
         {
-            FileLogger.Warn("[GameAssembly] LocalPlayerName: PlayerControl.LocalPlayer is null");
+            FileLogger.Warn("[GameAssembly] LocalPlayerName: PlayerControl type not found");
             return "UNKNOWN";
         }
 
+        var localPlayer = GetStaticMember(playerControlType, "LocalPlayer");
+        FileLogger.Info($"[GameAssembly] LocalPlayerName: LocalPlayer={localPlayer != null}");
+        
+        if (localPlayer == null)
+        {
+            FileLogger.Warn("[GameAssembly] LocalPlayerName: PlayerControl.LocalPlayer is null");
+            
+            // Try alternative: GameData.Instance.AllPlayers to find local player by ID
+            var localName = TryGetLocalPlayerFromGameData();
+            if (!string.IsNullOrEmpty(localName))
+            {
+                FileLogger.Info($"[GameAssembly] LocalPlayerName: Found via GameData fallback: '{localName}'");
+                return localName;
+            }
+            
+            return "UNKNOWN";
+        }
+
+        var localPlayerType = localPlayer.GetType();
+        FileLogger.Info($"[GameAssembly] LocalPlayerName: LocalPlayer type={localPlayerType.FullName}");
+        
+        // Debug: List all properties and fields on localPlayer
+        DebugObjectProperties(localPlayer, "LocalPlayer");
+
         // Try Data.PlayerName (standard path)
         var data = GetInstanceProp(localPlayer, "Data");
+        FileLogger.Info($"[GameAssembly] LocalPlayerName: Data={data != null}");
+        
         if (data != null)
         {
+            var dataType = data.GetType();
+            FileLogger.Info($"[GameAssembly] LocalPlayerName: Data type={dataType.FullName}");
+            
+            // Debug: List all properties and fields on Data object
+            DebugObjectProperties(data, "LocalPlayer.Data");
+            
             var name = ToStr(GetInstanceProp(data, "PlayerName"));
             FileLogger.Info($"[GameAssembly] LocalPlayerName: Data.PlayerName='{name}'");
             if (!string.IsNullOrEmpty(name) && name != "UNKNOWN")
@@ -442,8 +497,96 @@ public static class GameAssembly
             }
         }
 
+        // Try getting name from PlayerId field
+        var playerId = GetInstanceProp(localPlayer, "PlayerId");
+        FileLogger.Info($"[GameAssembly] LocalPlayerName: PlayerId={playerId}");
+        if (playerId != null)
+        {
+            var playerNameFromId = TryGetPlayerNameById(ToInt(playerId));
+            if (!string.IsNullOrEmpty(playerNameFromId))
+            {
+                FileLogger.Info($"[GameAssembly] LocalPlayerName: Found via PlayerId: '{playerNameFromId}'");
+                return playerNameFromId;
+            }
+        }
+
         FileLogger.Warn("[GameAssembly] LocalPlayerName: all attempts failed, returning UNKNOWN");
         return "UNKNOWN";
+    }
+
+    private static string? TryGetLocalPlayerFromGameData()
+    {
+        try
+        {
+            var gameDataType = Type("GameData");
+            if (gameDataType == null) return null;
+            
+            var gameDataInstance = GetStaticProp(gameDataType, "Instance");
+            if (gameDataInstance == null) return null;
+            
+            var allPlayers = GetInstanceProp(gameDataInstance, "AllPlayers");
+            if (allPlayers == null) return null;
+            
+            var countObj = GetInstanceProp(allPlayers, "Count");
+            var count = ToInt(countObj);
+            FileLogger.Info($"[GameAssembly] TryGetLocalPlayerFromGameData: AllPlayers.Count={count}");
+            
+            for (int i = 0; i < count; i++)
+            {
+                var playerInfo = CallInstanceMethod(allPlayers, "get_Item", new object[] { i }, new[] { typeof(int) });
+                if (playerInfo == null) continue;
+                
+                var isLocal = ToBool(GetInstanceProp(playerInfo, "IsLocal"));
+                if (isLocal)
+                {
+                    var name = ToStr(GetInstanceProp(playerInfo, "PlayerName"));
+                    FileLogger.Info($"[GameAssembly] TryGetLocalPlayerFromGameData: Found local player at index {i}: '{name}'");
+                    return name;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            FileLogger.Warn($"[GameAssembly] TryGetLocalPlayerFromGameData failed: {ex.Message}");
+        }
+        return null;
+    }
+
+    private static string? TryGetPlayerNameById(int playerId)
+    {
+        try
+        {
+            var gameDataType = Type("GameData");
+            if (gameDataType == null) return null;
+            
+            var gameDataInstance = GetStaticProp(gameDataType, "Instance");
+            if (gameDataInstance == null) return null;
+            
+            var allPlayers = GetInstanceProp(gameDataInstance, "AllPlayers");
+            if (allPlayers == null) return null;
+            
+            var countObj = GetInstanceProp(allPlayers, "Count");
+            var count = ToInt(countObj);
+            
+            for (int i = 0; i < count; i++)
+            {
+                var playerInfo = CallInstanceMethod(allPlayers, "get_Item", new object[] { i }, new[] { typeof(int) });
+                if (playerInfo == null) continue;
+                
+                var id = ToInt(GetInstanceProp(playerInfo, "PlayerId"));
+                if (id == playerId)
+                {
+                    var name = ToStr(GetInstanceProp(playerInfo, "PlayerName"));
+                    FileLogger.Info($"[GameAssembly] TryGetPlayerNameById: Found player {playerId}: '{name}'");
+                    return name;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            FileLogger.Warn($"[GameAssembly] TryGetPlayerNameById failed: {ex.Message}");
+        }
+        return null;
     }
 
     private static PropertyInfo? ResolveProperty(Type type, string name, bool isStatic)
@@ -491,18 +634,80 @@ public static class GameAssembly
         return true;
     }
 
+    public static void DebugObjectProperties(object? instance, string label)
+    {
+        if (instance == null)
+        {
+            FileLogger.Info($"[GameAssembly] DebugObjectProperties ({label}): instance is null");
+            return;
+        }
+
+        try
+        {
+            var type = instance.GetType();
+            FileLogger.Info($"[GameAssembly] DebugObjectProperties ({label}): type={type.FullName}");
+            
+            var props = type.GetProperties(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            FileLogger.Info($"[GameAssembly] DebugObjectProperties ({label}): {props.Length} properties");
+            
+            foreach (var prop in props)
+            {
+                try
+                {
+                    var value = prop.GetValue(instance);
+                    var valueStr = value?.ToString() ?? "null";
+                    if (valueStr.Length > 100)
+                        valueStr = valueStr.Substring(0, 100) + "...";
+                    FileLogger.Info($"[GameAssembly] DebugObjectProperties ({label}): {prop.Name} = {valueStr}");
+                }
+                catch (Exception ex)
+                {
+                    FileLogger.Warn($"[GameAssembly] DebugObjectProperties ({label}): {prop.Name} failed: {ex.Message}");
+                }
+            }
+            
+            var fields = type.GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            FileLogger.Info($"[GameAssembly] DebugObjectProperties ({label}): {fields.Length} fields");
+            
+            foreach (var field in fields)
+            {
+                try
+                {
+                    var value = field.GetValue(instance);
+                    var valueStr = value?.ToString() ?? "null";
+                    if (valueStr.Length > 100)
+                        valueStr = valueStr.Substring(0, 100) + "...";
+                    FileLogger.Info($"[GameAssembly] DebugObjectProperties ({label}): {field.Name} = {valueStr}");
+                }
+                catch (Exception ex)
+                {
+                    FileLogger.Warn($"[GameAssembly] DebugObjectProperties ({label}): {field.Name} failed: {ex.Message}");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            FileLogger.Warn($"[GameAssembly] DebugObjectProperties ({label}) failed: {ex.Message}");
+        }
+    }
+
     public static List<string> GetAllPlayerNames()
     {
         var names = new List<string>();
         try
         {
+            FileLogger.Info("[GameAssembly] GetAllPlayerNames: Starting...");
+            
             var gameDataType = Type("GameData");
+            FileLogger.Info($"[GameAssembly] GetAllPlayerNames: GameData type={gameDataType != null}");
+            
             var gameDataInstance = GetStaticProp(gameDataType, "Instance");
             if (gameDataInstance == null)
             {
                 FileLogger.Warn("[GameAssembly] GetAllPlayerNames: GameData.Instance is null");
                 return names;
             }
+            FileLogger.Info($"[GameAssembly] GetAllPlayerNames: GameData.Instance={gameDataInstance.GetType().FullName}");
 
             var allPlayers = GetInstanceProp(gameDataInstance, "AllPlayers");
             if (allPlayers == null)
@@ -510,6 +715,7 @@ public static class GameAssembly
                 FileLogger.Warn("[GameAssembly] GetAllPlayerNames: AllPlayers is null");
                 return names;
             }
+            FileLogger.Info($"[GameAssembly] GetAllPlayerNames: AllPlayers type={allPlayers.GetType().FullName}");
 
             // AllPlayers is Il2CppSystem.Collections.Generic.List<PlayerInfo>
             var countObj = GetInstanceProp(allPlayers, "Count");
@@ -519,21 +725,178 @@ public static class GameAssembly
             for (int i = 0; i < count; i++)
             {
                 var playerInfo = CallInstanceMethod(allPlayers, "get_Item", new object[] { i }, new[] { typeof(int) });
-                if (playerInfo == null) continue;
+                if (playerInfo == null)
+                {
+                    FileLogger.Warn($"[GameAssembly] GetAllPlayerNames: player[{i}] is null");
+                    continue;
+                }
 
+                FileLogger.Info($"[GameAssembly] GetAllPlayerNames: player[{i}] type={playerInfo.GetType().FullName}");
+                
+                // Debug: List all properties and fields on playerInfo (only for first player to avoid spam)
+                if (i == 0)
+                {
+                    DebugObjectProperties(playerInfo, $"AllPlayers[{i}]");
+                }
+                
                 var playerName = ToStr(GetInstanceProp(playerInfo, "PlayerName"));
+                var isLocal = ToBool(GetInstanceProp(playerInfo, "IsLocal"));
+                var playerId = ToInt(GetInstanceProp(playerInfo, "PlayerId"));
+                
+                FileLogger.Info($"[GameAssembly] GetAllPlayerNames: player[{i}] PlayerName='{playerName}', IsLocal={isLocal}, PlayerId={playerId}");
+                
                 if (!string.IsNullOrEmpty(playerName))
                 {
                     names.Add(playerName);
-                    FileLogger.Info($"[GameAssembly] GetAllPlayerNames: player[{i}]='{playerName}'");
+                }
+                else
+                {
+                    FileLogger.Warn($"[GameAssembly] GetAllPlayerNames: player[{i}] has empty PlayerName");
+                }
+            }
+            
+            FileLogger.Info($"[GameAssembly] GetAllPlayerNames: Returning {names.Count} names: [{string.Join(", ", names)}]");
+        }
+        catch (Exception ex)
+        {
+            FileLogger.Error($"[GameAssembly] GetAllPlayerNames failed: {ex.Message}");
+            FileLogger.Error($"[GameAssembly] GetAllPlayerNames stack trace: {ex.StackTrace}");
+        }
+        return names;
+    }
+
+    public static string GameVersion()
+    {
+        try
+        {
+            var client = AmongUsClient();
+            if (client != null)
+            {
+                var version = ToStr(GetInstanceProp(client, "GameVersion"));
+                if (!string.IsNullOrEmpty(version))
+                    return version;
+            }
+        }
+        catch (Exception ex)
+        {
+            FileLogger.Warn($"[GameAssembly] GameVersion failed: {ex.Message}");
+        }
+        return "";
+    }
+
+    public static string MapName()
+    {
+        try
+        {
+            var client = AmongUsClient();
+            if (client == null) return "";
+
+            var gameOptions = GetInstanceProp(client, "GameHostOpts")
+                ?? GetInstanceProp(client, "NormalOptions");
+            if (gameOptions != null)
+            {
+                var mapId = ToInt(GetInstanceProp(gameOptions, "MapId"));
+                return MapIdToName(mapId);
+            }
+
+            var playerControlType = Type("PlayerControl");
+            var localPlayer = GetStaticMember(playerControlType, "LocalPlayer");
+            if (localPlayer != null)
+            {
+                var gameOptions2 = GetInstanceProp(localPlayer, "GameOptions");
+                if (gameOptions2 != null)
+                {
+                    var mapId = ToInt(GetInstanceProp(gameOptions2, "MapId"));
+                    return MapIdToName(mapId);
                 }
             }
         }
         catch (Exception ex)
         {
-            FileLogger.Error($"[GameAssembly] GetAllPlayerNames failed: {ex.Message}");
+            FileLogger.Warn($"[GameAssembly] MapName failed: {ex.Message}");
         }
-        return names;
+        return "";
+    }
+
+    private static string MapIdToName(int mapId) => mapId switch
+    {
+        0 => "The Skeld",
+        1 => "MIRA HQ",
+        2 => "Polus",
+        3 => "Dleks",
+        4 => "The Airship",
+        5 => "The Fungle",
+        _ => ""
+    };
+
+    public static string Language()
+    {
+        try
+        {
+            var client = AmongUsClient();
+            if (client == null) return "";
+
+            var gameOptions = GetInstanceProp(client, "GameHostOpts")
+                ?? GetInstanceProp(client, "NormalOptions");
+            if (gameOptions != null)
+            {
+                var lang = ToStr(GetInstanceProp(gameOptions, "Language"));
+                if (!string.IsNullOrEmpty(lang)) return lang;
+            }
+
+            var playerControlType = Type("PlayerControl");
+            var localPlayer = GetStaticMember(playerControlType, "LocalPlayer");
+            if (localPlayer != null)
+            {
+                var gameOptions2 = GetInstanceProp(localPlayer, "GameOptions");
+                if (gameOptions2 != null)
+                {
+                    var lang = ToStr(GetInstanceProp(gameOptions2, "Language"));
+                    if (!string.IsNullOrEmpty(lang)) return lang;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            FileLogger.Warn($"[GameAssembly] Language failed: {ex.Message}");
+        }
+        return "";
+    }
+
+    public static string ChatType()
+    {
+        try
+        {
+            var client = AmongUsClient();
+            if (client == null) return "";
+
+            var gameOptions = GetInstanceProp(client, "GameHostOpts")
+                ?? GetInstanceProp(client, "NormalOptions");
+            if (gameOptions != null)
+            {
+                var chat = GetInstanceProp(gameOptions, "ChatType");
+                if (chat != null)
+                    return ToStr(chat);
+            }
+
+            var playerControlType = Type("PlayerControl");
+            var localPlayer = GetStaticMember(playerControlType, "LocalPlayer");
+            if (localPlayer != null)
+            {
+                var gameOptions2 = GetInstanceProp(localPlayer, "GameOptions");
+                if (gameOptions2 != null)
+                {
+                    var chat = GetInstanceProp(gameOptions2, "ChatType");
+                    if (chat != null)
+                        return ToStr(chat);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            FileLogger.Warn($"[GameAssembly] ChatType failed: {ex.Message}");
+        }
+        return "";
     }
 
     private static Assembly? GetAssembly()

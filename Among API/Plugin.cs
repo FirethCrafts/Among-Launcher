@@ -102,7 +102,9 @@ public class Plugin : BasePlugin
             tracker.LobbyCreated += (_, info) =>
             {
                 _lastLobby = info;
-                FileLogger.Info($"Lobby created: {info.Code} (region {info.Region}, host {info.Host}, players: [{string.Join(", ", info.PlayerNames ?? new())}])");
+                FileLogger.Info($"Lobby created: {info.Code} (region {info.Region}, host {info.Host}, players: [{string.Join(", ", info.PlayerNames ?? new())}], levels: [{string.Join(", ", info.PlayerLevels ?? new())}], pings: [{string.Join(", ", info.PlayerPings ?? new())}])");
+                var activeMods = GetInstalledMods();
+                var modType = activeMods.Count > 0 ? "modded" : "vanilla";
                 _ = pipe.SendMessageAsync("lobby_created",
                     new
                     {
@@ -113,7 +115,16 @@ public class Plugin : BasePlugin
                         host = info.Host,
                         playerCount = info.PlayerCount,
                         maxPlayers = info.MaxPlayers,
-                        playerNames = info.PlayerNames ?? new List<string>()
+                        playerNames = info.PlayerNames ?? new List<string>(),
+                        playerLevels = info.PlayerLevels ?? new List<int>(),
+                        playerPings = info.PlayerPings ?? new List<int>(),
+                        mod_type = modType,
+                        status = "lobby",
+                        mods = activeMods,
+                        game_version = info.GameVersion,
+                        map_name = info.MapName,
+                        language = info.Language,
+                        chat_type = info.ChatType
                     });
 
                 if (_autoPost && !string.IsNullOrEmpty(_serverUrl))
@@ -183,6 +194,8 @@ public class Plugin : BasePlugin
             var commands = new ChatCommandHandler(Log);
             commands.OnRepost = () =>
             {
+                var activeMods = GetInstalledMods();
+                var modType = activeMods.Count > 0 ? "modded" : "vanilla";
                 _ = pipe.SendMessageAsync("lobby_created",
                     new
                     {
@@ -193,7 +206,16 @@ public class Plugin : BasePlugin
                         host = _lastLobby?.Host ?? "",
                         playerCount = _lastLobby?.PlayerCount ?? 0,
                         maxPlayers = _lastLobby?.MaxPlayers ?? 15,
-                        playerNames = _lastLobby?.PlayerNames ?? new List<string>()
+                        playerNames = _lastLobby?.PlayerNames ?? new List<string>(),
+                        playerLevels = _lastLobby?.PlayerLevels ?? new List<int>(),
+                        playerPings = _lastLobby?.PlayerPings ?? new List<int>(),
+                        mod_type = modType,
+                        status = "lobby",
+                        mods = activeMods,
+                        game_version = _lastLobby?.GameVersion ?? "",
+                        map_name = _lastLobby?.MapName ?? "",
+                        language = _lastLobby?.Language ?? "",
+                        chat_type = _lastLobby?.ChatType ?? ""
                     });
 
                 if (_lastLobby != null && !string.IsNullOrEmpty(_serverUrl))
@@ -294,8 +316,13 @@ public class Plugin : BasePlugin
             region = lobby.Region,
             host = hostName,
             mod_type = modType,
+            status = "lobby",
+            max_players = lobby.MaxPlayers,
             mods = activeMods,
-            max_players = lobby.MaxPlayers
+            game_version = lobby.GameVersion,
+            map_name = lobby.MapName,
+            language = lobby.Language,
+            chat_type = lobby.ChatType
         };
 
         var json = JsonSerializer.Serialize(body);

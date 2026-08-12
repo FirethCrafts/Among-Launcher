@@ -9,7 +9,6 @@ public class DiscordAuthService
 {
     private const string ClientId = "1533706803748147240";
     private static readonly string ClientSecret = "Um7wPIDVkCS9ro-0ZltYrs1NUI2q2LLh";
-    private const string RedirectUri = "http://localhost:5000/callback/";
     private const string CallbackUrl = "http://localhost:5000/callback/";
 
     private const string AuthorizeUrl =
@@ -27,7 +26,15 @@ public class DiscordAuthService
 
         using var listener = new HttpListener();
         listener.Prefixes.Add(CallbackUrl);
-        listener.Start();
+        try
+        {
+            listener.Start();
+        }
+        catch (HttpListenerException)
+        {
+            throw new InvalidOperationException(
+                "Port 5000 is already in use. Please close any other application using that port (such as another instance of this launcher) and try again.");
+        }
 
         // Open browser for the user to authorize
         try
@@ -133,7 +140,7 @@ public class DiscordAuthService
             ["client_id"] = ClientId,
             ["client_secret"] = ClientSecret,
             ["code"] = code,
-            ["redirect_uri"] = RedirectUri
+            ["redirect_uri"] = CallbackUrl
         };
 
         var content = new FormUrlEncodedContent(values);

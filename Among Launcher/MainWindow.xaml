@@ -5,7 +5,7 @@
         xmlns:views="clr-namespace:AmongLauncher.Views"
         Title="Among Launcher" Height="640" Width="980"
         Background="{StaticResource AppBackground}"
-        WindowStartupLocation="CenterScreen"
+        WindowStartupLocation="Manual"
         WindowStyle="None" ResizeMode="CanResize"
         BorderThickness="1" BorderBrush="{StaticResource GlassBorder}">
     <shell:WindowChrome.WindowChrome>
@@ -133,8 +133,11 @@
                             Style="{StaticResource NavButton}"
                             Margin="0,0,0,8" ToolTip="Lobby"
                             Visibility="Collapsed">
-                        <Path Data="{StaticResource HomeIcon}" Stretch="Uniform" Width="24" Height="24"
-                              Fill="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}"/>
+                        <Path Data="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2M9 11a4 4 0 100-8 4 4 0 000 8zM23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"
+                              Stretch="Uniform" Width="24" Height="24"
+                              Stroke="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}"
+                              StrokeThickness="1.5" StrokeLineJoin="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                              Fill="Transparent"/>
                     </Button>
 
                     <!-- Spacer -->

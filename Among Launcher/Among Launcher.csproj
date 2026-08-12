@@ -4,11 +4,17 @@
         <OutputType>WinExe</OutputType>
         <TargetFramework>net10.0-windows</TargetFramework>
         <UseWPF>true</UseWPF>
+        <UseWindowsForms>true</UseWindowsForms>
         <RootNamespace>AmongLauncher</RootNamespace>
         <AssemblyName>AmongLauncher</AssemblyName>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
+        <Version>1.0.0</Version>
     </PropertyGroup>
+
+    <ItemGroup>
+        <None Include="..\CHANGELOG.md" CopyToOutputDirectory="PreserveNewest" Link="CHANGELOG.md"/>
+    </ItemGroup>
 
     <ItemGroup>
         <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />

@@ -131,6 +131,11 @@ Shell command: `"<exe>" "%1"` — the launcher receives the URI as a process arg
   11. Broadcast `join_lobby` over IPC pipe: `{ code, region, regionIp, regionPort }`
   12. `LobbyWebSocketClient.ConnectAsync()` — connect to backend WebSocket
   13. Return join outcome
+- **✅ STATUS: WORKING** — Fixed issues:
+  - MainThreadDispatcher context capture moved to `Plugin.Load()` for proper Unity main thread dispatch
+  - `StartCoroutine` now searches for any 1-parameter method and accepts IL2CPP enumerators
+  - `SetRegion` now checks existing built-in regions first before creating custom ones
+  - Reflection access updated to include `NonPublic` and traverse base class hierarchies
 
 ### 3.4 Debug Mode Join
 
@@ -387,6 +392,8 @@ Max payload: **1 MB**. `ReadMessage` validates `0 < len ≤ 1 MB`.
 8. Detects lobby type via `LobbyTypeDetector`
 9. Sends bot announcement via `LobbyBotClient`
 
+**✅ FIXED: Now sends actual mods** — `GetInstalledMods()` scans `BepInEx/plugins/*.dll`, computes SHA-256 hashes, filters out system DLLs, and includes the full active mod list. `mod_type` is set dynamically based on whether mods are present.
+
 #### `lobby_closed`
 
 `DELETE /api/v1/lobbies/{code}` → stop heartbeat → disconnect WebSocket → disconnect bot → clear `_activeLobby`.
@@ -453,11 +460,37 @@ Timeouts: 30s dispatch, 15s main-thread completion.
 ### 13.6 Auto-Post
 
 When `--autopost`: plugin calls `PostLobbyToBackend()` directly on lobby creation.
-`POST {serverUrl}/api/v1/lobbies` with `{ code, region, host, mod_type: "modded", mods: [], max_players }`.
+`POST {serverUrl}/api/v1/lobbies` with `{ code, region, host, mod_type: "modded"|"vanilla", mods: [...], max_players }`.
+
+**✅ FIXED: Now sends actual mods** — `GetInstalledMods()` scans `BepInEx/plugins/*.dll`, computes SHA-256 hashes, filters out system DLLs, and includes the full active mod list. `mod_type` is set dynamically.
 
 ### 13.7 Lobby Leave
 
 `AmongUsClient.Instance.ExitGame(DisconnectReasons.ExitGame)` via reflection.
+
+### 13.8 Lobby Join (IPC)
+
+When the launcher sends a `join_lobby` IPC message, the plugin:
+1. Receives `{ code, region, regionIp, regionPort }`
+2. Dispatches join to Unity main thread via `SynchronizationContext.Post`
+3. Waits for game to be ready (30s timeout)
+4. Calls `ExecuteJoin()` which:
+   - Leaves current lobby if in one
+   - Sets region if provided
+   - Decodes lobby code via `GameCode.GameNameToInt()`
+   - Attempts to join via reflection using multiple methods:
+     - `CoJoinOnlineGameFromCode(int, bool)`
+     - `JoinGame(string)`
+     - `JoinGame(int)`
+   - Starts coroutine via `StartCoroutine()`
+5. Polls for lobby join confirmation (45s timeout)
+6. Returns `join_lobby_result` to launcher
+
+**✅ STATUS: WORKING** — Fixed issues:
+- MainThreadDispatcher context capture moved to `Plugin.Load()` for proper Unity main thread dispatch
+- `StartCoroutine` now searches for any 1-parameter method and accepts IL2CPP enumerators
+- `SetRegion` now checks existing built-in regions first before creating custom ones
+- Reflection access updated to include `NonPublic` and traverse base class hierarchies
 
 ### 13.8 Logging
 
@@ -487,6 +520,8 @@ When `--autopost`: plugin calls `PostLobbyToBackend()` directly on lobby creatio
    i. Sends bot announcement
 ```
 
+**✅ FIXED: Now sends actual mods** — `GetInstalledMods()` scans `BepInEx/plugins/*.dll`, computes SHA-256 hashes, filters out system DLLs, and includes the full active mod list. `mod_type` is set dynamically based on whether mods are present.
+
 ### Guest Joins Lobby
 
 ```
@@ -503,6 +538,8 @@ When `--autopost`: plugin calls `PostLobbyToBackend()` directly on lobby creatio
 11. Plugin sends "join_lobby_result"
 12. Launcher connects WebSocket
 ```
+
+**✅ STATUS: WORKING** — Fixed MainThreadDispatcher context capture, StartCoroutine parameter types, and SetRegion reflection issues.
 
 ### Host Disbands Lobby
 

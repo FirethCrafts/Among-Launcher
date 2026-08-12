@@ -11,4 +11,8 @@ public class LobbyInfo
     public string Host { get; set; } = "Host";
     public int PlayerCount { get; set; }
     public int MaxPlayers { get; set; } = 15;
+    public string? GameVersion { get; set; }
+    public string? MapName { get; set; }
+    public string? Language { get; set; }
+    public string? ChatType { get; set; }
 }
