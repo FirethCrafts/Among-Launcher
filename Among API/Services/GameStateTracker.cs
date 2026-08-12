@@ -382,11 +382,21 @@ public class GameStateTracker : IDisposable
             if (allPlayers == null) return levels;
 
             var count = GameAssembly.ToInt(GameAssembly.GetInstanceProp(allPlayers, "Count"));
+            if (count <= 0 || count > 15) return levels;
+
             for (int i = 0; i < count; i++)
             {
-                var playerInfo = GameAssembly.CallInstanceMethod(allPlayers, "get_Item", new object[] { i }, new[] { typeof(int) });
-                if (playerInfo == null) continue;
-                levels.Add(GameAssembly.GetPlayerLevel(playerInfo));
+                try
+                {
+                    var playerInfo = GameAssembly.CallInstanceMethod(allPlayers, "get_Item", new object[] { i }, new[] { typeof(int) });
+                    if (playerInfo == null) continue;
+                    levels.Add(GameAssembly.GetPlayerLevel(playerInfo));
+                }
+                catch (Exception ex)
+                {
+                    FileLogger.Warn($"[GameStateTracker] GetAllPlayerLevels: player[{i}] failed: {ex.Message}");
+                    levels.Add(0);
+                }
             }
         }
         catch (Exception ex)
@@ -409,11 +419,21 @@ public class GameStateTracker : IDisposable
             if (allPlayers == null) return pings;
 
             var count = GameAssembly.ToInt(GameAssembly.GetInstanceProp(allPlayers, "Count"));
+            if (count <= 0 || count > 15) return pings;
+
             for (int i = 0; i < count; i++)
             {
-                var playerInfo = GameAssembly.CallInstanceMethod(allPlayers, "get_Item", new object[] { i }, new[] { typeof(int) });
-                if (playerInfo == null) continue;
-                pings.Add(GameAssembly.GetPlayerPing(playerInfo));
+                try
+                {
+                    var playerInfo = GameAssembly.CallInstanceMethod(allPlayers, "get_Item", new object[] { i }, new[] { typeof(int) });
+                    if (playerInfo == null) continue;
+                    pings.Add(GameAssembly.GetPlayerPing(playerInfo));
+                }
+                catch (Exception ex)
+                {
+                    FileLogger.Warn($"[GameStateTracker] GetAllPlayerPings: player[{i}] failed: {ex.Message}");
+                    pings.Add(0);
+                }
             }
         }
         catch (Exception ex)

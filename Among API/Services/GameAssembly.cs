@@ -350,7 +350,19 @@ public static class GameAssembly
     public static bool EnumEquals(object? value, object? expected)
         => value != null && expected != null && value.Equals(expected);
 
-    public static int ToInt(object? value) => value is null ? 0 : Convert.ToInt32(value);
+    public static int ToInt(object? value)
+    {
+        if (value is null) return 0;
+        if (value is int i) return i;
+        if (value is uint u) return (int)u;
+        if (value is short s) return s;
+        if (value is ushort us) return us;
+        if (value is long l) return (int)l;
+        if (value is float f) return (int)f;
+        if (value is double d) return (int)d;
+        try { return Convert.ToInt32(value); }
+        catch { return 0; }
+    }
 
     public static bool ToBool(object? value) => value is bool b && b;
 
@@ -359,20 +371,34 @@ public static class GameAssembly
     public static int GetPlayerLevel(object? playerInfo)
     {
         if (playerInfo == null) return 0;
-        var level = GetInstanceProp(playerInfo, "PlayerLevel");
-        if (level != null) return ToInt(level);
-        level = GetInstanceMember(playerInfo, "Level");
-        if (level != null) return ToInt(level);
+        try
+        {
+            var level = GetInstanceProp(playerInfo, "PlayerLevel");
+            if (level != null) return ToInt(level);
+            level = GetInstanceMember(playerInfo, "Level");
+            if (level != null) return ToInt(level);
+        }
+        catch (Exception ex)
+        {
+            Log?.LogWarning($"[GameAssembly] GetPlayerLevel failed: {ex.Message}");
+        }
         return 0;
     }
 
     public static int GetPlayerPing(object? playerInfo)
     {
         if (playerInfo == null) return 0;
-        var ping = GetInstanceProp(playerInfo, "Ping");
-        if (ping != null) return ToInt(ping);
-        ping = GetInstanceMember(playerInfo, "Ping");
-        if (ping != null) return ToInt(ping);
+        try
+        {
+            var ping = GetInstanceProp(playerInfo, "Ping");
+            if (ping != null) return ToInt(ping);
+            ping = GetInstanceMember(playerInfo, "Ping");
+            if (ping != null) return ToInt(ping);
+        }
+        catch (Exception ex)
+        {
+            Log?.LogWarning($"[GameAssembly] GetPlayerPing failed: {ex.Message}");
+        }
         return 0;
     }
 
