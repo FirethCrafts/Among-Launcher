@@ -1,5 +1,6 @@
 using System.Windows;
 using AmongLauncher.Services;
+using Velopack;
 
 namespace AmongLauncher;
 
@@ -14,6 +15,8 @@ public partial class App
 
     protected override void OnStartup(StartupEventArgs e)
     {
+        VelopackApp.Build().Run();
+
         ReduceMotion = !SystemParameters.ClientAreaAnimation;
 
         var deepLink = DeepLinkHandler.FindDeepLinkArgument();

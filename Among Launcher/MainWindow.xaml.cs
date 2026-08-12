@@ -1,11 +1,13 @@
 using System.Diagnostics;
 using System.Text.Json;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using AmongLauncher.Ipc;
 using AmongLauncher.Models;
+using AmongLauncher.Services;
 using AmongLauncher.Views;
 
 namespace AmongLauncher;
@@ -255,6 +257,23 @@ public partial class MainWindow
             RestoreWindowState();
             await _pipeServer.BroadcastMessageAsync("launcher_ready");
             HandleDeepLink(deepLink);
+            
+            UpdateService.Initialize();
+            if (await UpdateService.CheckForUpdateAsync())
+            {
+                var result = await ShowLauncherUpdatePopup();
+                if (result == true)
+                {
+                    await UpdateService.ApplyUpdateAsync();
+                    return;
+                }
+                else
+                {
+                    Application.Current.Shutdown();
+                    return;
+                }
+            }
+            
             await CheckAmongApiUpdatesAsync();
             await CheckAndShowChangelogAsync();
             SetupTrayIcon();
@@ -428,6 +447,39 @@ public partial class MainWindow
         };
 
         _trayIcon.DoubleClick += (_, _) => Dispatcher.Invoke(ShowFromTray);
+    }
+
+    private async Task<bool?> ShowLauncherUpdatePopup()
+    {
+        var tcs = new TaskCompletionSource<bool?>();
+        var confirmModal = new ConfirmationModal();
+        confirmModal.Configure(
+            "A new version of Among Launcher is available. Update to continue?",
+            "Update",
+            isDanger: false);
+
+        // Override button colors for launcher update: green Update, red Close
+        confirmModal.ConfirmButton.Background = new System.Windows.Media.SolidColorBrush(
+            System.Windows.Media.Color.FromRgb(0x22, 0xC5, 0x5E)); // Green
+
+        // Rename Cancel to Close and make it red
+        confirmModal.CancelButton.Content = "Close";
+        confirmModal.CancelButton.Background = new System.Windows.Media.SolidColorBrush(
+            System.Windows.Media.Color.FromRgb(0xDC, 0x26, 0x26)); // Red
+
+        confirmModal.Confirmed += (_, _) =>
+        {
+            ModalOverlay.Hide();
+            tcs.TrySetResult(true);
+        };
+        confirmModal.Cancelled += (_, _) =>
+        {
+            ModalOverlay.Hide();
+            tcs.TrySetResult(false);
+        };
+
+        ModalOverlay.Show("Update Available", confirmModal);
+        return await tcs.Task;
     }
 
     private void ShowFromTray()
