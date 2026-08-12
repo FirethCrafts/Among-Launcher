@@ -2,12 +2,6 @@ using System.Collections.Concurrent;
 
 namespace AmongApi.Services;
 
-/// <summary>
-/// Lazy reflection helper over the game's Assembly-CSharp interop assembly.
-/// Resolves types and members at runtime so the plugin compiles without any
-/// game-assembly reference. Resolution failures degrade to null + a log entry
-/// and never throw.
-/// </summary>
 public static class GameAssembly
 {
     private static readonly object _assemblyLock = new();
@@ -42,7 +36,6 @@ public static class GameAssembly
 
     private static Type? ResolveType(string name)
     {
-        // 1. Assembly-CSharp (all game types).
         var acs = GetAssembly();
         if (acs != null)
         {
@@ -50,7 +43,6 @@ public static class GameAssembly
             if (t != null) return t;
         }
 
-        // 2. Any other already-loaded assembly (covers Il2CppInterop.Runtime, Il2CppSystem.*, UnityEngine.*).
         foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
         {
             if (ReferenceEquals(asm, acs)) continue;
@@ -59,13 +51,9 @@ public static class GameAssembly
                 var t = asm.GetType(name, false, true) ?? asm.GetTypes().FirstOrDefault(x => x.Name == name);
                 if (t != null) return t;
             }
-            catch
-            {
-                // Some interop assemblies cannot enumerate their types; skip.
-            }
+            catch { }
         }
 
-        // 3. On-disk fallback for the Il2CppInterop runtime (BepInEx core).
         var interopRuntime = LoadAssemblyByName("Il2CppInterop.Runtime");
         if (interopRuntime != null)
         {
@@ -106,8 +94,14 @@ public static class GameAssembly
         if (type == null) return null;
         try
         {
-            var prop = ResolveProperty(type, name, isStatic: true);
-            return prop?.GetValue(null);
+            Type? current = type;
+            while (current != null)
+            {
+                var prop = ResolveProperty(current, name, isStatic: true);
+                if (prop != null) return prop.GetValue(null);
+                current = current.BaseType;
+            }
+            return null;
         }
         catch (Exception ex)
         {
@@ -121,8 +115,14 @@ public static class GameAssembly
         if (instance == null) return null;
         try
         {
-            var prop = ResolveProperty(instance.GetType(), name, isStatic: false);
-            return prop?.GetValue(instance);
+            Type? current = instance.GetType();
+            while (current != null)
+            {
+                var prop = ResolveProperty(current, name, isStatic: false);
+                if (prop != null) return prop.GetValue(instance);
+                current = current.BaseType;
+            }
+            return null;
         }
         catch (Exception ex)
         {
@@ -131,18 +131,20 @@ public static class GameAssembly
         }
     }
 
-    /// <summary>
-    /// Reads an instance member that may be a property or a field (e.g. HostId).
-    /// Resolves silently against the cache; a single failure is logged, never thrown.
-    /// </summary>
     public static object? GetInstanceMember(object? instance, string name)
     {
         if (instance == null) return null;
         try
         {
-            var type = instance.GetType();
-            return ResolveProperty(type, name, isStatic: false)?.GetValue(instance)
-                ?? ResolveField(type, name, isStatic: false)?.GetValue(instance);
+            Type? current = instance.GetType();
+            while (current != null)
+            {
+                var val = ResolveProperty(current, name, isStatic: false)?.GetValue(instance)
+                       ?? ResolveField(current, name, isStatic: false)?.GetValue(instance);
+                if (val != null) return val;
+                current = current.BaseType;
+            }
+            return null;
         }
         catch (Exception ex)
         {
@@ -151,17 +153,20 @@ public static class GameAssembly
         }
     }
 
-    /// <summary>
-    /// Reads a static member that may be a property or a field (e.g. CurrentClient).
-    /// Resolves silently against the cache; a single failure is logged, never thrown.
-    /// </summary>
     public static object? GetStaticMember(Type? type, string name)
     {
         if (type == null) return null;
         try
         {
-            return ResolveProperty(type, name, isStatic: true)?.GetValue(null)
-                ?? ResolveField(type, name, isStatic: true)?.GetValue(null);
+            Type? current = type;
+            while (current != null)
+            {
+                var val = ResolveProperty(current, name, isStatic: true)?.GetValue(null)
+                       ?? ResolveField(current, name, isStatic: true)?.GetValue(null);
+                if (val != null) return val;
+                current = current.BaseType;
+            }
+            return null;
         }
         catch (Exception ex)
         {
@@ -175,21 +180,26 @@ public static class GameAssembly
         if (type == null) return null;
         try
         {
-            var flags = BindingFlags.Public | BindingFlags.Static;
+            var flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static;
             var key = argTypes != null
                 ? $"{type.FullName}::{name}({string.Join(",", argTypes.Select(t => t.Name))})"
                 : $"{type.FullName}::{name}()";
 
-            MethodInfo? method;
+            MethodInfo? method = null;
             if (MemberCache.TryGetValue(key, out var cached) && cached is MethodInfo m)
             {
                 method = m;
             }
             else
             {
-                method = argTypes != null
-                    ? type.GetMethod(name, flags, null, argTypes, null)
-                    : type.GetMethod(name, flags);
+                Type? current = type;
+                while (current != null && method == null)
+                {
+                    method = argTypes != null
+                        ? current.GetMethod(name, flags, null, argTypes, null)
+                        : current.GetMethod(name, flags);
+                    current = current.BaseType;
+                }
                 if (method != null)
                     MemberCache[key] = method;
             }
@@ -208,38 +218,45 @@ public static class GameAssembly
         try
         {
             var type = instance.GetType();
+            var flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
 
             if (argTypes != null)
             {
                 var key = $"{type.FullName}::{name}({string.Join(",", argTypes.Select(t => t.Name))})i";
-                MethodInfo? method;
+                MethodInfo? method = null;
                 if (MemberCache.TryGetValue(key, out var cached) && cached is MethodInfo m)
                 {
                     method = m;
                 }
                 else
                 {
-                    method = type.GetMethod(name, BindingFlags.Public | BindingFlags.Instance, null, argTypes, null);
+                    Type? current = type;
+                    while (current != null && method == null)
+                    {
+                        method = current.GetMethod(name, flags, null, argTypes, null);
+                        current = current.BaseType;
+                    }
                     if (method != null)
                         MemberCache[key] = method;
                 }
                 return method?.Invoke(instance, args);
             }
 
-            // Best-match fallback: resolve by name + parameter count + assignability.
-            // Needed when the exact parameter type (e.g. Il2CppSystem.Collections.IEnumerator)
-            // cannot be expressed with compile-time types.
-            var candidates = type.GetMethods(BindingFlags.Public | BindingFlags.Instance)
-                .Where(m => m.Name == name && m.GetParameters().Length == (args?.Length ?? 0))
-                .Where(m => ArgsMatch(m, args))
-                .ToList();
+            var candidates = new List<MethodInfo>();
+            Type? curr = type;
+            while (curr != null)
+            {
+                candidates.AddRange(curr.GetMethods(flags)
+                    .Where(m => m.Name == name && m.GetParameters().Length == (args?.Length ?? 0))
+                    .Where(m => ArgsMatch(m, args)));
+                curr = curr.BaseType;
+            }
+
             if (candidates.Count == 0)
             {
                 Log?.LogWarning($"[GameAssembly] No matching instance method {type.Name}.{name} for {args?.Length ?? 0} arg(s).");
                 return null;
             }
-            if (candidates.Count > 1)
-                Log?.LogWarning($"[GameAssembly] {type.Name}.{name} is ambiguous ({candidates.Count} matches); using first.");
             return candidates[0].Invoke(instance, args);
         }
         catch (Exception ex)
@@ -254,9 +271,15 @@ public static class GameAssembly
         if (instance == null) return false;
         try
         {
-            return instance.GetType()
-                .GetMethods(BindingFlags.Public | BindingFlags.Instance)
-                .Any(m => m.Name == name && m.GetParameters().Length == argCount);
+            Type? current = instance.GetType();
+            while (current != null)
+            {
+                if (current.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
+                    .Any(m => m.Name == name && m.GetParameters().Length == argCount))
+                    return true;
+                current = current.BaseType;
+            }
+            return false;
         }
         catch (Exception ex)
         {
@@ -280,7 +303,7 @@ public static class GameAssembly
                 }
                 else
                 {
-                    ctor = type.GetConstructor(BindingFlags.Public | BindingFlags.Instance, null, argTypes, null);
+                    ctor = type.GetConstructor(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, null, argTypes, null);
                     if (ctor != null)
                         MemberCache[key] = ctor;
                 }
@@ -333,10 +356,6 @@ public static class GameAssembly
 
     public static string ToStr(object? value) => value as string ?? "";
 
-    /// <summary>
-    /// True when the client is in a lobby: the lobby scene object exists, or the
-    /// client is connected (GameState == Joined) and in the online scene.
-    /// </summary>
     public static bool InLobby()
     {
         var lobbyBehaviour = Type("LobbyBehaviour");
@@ -355,20 +374,12 @@ public static class GameAssembly
         return ToBool(GetInstanceProp(client, "InOnlineScene"));
     }
 
-    /// <summary>Gets AmongUsClient.Instance (null-safe).</summary>
     public static object? AmongUsClient() => GetStaticProp(Type("AmongUsClient"), "Instance");
 
-    /// <summary>
-    /// The currently selected region's display name (e.g. "NA", "EU", "ASIA", or a
-    /// custom server label) via ServerManager.CurrentRegion.Name. Falls back to
-    /// "UNKNOWN" rather than throwing when reflection cannot resolve it.
-    /// </summary>
     public static string CurrentRegionName()
     {
         var serverManagerType = Type("ServerManager");
-        var serverManager = serverManagerType?.BaseType == null
-            ? null
-            : GetStaticProp(serverManagerType.BaseType, "Instance");
+        var serverManager = serverManagerType != null ? GetStaticProp(serverManagerType, "Instance") : null;
         if (serverManager == null)
             return "UNKNOWN";
 
@@ -380,55 +391,58 @@ public static class GameAssembly
         return string.IsNullOrEmpty(name) ? "UNKNOWN" : name;
     }
 
-    /// <summary>
-    /// The local player's display name via PlayerControl.LocalPlayer.Data.PlayerName.
-    /// Falls back to "UNKNOWN" rather than throwing when reflection cannot resolve it.
-    /// </summary>
     public static string LocalPlayerName()
     {
         var playerControlType = Type("PlayerControl");
         var localPlayer = GetStaticMember(playerControlType, "LocalPlayer");
         if (localPlayer == null)
+        {
+            FileLogger.Warn("[GameAssembly] LocalPlayerName: PlayerControl.LocalPlayer is null");
             return "UNKNOWN";
+        }
 
+        // Try Data.PlayerName (standard path)
         var data = GetInstanceProp(localPlayer, "Data");
         if (data != null)
         {
             var name = ToStr(GetInstanceProp(data, "PlayerName"));
-            if (!string.IsNullOrEmpty(name))
+            FileLogger.Info($"[GameAssembly] LocalPlayerName: Data.PlayerName='{name}'");
+            if (!string.IsNullOrEmpty(name) && name != "UNKNOWN")
                 return name;
         }
+        else
+        {
+            FileLogger.Warn("[GameAssembly] LocalPlayerName: Data is null");
+        }
 
+        // Try direct PlayerName property on PlayerControl
         var directName = ToStr(GetInstanceProp(localPlayer, "PlayerName"));
-        if (!string.IsNullOrEmpty(directName))
+        FileLogger.Info($"[GameAssembly] LocalPlayerName: direct PlayerName='{directName}'");
+        if (!string.IsNullOrEmpty(directName) && directName != "UNKNOWN")
             return directName;
 
-        try
+        // Try name property (Unity Object.name)
+        var unityName = ToStr(GetInstanceProp(localPlayer, "name"));
+        FileLogger.Info($"[GameAssembly] LocalPlayerName: name='{unityName}'");
+        if (!string.IsNullOrEmpty(unityName) && unityName != "UNKNOWN")
+            return unityName;
+
+        // Try AmongUsClient.GetPlayerName (alternative method)
+        var client = AmongUsClient();
+        if (client != null)
         {
-            var gameDataType = Type("GameData");
-            var gameDataInstance = GetStaticProp(gameDataType, "Instance");
-            if (gameDataInstance != null)
+            var methodName = HasInstanceMethod(client, "GetPlayerName", 0) ? "GetPlayerName" : null;
+            if (methodName != null)
             {
-                var allPlayers = GetInstanceProp(gameDataInstance, "AllPlayers");
-                if (allPlayers is System.Collections.IList list)
-                {
-                    var clientId = ToInt(GetStaticMember(Type("InnerNet.InnerNetClient"), "CurrentClient"));
-                    foreach (var playerInfo in list)
-                    {
-                        if (playerInfo == null) continue;
-                        var ownerId = ToInt(GetInstanceProp(playerInfo, "OwnerId"));
-                        if (ownerId == clientId)
-                        {
-                            var pname = ToStr(GetInstanceProp(playerInfo, "PlayerName"));
-                            if (!string.IsNullOrEmpty(pname))
-                                return pname;
-                        }
-                    }
-                }
+                var result = CallInstanceMethod(client, methodName);
+                var clientName = ToStr(result);
+                FileLogger.Info($"[GameAssembly] LocalPlayerName: client.GetPlayerName()='{clientName}'");
+                if (!string.IsNullOrEmpty(clientName) && clientName != "UNKNOWN")
+                    return clientName;
             }
         }
-        catch { }
 
+        FileLogger.Warn("[GameAssembly] LocalPlayerName: all attempts failed, returning UNKNOWN");
         return "UNKNOWN";
     }
 
@@ -438,7 +452,7 @@ public static class GameAssembly
         if (MemberCache.TryGetValue(key, out var cached) && cached is PropertyInfo prop)
             return prop;
 
-        var flags = BindingFlags.Public | (isStatic ? BindingFlags.Static : BindingFlags.Instance);
+        var flags = BindingFlags.Public | BindingFlags.NonPublic | (isStatic ? BindingFlags.Static : BindingFlags.Instance);
         var resolved = type.GetProperty(name, flags);
         if (resolved != null)
             MemberCache[key] = resolved;
@@ -451,7 +465,7 @@ public static class GameAssembly
         if (MemberCache.TryGetValue(key, out var cached) && cached is FieldInfo field)
             return field;
 
-        var flags = BindingFlags.Public | (isStatic ? BindingFlags.Static : BindingFlags.Instance);
+        var flags = BindingFlags.Public | BindingFlags.NonPublic | (isStatic ? BindingFlags.Static : BindingFlags.Instance);
         var resolved = type.GetField(name, flags);
         if (resolved != null)
             MemberCache[key] = resolved;
@@ -475,6 +489,51 @@ public static class GameAssembly
                 return false;
         }
         return true;
+    }
+
+    public static List<string> GetAllPlayerNames()
+    {
+        var names = new List<string>();
+        try
+        {
+            var gameDataType = Type("GameData");
+            var gameDataInstance = GetStaticProp(gameDataType, "Instance");
+            if (gameDataInstance == null)
+            {
+                FileLogger.Warn("[GameAssembly] GetAllPlayerNames: GameData.Instance is null");
+                return names;
+            }
+
+            var allPlayers = GetInstanceProp(gameDataInstance, "AllPlayers");
+            if (allPlayers == null)
+            {
+                FileLogger.Warn("[GameAssembly] GetAllPlayerNames: AllPlayers is null");
+                return names;
+            }
+
+            // AllPlayers is Il2CppSystem.Collections.Generic.List<PlayerInfo>
+            var countObj = GetInstanceProp(allPlayers, "Count");
+            var count = ToInt(countObj);
+            FileLogger.Info($"[GameAssembly] GetAllPlayerNames: AllPlayers.Count={count}");
+
+            for (int i = 0; i < count; i++)
+            {
+                var playerInfo = CallInstanceMethod(allPlayers, "get_Item", new object[] { i }, new[] { typeof(int) });
+                if (playerInfo == null) continue;
+
+                var playerName = ToStr(GetInstanceProp(playerInfo, "PlayerName"));
+                if (!string.IsNullOrEmpty(playerName))
+                {
+                    names.Add(playerName);
+                    FileLogger.Info($"[GameAssembly] GetAllPlayerNames: player[{i}]='{playerName}'");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            FileLogger.Error($"[GameAssembly] GetAllPlayerNames failed: {ex.Message}");
+        }
+        return names;
     }
 
     private static Assembly? GetAssembly()

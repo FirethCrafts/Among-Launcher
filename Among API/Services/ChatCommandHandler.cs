@@ -107,10 +107,9 @@ public class ChatCommandHandler : IDisposable
         if (!handled)
             return;
 
-        // Do NOT call TryClearInput — FreeChatInputField.Clear() is a Unity
-        // API call that crashes with 0xC0000005 when invoked from a background
-        // thread. The command text stays in the input but starts with "/" so
-        // the game won't send it as a normal chat message.
+        // Clear the chat input on the Unity main thread to prevent the
+        // command from being sent as a normal chat message.
+        MainThreadDispatcher.Enqueue(() => TryClearInput());
         _lastHandledText = text;
     }
 

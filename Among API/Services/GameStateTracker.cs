@@ -1,6 +1,6 @@
 namespace AmongApi.Services;
 
-public record LobbyInfo(string Code, string Region, string RegionIp, int RegionPort, string Host, int PlayerCount, int MaxPlayers = 15);
+public record LobbyInfo(string Code, string Region, string RegionIp, int RegionPort, string Host, int PlayerCount, int MaxPlayers = 15, List<string>? PlayerNames = null);
 public record PlayerInfo(string PlayerName, int PlayerCount);
 
 /// <summary>
@@ -104,12 +104,14 @@ public class GameStateTracker : IDisposable
                     var region = "UNKNOWN";
                     var host = "UNKNOWN";
                     int maxPlayers = 15;
+                    List<string>? playerNames = null;
                     try { region = GameAssembly.CurrentRegionName(); } catch { }
                     try { host = GameAssembly.LocalPlayerName(); } catch { }
                     try { maxPlayers = MaxPlayers(); } catch { }
-                    _log.LogInfo($"[GameStateTracker] Lobby created (code {code}, region {region}, host {host}, players {count}, maxPlayers {maxPlayers}).");
+                    try { playerNames = GameAssembly.GetAllPlayerNames(); } catch { }
+                    _log.LogInfo($"[GameStateTracker] Lobby created (code {code}, region {region}, host {host}, players {count}, maxPlayers {maxPlayers}, playerNames [{string.Join(", ", playerNames ?? new())}]).");
                     _lastPlayerCount = count >= 0 ? count : -1;
-                    LobbyCreated?.Invoke(this, new LobbyInfo(code, region, "", 0, host, count, maxPlayers));
+                    LobbyCreated?.Invoke(this, new LobbyInfo(code, region, "", 0, host, count, maxPlayers, playerNames));
                 }
                 else
                 {
@@ -236,22 +238,54 @@ public class GameStateTracker : IDisposable
     {
         var client = GameAssembly.AmongUsClient();
         if (client == null)
+        {
+            FileLogger.Warn("[GameStateTracker] MaxPlayers: AmongUsClient is null");
             return 15;
+        }
 
+        // Try GameHostOpts (host-only property in some versions)
         var gameOptions = GameAssembly.GetInstanceProp(client, "GameHostOpts");
         if (gameOptions != null)
         {
             var max = GameAssembly.ToInt(GameAssembly.GetInstanceProp(gameOptions, "MaxPlayers"));
+            FileLogger.Info($"[GameStateTracker] MaxPlayers: GameHostOpts.MaxPlayers={max}");
             if (max > 0) return max;
         }
 
+        // Try NormalOptions (common property name)
         var normalOptions = GameAssembly.GetInstanceProp(client, "NormalOptions");
         if (normalOptions != null)
         {
             var max = GameAssembly.ToInt(GameAssembly.GetInstanceProp(normalOptions, "MaxPlayers"));
+            FileLogger.Info($"[GameStateTracker] MaxPlayers: NormalOptions.MaxPlayers={max}");
             if (max > 0) return max;
         }
 
+        // Try GameOptions on PlayerControl (alternative path)
+        var playerControlType = GameAssembly.Type("PlayerControl");
+        var localPlayer = GameAssembly.GetStaticMember(playerControlType, "LocalPlayer");
+        if (localPlayer != null)
+        {
+            var gameOptions2 = GameAssembly.GetInstanceProp(localPlayer, "GameOptions");
+            if (gameOptions2 != null)
+            {
+                var max = GameAssembly.ToInt(GameAssembly.GetInstanceProp(gameOptions2, "MaxPlayers"));
+                FileLogger.Info($"[GameStateTracker] MaxPlayers: PlayerControl.GameOptions.MaxPlayers={max}");
+                if (max > 0) return max;
+            }
+        }
+
+        // Try GameData.Instance.MaxPlayers (fallback)
+        var gameDataType = GameAssembly.Type("GameData");
+        var gameDataInstance = GameAssembly.GetStaticProp(gameDataType, "Instance");
+        if (gameDataInstance != null)
+        {
+            var max = GameAssembly.ToInt(GameAssembly.GetInstanceProp(gameDataInstance, "MaxPlayers"));
+            FileLogger.Info($"[GameStateTracker] MaxPlayers: GameData.Instance.MaxPlayers={max}");
+            if (max > 0) return max;
+        }
+
+        FileLogger.Warn("[GameStateTracker] MaxPlayers: all attempts failed, returning default 15");
         return 15;
     }
 }

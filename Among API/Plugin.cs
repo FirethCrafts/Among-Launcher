@@ -1,4 +1,5 @@
 using System.Net.Http;
+using System.Security.Cryptography;
 using System.Text.Json;
 
 namespace AmongApi;
@@ -19,6 +20,9 @@ public class Plugin : BasePlugin
         FileLogger.Init();
         FileLogger.Info($"Plugin v{MyPluginInfo.PLUGIN_VERSION} loading...");
         Log.LogInfo($"[{MyPluginInfo.PLUGIN_NAME}] Loading...");
+
+        // Capture context immediately on main thread during plugin load
+        MainThreadDispatcher.CaptureContext();
 
         ParseLaunchArgs();
 
@@ -80,13 +84,9 @@ public class Plugin : BasePlugin
             Thread.Sleep(30000);
             FileLogger.Info("Done waiting.");
 
-            // Capture Unity's SynchronizationContext for main-thread dispatch
-            MainThreadDispatcher.CaptureContext();
-
             await pipe.SendMessageAsync("game_ready");
             FileLogger.Info("Game ready signal sent to launcher.");
 
-            // Listen for server_url from launcher if not set via args
             pipe.RegisterHandler("set_server_url", element =>
             {
                 var p = element.GetProperty("payload");
@@ -98,12 +98,11 @@ public class Plugin : BasePlugin
                 return Task.FromResult<object?>(null);
             });
 
-            // Report lobby / player state transitions to the launcher
             var tracker = new GameStateTracker(Log);
             tracker.LobbyCreated += (_, info) =>
             {
                 _lastLobby = info;
-                FileLogger.Info($"Lobby created: {info.Code} (region {info.Region}, host {info.Host})");
+                FileLogger.Info($"Lobby created: {info.Code} (region {info.Region}, host {info.Host}, players: [{string.Join(", ", info.PlayerNames ?? new())}])");
                 _ = pipe.SendMessageAsync("lobby_created",
                     new
                     {
@@ -113,12 +112,13 @@ public class Plugin : BasePlugin
                         regionPort = info.RegionPort,
                         host = info.Host,
                         playerCount = info.PlayerCount,
-                        maxPlayers = info.MaxPlayers
+                        maxPlayers = info.MaxPlayers,
+                        playerNames = info.PlayerNames ?? new List<string>()
                     });
 
                 if (_autoPost && !string.IsNullOrEmpty(_serverUrl))
                 {
-                    FileLogger.Info("Auto-post: dispatching lobby POST to main thread...");
+                    FileLogger.Info("Auto-post: dispatching lobby POST to background thread...");
                     _ = Task.Run(async () =>
                     {
                         try
@@ -151,7 +151,6 @@ public class Plugin : BasePlugin
             };
             tracker.Start();
 
-            // In-game direct lobby join
             var joiner = new LobbyJoiner(Log);
             pipe.Disconnected += (_, _) => joiner.Dispose();
 
@@ -168,7 +167,6 @@ public class Plugin : BasePlugin
 
                     FileLogger.Info($"join_lobby received: code={code}, region={region}, regionIp={regionIp}, regionPort={regionPort}");
 
-                    // Dispatch join to main thread via SynchronizationContext
                     result = await joiner.JoinAsync(code, region, regionIp, regionPort);
                 }
                 catch (Exception ex)
@@ -182,18 +180,44 @@ public class Plugin : BasePlugin
                 return new { success = result.Success, error = result.Error };
             });
 
-            // Chat commands: /repost, /disband, /postlobby
             var commands = new ChatCommandHandler(Log);
-            commands.OnRepost = () => _ = pipe.SendMessageAsync("lobby_created",
-                new
+            commands.OnRepost = () =>
+            {
+                _ = pipe.SendMessageAsync("lobby_created",
+                    new
+                    {
+                        code = _lastLobby?.Code ?? "",
+                        region = _lastLobby?.Region ?? "",
+                        regionIp = _lastLobby?.RegionIp ?? "",
+                        regionPort = _lastLobby?.RegionPort ?? 0,
+                        host = _lastLobby?.Host ?? "",
+                        playerCount = _lastLobby?.PlayerCount ?? 0,
+                        maxPlayers = _lastLobby?.MaxPlayers ?? 15,
+                        playerNames = _lastLobby?.PlayerNames ?? new List<string>()
+                    });
+
+                if (_lastLobby != null && !string.IsNullOrEmpty(_serverUrl))
                 {
-                    code = _lastLobby?.Code ?? "",
-                    region = _lastLobby?.Region ?? "",
-                    regionIp = _lastLobby?.RegionIp ?? "",
-                    regionPort = _lastLobby?.RegionPort ?? 0,
-                    host = _lastLobby?.Host ?? "",
-                    playerCount = _lastLobby?.PlayerCount ?? 0
-                });
+                    FileLogger.Info("/repost: dispatching POST to backend...");
+                    var lobby = _lastLobby;
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+                            await PostLobbyToBackend(lobby, cts.Token);
+                        }
+                        catch (Exception ex)
+                        {
+                            FileLogger.Error($"/repost background task failed: {ex.GetType().Name}: {ex.Message}");
+                        }
+                    });
+                }
+                else
+                {
+                    FileLogger.Warn("/repost: no active lobby or server URL not set.");
+                }
+            };
             commands.OnDisband = () =>
             {
                 _ = pipe.SendMessageAsync("lobby_closed", new { code = _lastLobby?.Code ?? "", reason = "disband" });
@@ -261,13 +285,16 @@ public class Plugin : BasePlugin
             ? lobby.Host
             : "Host";
 
+        var activeMods = GetInstalledMods();
+        var modType = activeMods.Count > 0 ? "modded" : "vanilla";
+
         var body = new
         {
             code = lobby.Code,
             region = lobby.Region,
             host = hostName,
-            mod_type = "modded",
-            mods = new object[] { },
+            mod_type = modType,
+            mods = activeMods,
             max_players = lobby.MaxPlayers
         };
 
@@ -277,6 +304,63 @@ public class Plugin : BasePlugin
         using var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
         using var response = await _http.PostAsync(url, content, ct);
         FileLogger.Info($"PostLobby: response {(int)response.StatusCode} {response.ReasonPhrase}");
+    }
+
+    private static List<object> GetInstalledMods()
+    {
+        var mods = new List<object>();
+        try
+        {
+            var pluginsDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "BepInEx", "plugins");
+            if (!Directory.Exists(pluginsDir))
+                pluginsDir = Path.Combine(Directory.GetCurrentDirectory(), "BepInEx", "plugins");
+
+            if (Directory.Exists(pluginsDir))
+            {
+                var excluded = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    "AmongApi.dll", "0Harmony.dll", "AsmResolver.dll",
+                    "BepInEx.Core.dll", "BepInEx.Preloader.Core.dll",
+                    "BepInEx.Unity.Common.dll", "BepInEx.Unity.IL2CPP.dll"
+                };
+
+                foreach (var file in Directory.GetFiles(pluginsDir, "*.dll", SearchOption.AllDirectories))
+                {
+                    var fileName = Path.GetFileName(file);
+                    if (excluded.Contains(fileName)) continue;
+
+                    var hash = ComputeSha256(file);
+                    var version = System.Diagnostics.FileVersionInfo.GetVersionInfo(file).FileVersion ?? "";
+
+                    mods.Add(new
+                    {
+                        name = fileName,
+                        version = version,
+                        file_hash = hash
+                    });
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            FileLogger.Error($"GetInstalledMods failed: {ex.Message}");
+        }
+        return mods;
+    }
+
+    private static string ComputeSha256(string filePath)
+    {
+        try
+        {
+            using var sha = SHA256.Create();
+            using var stream = File.OpenRead(filePath);
+            var bytes = sha.ComputeHash(stream);
+            return BitConverter.ToString(bytes).Replace("-", "").ToLowerInvariant();
+        }
+        catch
+        {
+            return "";
+        }
     }
 
     private static void LeaveLobby()

@@ -4,10 +4,6 @@ namespace AmongApi.Services;
 
 public record JoinResult(bool Success, string? Error);
 
-/// <summary>
-/// Joins a lobby using pure reflection - no IL2CPP compile-time types needed.
-/// Waits for the game to be fully loaded before attempting join.
-/// </summary>
 public class LobbyJoiner : IDisposable
 {
     private const int JoinConfirmTimeoutMs = 45_000;
@@ -101,7 +97,6 @@ public class LobbyJoiner : IDisposable
 
     private async Task<JoinResult> ProcessJoinAsync(JoinRequest request, CancellationToken ct)
     {
-        // Wait for game to be fully loaded before dispatching join
         FileLogger.Info("[LobbyJoiner] Waiting for game to be ready...");
         if (!await WaitForGameReady(ct))
         {
@@ -122,7 +117,6 @@ public class LobbyJoiner : IDisposable
         if (!startResult.Success)
             return startResult;
 
-        // Poll for lobby
         FileLogger.Info("[LobbyJoiner] Waiting for lobby...");
         var deadline = DateTimeOffset.UtcNow.AddMilliseconds(JoinConfirmTimeoutMs);
         while (DateTimeOffset.UtcNow < deadline && !ct.IsCancellationRequested)
@@ -140,9 +134,6 @@ public class LobbyJoiner : IDisposable
         return new JoinResult(false, "Join timed out");
     }
 
-    /// <summary>
-    /// Waits until the game has AmongUsClient and is not in a loading/connecting state.
-    /// </summary>
     private async Task<bool> WaitForGameReady(CancellationToken ct)
     {
         var deadline = DateTimeOffset.UtcNow.AddMilliseconds(GameReadyWaitMs);
@@ -153,7 +144,6 @@ public class LobbyJoiner : IDisposable
             var client = GameAssembly.AmongUsClient();
             if (client == null) continue;
 
-            // Check GameState - we want it to be "NotJoined" or in a state where we can join
             try
             {
                 var gameStateEnum = GameAssembly.Type("InnerNet.InnerNetClient")?.GetNestedType("GameStates");
@@ -165,21 +155,18 @@ public class LobbyJoiner : IDisposable
                 var notJoined = GameAssembly.EnumValue(gameStateEnum, "NotJoined");
                 var joined = GameAssembly.EnumValue(gameStateEnum, "Joined");
 
-                // If already in a lobby, that's fine
                 if (GameAssembly.EnumEquals(state, joined) && GameAssembly.InLobby())
                 {
                     FileLogger.Info("[LobbyJoiner] Game ready: already in lobby");
                     return true;
                 }
 
-                // If at main menu, we can join
                 if (GameAssembly.EnumEquals(state, notJoined))
                 {
                     FileLogger.Info("[LobbyJoiner] Game ready: at main menu (NotJoined)");
                     return true;
                 }
 
-                // Otherwise keep waiting (connecting, loading, etc.)
                 FileLogger.Info($"[LobbyJoiner] Game state: {state}, waiting...");
             }
             catch (Exception ex)
@@ -196,7 +183,6 @@ public class LobbyJoiner : IDisposable
     {
         FileLogger.Info($"[LobbyJoiner] ExecuteJoin: code={request.Code} region={request.Region} ip={request.RegionIp}:{request.RegionPort}");
 
-        // Leave current lobby if in one
         if (GameAssembly.InLobby())
         {
             FileLogger.Info("[LobbyJoiner] In lobby, leaving...");
@@ -204,13 +190,12 @@ public class LobbyJoiner : IDisposable
             Thread.Sleep(1500);
         }
 
-        // Set region if provided
-        if (!string.IsNullOrEmpty(request.RegionIp) || !string.IsNullOrEmpty(request.Region))
+        var regionSet = SetRegion(request);
+        if (!regionSet)
         {
-            SetRegion(request);
+            FileLogger.Warn($"[LobbyJoiner] Region could not be set (region='{request.Region}', regionIp='{request.RegionIp}'); join may fail or connect to wrong server");
         }
 
-        // Decode code
         var gameId = DecodeCode(request.Code);
         if (gameId == 0)
         {
@@ -219,7 +204,6 @@ public class LobbyJoiner : IDisposable
         }
         FileLogger.Info($"[LobbyJoiner] Decoded {request.Code} -> {gameId}");
 
-        // Get client
         var client = GameAssembly.AmongUsClient();
         if (client == null)
         {
@@ -227,80 +211,78 @@ public class LobbyJoiner : IDisposable
             return new JoinResult(false, "AmongUsClient unavailable");
         }
 
-        // Try to join using reflection only
         return TryJoinViaReflection(client, gameId, request.Code);
     }
 
     private JoinResult TryJoinViaReflection(object client, int gameId, string code)
     {
-        var clientType = GameAssembly.Type("AmongUsClient");
-        FileLogger.Info($"[LobbyJoiner] AmongUsClient type: {clientType?.FullName ?? "null"}");
+        var clientType = client.GetType();
+        FileLogger.Info($"[LobbyJoiner] AmongUsClient type: {clientType.FullName}");
 
-        if (clientType == null)
-        {
-            return new JoinResult(false, "AmongUsClient type not found");
-        }
-
-        // Log all methods
         var allMethods = clientType.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static);
         var methodNames = allMethods.Where(m => !m.IsSpecialName && !m.Name.StartsWith("get_") && !m.Name.StartsWith("set_"))
             .Select(m => $"{m.Name}({string.Join(",", m.GetParameters().Select(p => p.ParameterType.Name))})");
-        FileLogger.Info($"[LobbyJoiner] Methods: {string.Join(" | ", methodNames)}");
+        FileLogger.Info($"[LobbyJoiner] Available methods: {string.Join(" | ", methodNames)}");
 
-        // Try each join method using GameAssembly.CallInstanceMethod which handles IL2CPP type marshalling
-        string[] joinMethods = { "CoJoinOnlineGameFromCode", "JoinGame", "CoJoinOnline", "JoinOnlineGame", "StartGame" };
-
-        foreach (var methodName in joinMethods)
+        // 1. Try CoJoinOnlineGameFromCode
+        var coJoin = allMethods.FirstOrDefault(m => m.Name == "CoJoinOnlineGameFromCode");
+        if (coJoin != null)
         {
-            if (!allMethods.Any(m => m.Name == methodName)) continue;
-
-            FileLogger.Info($"[LobbyJoiner] Trying {methodName}...");
-
-            // Try CoJoinOnlineGameFromCode(int, bool)
-            if (methodName == "CoJoinOnlineGameFromCode")
+            try
             {
-                try
+                var pCount = coJoin.GetParameters().Length;
+                FileLogger.Info($"[LobbyJoiner] Calling CoJoinOnlineGameFromCode ({pCount} params)...");
+
+                object? result = pCount switch
                 {
-                    var result = GameAssembly.CallInstanceMethod(client, methodName, new object[] { gameId, false },
-                        new[] { typeof(int), typeof(bool) });
-                    FileLogger.Info($"[LobbyJoiner] {methodName} returned: {result}");
-                    if (result != null) return StartCoroutine(client, clientType, result);
-                }
-                catch (Exception ex) { FileLogger.Warn($"[LobbyJoiner] {methodName} failed: {ex.Message}"); }
+                    2 => coJoin.Invoke(client, new object[] { gameId, false }),
+                    1 => coJoin.Invoke(client, new object[] { gameId }),
+                    _ => null
+                };
+
+                if (result != null)
+                    return StartCoroutine(client, clientType, result);
             }
-
-            // Try JoinGame(string)
-            if (methodName == "JoinGame")
+            catch (Exception ex)
             {
-                try
-                {
-                    var result = GameAssembly.CallInstanceMethod(client, methodName, new object[] { code },
-                        new[] { typeof(string) });
-                    FileLogger.Info($"[LobbyJoiner] JoinGame(string) returned: {result}");
-                    if (result != null) return StartCoroutine(client, clientType, result);
-                }
-                catch (Exception ex) { FileLogger.Warn($"[LobbyJoiner] JoinGame(string) failed: {ex.Message}"); }
-
-                try
-                {
-                    var result = GameAssembly.CallInstanceMethod(client, methodName, new object[] { gameId },
-                        new[] { typeof(int) });
-                    FileLogger.Info($"[LobbyJoiner] JoinGame(int) returned: {result}");
-                    if (result != null) return StartCoroutine(client, clientType, result);
-                }
-                catch (Exception ex) { FileLogger.Warn($"[LobbyJoiner] JoinGame(int) failed: {ex.Message}"); }
+                FileLogger.Warn($"[LobbyJoiner] CoJoinOnlineGameFromCode failed: {ex.Message}");
             }
+        }
 
-            // Try other methods with no args
-            if (methodName != "CoJoinOnlineGameFromCode" && methodName != "JoinGame")
+        // 2. Try ConnectToGame
+        var connectToGame = allMethods.FirstOrDefault(m => m.Name == "ConnectToGame");
+        if (connectToGame != null)
+        {
+            try
             {
-                try
+                FileLogger.Info("[LobbyJoiner] Calling ConnectToGame...");
+                var result = connectToGame.Invoke(client, new object[] { gameId });
+                if (result != null) return StartCoroutine(client, clientType, result);
+            }
+            catch (Exception ex)
+            {
+                FileLogger.Warn($"[LobbyJoiner] ConnectToGame failed: {ex.Message}");
+            }
+        }
+
+        // 3. Try JoinGame
+        var joinGameMethods = allMethods.Where(m => m.Name == "JoinGame").ToList();
+        foreach (var m in joinGameMethods)
+        {
+            try
+            {
+                var paramsInfo = m.GetParameters();
+                if (paramsInfo.Length == 1)
                 {
-                    var result = GameAssembly.CallInstanceMethod(client, methodName);
-                    FileLogger.Info($"[LobbyJoiner] {methodName} returned: {result}");
+                    object arg = paramsInfo[0].ParameterType == typeof(string) ? code : gameId;
+                    FileLogger.Info($"[LobbyJoiner] Calling JoinGame({arg})...");
+                    var result = m.Invoke(client, new[] { arg });
                     if (result != null) return StartCoroutine(client, clientType, result);
                 }
-                catch (Exception ex) { FileLogger.Warn($"[LobbyJoiner] {methodName} failed: {ex.Message}"); }
+            }
+            catch (Exception ex)
+            {
+                FileLogger.Warn($"[LobbyJoiner] JoinGame failed: {ex.Message}");
             }
         }
 
@@ -312,17 +294,30 @@ public class LobbyJoiner : IDisposable
     {
         try
         {
-            // Search entire inheritance chain for StartCoroutine
+            if (enumerator == null)
+            {
+                FileLogger.Warn("[LobbyJoiner] StartCoroutine received null enumerator");
+                return new JoinResult(false, "Enumerator was null");
+            }
+
+            FileLogger.Info($"[LobbyJoiner] Invoking StartCoroutine with enumerator type: {enumerator.GetType().FullName}");
+
             Type? current = clientType;
             MethodInfo? startMethod = null;
+
             while (current != null && startMethod == null)
             {
-                startMethod = current.GetMethod("StartCoroutine",
-                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance,
-                    null, new[] { typeof(IEnumerator) }, null);
-                if (startMethod != null)
+                var methods = current.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
+                    .Where(m => m.Name == "StartCoroutine" && m.GetParameters().Length == 1)
+                    .ToList();
+
+                if (methods.Count > 0)
                 {
-                    FileLogger.Info($"[LobbyJoiner] Found StartCoroutine on {current.Name}");
+                    startMethod = methods.FirstOrDefault(m => m.GetParameters()[0].ParameterType.IsInstanceOfType(enumerator))
+                        ?? methods.FirstOrDefault(m => m.GetParameters()[0].ParameterType.Name.Contains("IEnumerator"))
+                        ?? methods[0];
+
+                    FileLogger.Info($"[LobbyJoiner] Found StartCoroutine on {current.Name}: {startMethod}");
                     break;
                 }
                 current = current.BaseType;
@@ -330,26 +325,12 @@ public class LobbyJoiner : IDisposable
 
             if (startMethod == null)
             {
-                // Also try the Il2Cpp MonoBehaviour type
-                var monoBehaviourType = GameAssembly.Type("UnityEngine.MonoBehaviour");
-                if (monoBehaviourType != null)
-                {
-                    startMethod = monoBehaviourType.GetMethod("StartCoroutine",
-                        BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance,
-                        null, new[] { typeof(IEnumerator) }, null);
-                    if (startMethod != null)
-                        FileLogger.Info($"[LobbyJoiner] Found StartCoroutine on MonoBehaviour");
-                }
-            }
-
-            if (startMethod == null)
-            {
-                FileLogger.Warn("[LobbyJoiner] StartCoroutine not found anywhere in hierarchy");
+                FileLogger.Warn("[LobbyJoiner] StartCoroutine not found in hierarchy");
                 return new JoinResult(false, "StartCoroutine not found");
             }
 
-            var coroutine = startMethod.Invoke(client, new object[] { enumerator });
-            FileLogger.Info($"[LobbyJoiner] StartCoroutine succeeded: {coroutine != null}");
+            var coroutine = startMethod.Invoke(client, new[] { enumerator });
+            FileLogger.Info($"[LobbyJoiner] StartCoroutine invoked successfully (result: {coroutine != null})");
             return new JoinResult(true, null);
         }
         catch (Exception ex)
@@ -357,19 +338,6 @@ public class LobbyJoiner : IDisposable
             FileLogger.Warn($"[LobbyJoiner] StartCoroutine failed: {ex.Message}");
             return new JoinResult(false, $"StartCoroutine failed: {ex.Message}");
         }
-    }
-
-    private static MethodInfo? FindMethod(Type type, string name, Type paramType)
-    {
-        var current = type;
-        while (current != null)
-        {
-            var method = current.GetMethod(name, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance,
-                null, new[] { paramType }, null);
-            if (method != null) return method;
-            current = current.BaseType;
-        }
-        return null;
     }
 
     private void LeaveLobby()
@@ -393,90 +361,126 @@ public class LobbyJoiner : IDisposable
         }
     }
 
-    private void SetRegion(JoinRequest request)
+    private bool SetRegion(JoinRequest request)
     {
         try
         {
             var serverManagerType = GameAssembly.Type("ServerManager");
-            if (serverManagerType?.BaseType == null) return;
+            if (serverManagerType == null) return false;
 
-            var serverManager = GameAssembly.GetStaticProp(serverManagerType.BaseType, "Instance");
+            var serverManager = GameAssembly.GetStaticProp(serverManagerType, "Instance");
             if (serverManager == null)
             {
                 FileLogger.Warn("[LobbyJoiner] ServerManager unavailable");
-                return;
+                return false;
             }
 
+            var regionName = !string.IsNullOrEmpty(request.Region) ? request.Region : request.RegionIp;
+            if (string.IsNullOrEmpty(regionName))
+            {
+                FileLogger.Warn("[LobbyJoiner] No region name or IP provided");
+                return false;
+            }
+
+            FileLogger.Info($"[LobbyJoiner] Checking built-in regions for: '{regionName}'");
+
+            // 1. Check existing regions on ServerManager.Instance.AvailableRegions
+            var availableRegions = GameAssembly.GetInstanceProp(serverManager, "AvailableRegions");
+            if (availableRegions is System.Collections.IEnumerable regionList)
+            {
+                foreach (var reg in regionList)
+                {
+                    if (reg == null) continue;
+                    var name = GameAssembly.ToStr(GameAssembly.GetInstanceProp(reg, "Name"));
+
+                    if (MatchesRegion(regionName, name))
+                    {
+                        FileLogger.Info($"[LobbyJoiner] Matched built-in region: '{name}'");
+                        GameAssembly.CallInstanceMethod(serverManager, "SetRegion", new object?[] { reg });
+                        FileLogger.Info("[LobbyJoiner] Region set successfully via built-in match");
+                        return true;
+                    }
+                }
+            }
+            else
+            {
+                FileLogger.Warn("[LobbyJoiner] AvailableRegions is null or not enumerable");
+            }
+
+            // 2. Custom region creation fallback
             var regionIp = request.RegionIp;
+            if (string.IsNullOrEmpty(regionIp))
+            {
+                FileLogger.Warn($"[LobbyJoiner] Region '{regionName}' not found in built-in regions and no RegionIp provided for custom region");
+                return false;
+            }
+
             var regionPort = request.RegionPort > 0 ? request.RegionPort : 443;
-            var regionName = request.Region.Length > 0 ? request.Region : regionIp;
-
-            if (string.IsNullOrEmpty(regionIp)) return;
-
-            if (!regionIp.StartsWith("http"))
+            if (!regionIp.StartsWith("http", StringComparison.OrdinalIgnoreCase))
                 regionIp = "https://" + regionIp;
 
-            FileLogger.Info($"[LobbyJoiner] Setting region: {regionName} @ {regionIp}:{regionPort}");
+            FileLogger.Info($"[LobbyJoiner] Creating custom region: {regionName} @ {regionIp}:{regionPort}");
 
             var serverInfoType = GameAssembly.Type("ServerInfo");
             if (serverInfoType == null)
             {
                 FileLogger.Warn("[LobbyJoiner] ServerInfo type not found");
-                return;
+                return false;
             }
 
             var serverInfo = GameAssembly.CreateInstance(serverInfoType,
                 new object?[] { "Http-1", regionIp, (ushort)regionPort, false });
             if (serverInfo == null)
             {
-                FileLogger.Warn("[LobbyJoiner] Failed to create ServerInfo");
-                return;
-            }
-
-            var arrayType = GameAssembly.GenericType("Il2CppReferenceArray`1", serverInfoType);
-            var plainArray = Array.CreateInstance(serverInfoType, 1);
-            plainArray.SetValue(serverInfo, 0);
-            var servers = GameAssembly.CreateInstance(arrayType, new object?[] { plainArray });
-            if (servers == null)
-            {
-                FileLogger.Warn("[LobbyJoiner] Failed to create server array");
-                return;
+                FileLogger.Warn("[LobbyJoiner] Failed to create ServerInfo instance");
+                return false;
             }
 
             var staticHttpType = GameAssembly.Type("StaticHttpRegionInfo");
+            if (staticHttpType == null)
+            {
+                FileLogger.Warn("[LobbyJoiner] StaticHttpRegionInfo type not found");
+                return false;
+            }
+
             var noTranslation = GameAssembly.EnumValue(GameAssembly.Type("StringNames"), "NoTranslation");
             var regionObj = GameAssembly.CreateInstance(staticHttpType,
-                new object?[] { regionName, noTranslation, regionIp, servers, null });
-            if (regionObj == null)
+                new object?[] { regionName, noTranslation, regionIp, new[] { serverInfo }, null })
+                ?? GameAssembly.CreateInstance(staticHttpType, new object?[] { regionName, noTranslation, regionIp });
+
+            if (regionObj != null)
             {
-                FileLogger.Warn("[LobbyJoiner] Failed to create region info");
-                return;
+                GameAssembly.CallInstanceMethod(serverManager, "AddOrUpdateRegion", new object?[] { regionObj });
+                GameAssembly.CallInstanceMethod(serverManager, "SetRegion", new object?[] { regionObj });
+                FileLogger.Info("[LobbyJoiner] Custom region set successfully");
+                return true;
             }
 
-            var regionInfoType = GameAssembly.Type("IRegionInfo");
-            var pointer = GameAssembly.GetInstanceProp(regionObj, "Pointer");
-            if (pointer is not IntPtr nativePtr)
-            {
-                FileLogger.Warn("[LobbyJoiner] Failed to get region pointer");
-                return;
-            }
-
-            var regionAsInfo = GameAssembly.CreateInstance(regionInfoType, new object?[] { nativePtr });
-            if (regionAsInfo == null)
-            {
-                FileLogger.Warn("[LobbyJoiner] Failed to wrap as IRegionInfo");
-                return;
-            }
-
-            GameAssembly.CallInstanceMethod(serverManager, "AddOrUpdateRegion", new object?[] { regionAsInfo });
-            GameAssembly.CallInstanceMethod(serverManager, "SetRegion", new object?[] { regionAsInfo });
-
-            FileLogger.Info("[LobbyJoiner] Region set successfully");
+            FileLogger.Warn("[LobbyJoiner] Failed to create custom region object");
+            return false;
         }
         catch (Exception ex)
         {
             FileLogger.Warn($"[LobbyJoiner] SetRegion failed: {ex.Message}");
+            return false;
         }
+    }
+
+    private static bool MatchesRegion(string requested, string actual)
+    {
+        if (string.Equals(actual, requested, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        var req = requested.ToUpperInvariant();
+        return req switch
+        {
+            "NA" => actual.StartsWith("North", StringComparison.OrdinalIgnoreCase),
+            "EU" => actual.StartsWith("Europe", StringComparison.OrdinalIgnoreCase),
+            "ASIA" => actual.StartsWith("Asia", StringComparison.OrdinalIgnoreCase),
+            "OCE" or "OCEANIA" or "AUSTRALIA" => actual.StartsWith("Australia", StringComparison.OrdinalIgnoreCase),
+            "SA" => actual.StartsWith("South America", StringComparison.OrdinalIgnoreCase),
+            _ => req.Replace(" ", "").Equals(actual.Replace(" ", ""), StringComparison.OrdinalIgnoreCase)
+        };
     }
 
     private int DecodeCode(string code)
@@ -484,9 +488,19 @@ public class LobbyJoiner : IDisposable
         try
         {
             var gameCodeType = GameAssembly.Type("InnerNet.GameCode");
+            if (gameCodeType == null)
+            {
+                FileLogger.Error($"[LobbyJoiner] InnerNet.GameCode type not found - cannot decode code '{code}'");
+                return 0;
+            }
             var result = GameAssembly.CallStaticMethod(gameCodeType, "GameNameToInt",
                 new object?[] { code }, new[] { typeof(string) });
-            return result != null ? GameAssembly.ToInt(result) : 0;
+            if (result == null)
+            {
+                FileLogger.Error($"[LobbyJoiner] GameNameToInt returned null for code '{code}'");
+                return 0;
+            }
+            return GameAssembly.ToInt(result);
         }
         catch (Exception ex)
         {
