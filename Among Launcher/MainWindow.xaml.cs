@@ -278,7 +278,7 @@ public partial class MainWindow
 
         if (!showUpdateButtons && _config.LastSeenVersion == currentVersion) return;
 
-        var changelog = LoadChangelogSince(_config.LastSeenVersion);
+        var changelog = showUpdateButtons ? "" : LoadChangelogSince(_config.LastSeenVersion);
         if (string.IsNullOrEmpty(changelog) && !showUpdateButtons)
         {
             _config.LastSeenVersion = currentVersion;
@@ -287,7 +287,7 @@ public partial class MainWindow
         }
 
         var modal = new ChangelogModal();
-        modal.Configure(currentVersion, string.IsNullOrEmpty(changelog) ? "No new changes." : changelog);
+        modal.Configure(currentVersion, showUpdateButtons ? "" : (string.IsNullOrEmpty(changelog) ? "No new changes." : changelog));
 
         if (showUpdateButtons)
         {
