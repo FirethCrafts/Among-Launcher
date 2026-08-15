@@ -9,6 +9,7 @@ public class LobbyJoiner : IDisposable
     private const int JoinConfirmTimeoutMs = 45_000;
     private const int PollIntervalMs = 500;
     private const int GameReadyWaitMs = 30_000;
+    private const int PumpMaxDurationMs = GameReadyWaitMs + JoinConfirmTimeoutMs;
 
     private readonly ConcurrentQueue<JoinRequest> _queue = new();
     private readonly CancellationTokenSource _cts = new();
@@ -49,7 +50,7 @@ public class LobbyJoiner : IDisposable
 
         try
         {
-            return await request.Tcs.Task.WaitAsync(TimeSpan.FromMilliseconds(JoinConfirmTimeoutMs + 5000));
+            return await request.Tcs.Task.WaitAsync(TimeSpan.FromMilliseconds(PumpMaxDurationMs + 5000));
         }
         catch (TimeoutException)
         {

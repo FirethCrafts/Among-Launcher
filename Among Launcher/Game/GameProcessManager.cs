@@ -8,10 +8,13 @@ public class GameProcessManager
 
     public event EventHandler? GameExited;
 
-    public void LaunchGame(string exePath, string? arguments = null)
+    public bool LaunchGame(string exePath, string? arguments = null)
     {
         if (!File.Exists(exePath))
-            throw new FileNotFoundException("Among Us.exe not found", exePath);
+        {
+            Services.LauncherLog.Write($"[GameProcessManager] Launch failed: '{exePath}' not found.");
+            return false;
+        }
 
         var startInfo = new ProcessStartInfo
         {
@@ -23,13 +26,25 @@ public class GameProcessManager
         if (!string.IsNullOrEmpty(arguments))
             startInfo.Arguments = arguments;
 
-        _gameProcess = Process.Start(startInfo);
-
-        if (_gameProcess != null)
+        try
         {
-            _gameProcess.EnableRaisingEvents = true;
-            _gameProcess.Exited += OnGameExited;
+            _gameProcess = Process.Start(startInfo);
         }
+        catch (Exception ex)
+        {
+            Services.LauncherLog.Write($"[GameProcessManager] Failed to launch '{exePath}': {ex}");
+            return false;
+        }
+
+        if (_gameProcess == null)
+        {
+            Services.LauncherLog.Write($"[GameProcessManager] Process.Start returned null for '{exePath}'.");
+            return false;
+        }
+
+        _gameProcess.EnableRaisingEvents = true;
+        _gameProcess.Exited += OnGameExited;
+        return true;
     }
 
     public void KillGame()

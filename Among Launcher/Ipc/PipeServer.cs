@@ -14,6 +14,7 @@ public class PipeServer : IDisposable
     private Task? _listenerTask;
     private NamedPipeServerStream? _server;
     private readonly object _lock = new();
+    private readonly SemaphoreSlim _writeGate = new(1, 1);
     private bool _disposed;
 
     public event EventHandler? ClientConnected;
@@ -166,13 +167,21 @@ public class PipeServer : IDisposable
         catch { }
     }
 
-    private static async Task SendMessageAsync(NamedPipeServerStream server, string json, CancellationToken ct)
+    private async Task SendMessageAsync(NamedPipeServerStream server, string json, CancellationToken ct)
     {
-        var data = Encoding.UTF8.GetBytes(json);
-        var header = BitConverter.GetBytes(data.Length);
-        await server.WriteAsync(header, ct);
-        await server.WriteAsync(data, ct);
-        await server.FlushAsync(ct);
+        await _writeGate.WaitAsync(ct);
+        try
+        {
+            var data = Encoding.UTF8.GetBytes(json);
+            var header = BitConverter.GetBytes(data.Length);
+            await server.WriteAsync(header, ct);
+            await server.WriteAsync(data, ct);
+            await server.FlushAsync(ct);
+        }
+        finally
+        {
+            _writeGate.Release();
+        }
     }
 
     private static async Task<string> ReadMessageAsync(NamedPipeServerStream server, CancellationToken ct)

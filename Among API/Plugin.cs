@@ -84,9 +84,6 @@ public class Plugin : BasePlugin
             Thread.Sleep(30000);
             FileLogger.Info("Done waiting.");
 
-            await pipe.SendMessageAsync("game_ready");
-            FileLogger.Info("Game ready signal sent to launcher.");
-
             pipe.RegisterHandler("set_server_url", element =>
             {
                 var p = element.GetProperty("payload");
@@ -97,6 +94,38 @@ public class Plugin : BasePlugin
                 }
                 return Task.FromResult<object?>(null);
             });
+
+            var joiner = new LobbyJoiner(Log);
+            pipe.Disconnected += (_, _) => joiner.Dispose();
+
+            pipe.RegisterHandler("join_lobby", async element =>
+            {
+                JoinResult result;
+                try
+                {
+                    var payload = element.TryGetProperty("payload", out var p) ? p : default;
+                    var code = ReadString(payload, "code");
+                    var region = ReadString(payload, "region");
+                    var regionIp = ReadString(payload, "regionIp");
+                    var regionPort = ReadInt(payload, "regionPort");
+
+                    FileLogger.Info($"join_lobby received: code={code}, region={region}, regionIp={regionIp}, regionPort={regionPort}");
+
+                    result = await joiner.JoinAsync(code, region, regionIp, regionPort);
+                }
+                catch (Exception ex)
+                {
+                    FileLogger.Error($"join_lobby handler exception: {ex.GetType().Name}: {ex.Message}");
+                    result = new JoinResult(false, ex.Message);
+                }
+
+                FileLogger.Info($"Join lobby result -> success={result.Success} error={result.Error ?? "none"}");
+                _ = pipe.SendMessageAsync("join_lobby_result", new { success = result.Success, error = result.Error });
+                return new { success = result.Success, error = result.Error };
+            });
+
+            await pipe.SendMessageAsync("game_ready");
+            FileLogger.Info("Game ready signal sent to launcher.");
 
             var tracker = new GameStateTracker(Log);
             tracker.LobbyCreated += (_, info) =>
@@ -161,35 +190,6 @@ public class Plugin : BasePlugin
                 _ = pipe.SendMessageAsync("player_left", new { playerName = p.PlayerName, playerCount = p.PlayerCount });
             };
             tracker.Start();
-
-            var joiner = new LobbyJoiner(Log);
-            pipe.Disconnected += (_, _) => joiner.Dispose();
-
-            pipe.RegisterHandler("join_lobby", async element =>
-            {
-                JoinResult result;
-                try
-                {
-                    var payload = element.TryGetProperty("payload", out var p) ? p : default;
-                    var code = ReadString(payload, "code");
-                    var region = ReadString(payload, "region");
-                    var regionIp = ReadString(payload, "regionIp");
-                    var regionPort = ReadInt(payload, "regionPort");
-
-                    FileLogger.Info($"join_lobby received: code={code}, region={region}, regionIp={regionIp}, regionPort={regionPort}");
-
-                    result = await joiner.JoinAsync(code, region, regionIp, regionPort);
-                }
-                catch (Exception ex)
-                {
-                    FileLogger.Error($"join_lobby handler exception: {ex.GetType().Name}: {ex.Message}");
-                    result = new JoinResult(false, ex.Message);
-                }
-
-                FileLogger.Info($"Join lobby result -> success={result.Success} error={result.Error ?? "none"}");
-                _ = pipe.SendMessageAsync("join_lobby_result", new { success = result.Success, error = result.Error });
-                return new { success = result.Success, error = result.Error };
-            });
 
             var commands = new ChatCommandHandler(Log);
             commands.OnRepost = () =>
