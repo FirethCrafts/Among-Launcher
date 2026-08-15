@@ -65,7 +65,6 @@ public partial class MainWindow
 
         _mainView.GameStateChanged += OnGameStateChanged;
         _mainView.AmongApiUpdateRequested += OnAmongApiUpdateRequested;
-        _mainView.AmongApiUpdateWithChangelogRequested += OnAmongApiUpdateWithChangelogRequested;
         _welcomeView.LoginCompleted += OnLoginCompleted;
 
         _pipeServer.ClientConnected += (_, _) =>
@@ -274,7 +273,6 @@ public partial class MainWindow
                 }
             }
             
-            await CheckAmongApiUpdatesAsync();
             await CheckAndShowChangelogAsync();
             SetupTrayIcon();
         };
@@ -532,40 +530,6 @@ public partial class MainWindow
                 return Task.CompletedTask;
             },
             rejoin: cmd => RejoinAsync(cmd));
-    }
-
-    private async Task CheckAmongApiUpdatesAsync()
-    {
-        var moddedPath = GetModdedPath();
-        var pathToCheck = string.IsNullOrEmpty(moddedPath) ? AppDomain.CurrentDomain.BaseDirectory : moddedPath;
-
-        var (updateAvailable, latestVersion, downloadUrl) =
-            await Services.VersionChecker.CheckForUpdateAsync(_httpClient, pathToCheck);
-
-        _amongApiUpdateAvailable = updateAvailable;
-        _amongApiDownloadUrl = downloadUrl;
-
-        Dispatcher.Invoke(() =>
-        {
-            if (_amongApiUpdateAvailable)
-            {
-                _mainView.ShowUpdateAmongApiButton(latestVersion);
-            }
-            else
-            {
-                _mainView.HideUpdateAmongApiButton();
-            }
-        });
-    }
-
-    private void OnAmongApiUpdateWithChangelogRequested(object? sender, AmongApiUpdateInfo? updateInfo)
-    {
-        if (updateInfo != null)
-        {
-            _amongApiUpdateAvailable = true;
-            _amongApiDownloadUrl = updateInfo.DownloadUrl;
-        }
-        _ = CheckAndShowChangelogAsync();
     }
 
     private async void OnAmongApiUpdateRequested(object? sender, EventArgs e)

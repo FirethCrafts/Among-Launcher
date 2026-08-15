@@ -14,8 +14,6 @@ using AmongLauncher.Services.Lobby;
 
 namespace AmongLauncher.Views;
 
-public record AmongApiUpdateInfo(string LatestVersion, string? DownloadUrl);
-
 public partial class MainView
 {
     private readonly GameProcessManager _gameManager = new();
@@ -25,8 +23,6 @@ public partial class MainView
 
     public event EventHandler<bool>? GameStateChanged;
     public event EventHandler? AmongApiUpdateRequested;
-    public event EventHandler<AmongApiUpdateInfo>? AmongApiUpdateWithChangelogRequested;
-    public bool UpdateAvailable { get; private set; }
 
     public MainView()
     {
@@ -197,7 +193,7 @@ public partial class MainView
         await stream.CopyToAsync(fileStream);
     }
 
-    private async void PlayButton_Click(object sender, RoutedEventArgs e)
+    private void PlayButton_Click(object sender, RoutedEventArgs e)
     {
         if (_gameManager.IsGameRunning())
         {
@@ -210,25 +206,6 @@ public partial class MainView
             if (TryShowUnavailableInstall()) return;
             return;
         }
-
-        PlayButton.IsEnabled = false;
-        ModStatusText.Text = "Checking for AmongAPI updates...";
-
-        var (updateAvailable, latestVersion, downloadUrl) =
-            await VersionChecker.CheckForUpdateAsync(_httpClient, _moddedPath);
-
-        if (updateAvailable)
-        {
-            UpdateAvailable = true;
-            PlayButton.IsEnabled = true;
-            ShowUpdateAmongApiButton(latestVersion);
-            AmongApiUpdateWithChangelogRequested?.Invoke(this, new AmongApiUpdateInfo(latestVersion?.ToString() ?? "", downloadUrl));
-            return;
-        }
-
-        UpdateAvailable = false;
-        HideUpdateAmongApiButton();
-        PlayButton.IsEnabled = true;
 
         var exePath = System.IO.Path.Combine(_moddedPath, "Among Us.exe");
         if (!System.IO.File.Exists(exePath))
@@ -844,7 +821,6 @@ public partial class MainView
 
     public void ShowUpdateAmongApiButton(Version? latestVersion)
     {
-        UpdateAvailable = true;
         UpdateAmongApiButton.Content = latestVersion != null
             ? $"UPDATE AmongAPI ({latestVersion})"
             : "UPDATE AmongAPI";
@@ -854,7 +830,6 @@ public partial class MainView
 
     public void HideUpdateAmongApiButton()
     {
-        UpdateAvailable = false;
         UpdateAmongApiButton.Visibility = Visibility.Collapsed;
         PlayButton.Visibility = Visibility.Visible;
     }
