@@ -81,7 +81,7 @@ public class Plugin : BasePlugin
 
             // Wait for game to fully load (splash + connecting + logging in)
             FileLogger.Info("Waiting 30 seconds for game to fully load...");
-            Thread.Sleep(30000);
+            await Task.Delay(30000);
             FileLogger.Info("Done waiting.");
 
             pipe.RegisterHandler("set_server_url", element =>

@@ -47,7 +47,10 @@ public partial class MainView
         var locator = new AmongUsLocator();
         var config = Config.LauncherConfig.Load();
         _storefront = config.Storefront;
-        var gamePath = locator.FindAmongUsForStorefront(_storefront).Path;
+        var result = locator.FindAmongUsForStorefront(_storefront);
+        if (result.Storefront.HasValue)
+            _storefront = result.Storefront;
+        var gamePath = result.Path;
 
         if (gamePath == null)
         {
@@ -256,7 +259,7 @@ public partial class MainView
         var args = new List<string>(safeArgs);
 
         if (_storefront == Storefront.Epic)
-            args.Add("--epicportal");
+            args.Add("-EpicPortal");
 
         var config = Config.LauncherConfig.Load();
         args.Add(config.AutoPostLobby ? "--autopost" : "--no-autopost");

@@ -107,6 +107,17 @@ public class LobbyJoiner : IDisposable
         JoinResult startResult;
         try
         {
+            await MainThreadDispatcher.EnqueueAsync(() =>
+            {
+                if (GameAssembly.InLobby())
+                {
+                    FileLogger.Info("[LobbyJoiner] In lobby, leaving...");
+                    LeaveLobby();
+                }
+            });
+
+            await Task.Delay(1500, ct);
+
             startResult = await MainThreadDispatcher.EnqueueAsync(() => ExecuteJoin(request));
         }
         catch (Exception ex)
@@ -188,7 +199,6 @@ public class LobbyJoiner : IDisposable
         {
             FileLogger.Info("[LobbyJoiner] In lobby, leaving...");
             LeaveLobby();
-            Thread.Sleep(1500);
         }
 
         var regionSet = SetRegion(request);

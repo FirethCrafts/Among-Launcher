@@ -91,44 +91,64 @@ public partial class MainWindow
         // Handler: game_ready
         _pipeServer.RegisterHandler("game_ready", async element =>
         {
-            LogDebug("[Launcher] game_ready received from mod!");
-            Dispatcher.Invoke(() =>
+            try
             {
-                if (ContentArea.Content is MainView mv)
-                    mv.UpdateModStatusText("Game loaded — AmongAPI active");
-
-                if (_inGameView == null)
+                LogDebug("[Launcher] game_ready received from mod!");
+                Dispatcher.Invoke(() =>
                 {
-                    _inGameView = new Views.InGameView();
-                    _inGameView.JoinLobbyRequested += InGameView_JoinLobbyRequested;
+                    if (ContentArea.Content is MainView mv)
+                        mv.UpdateModStatusText("Game loaded — AmongAPI active");
+
+                    if (_inGameView == null)
+                    {
+                        _inGameView = new Views.InGameView();
+                        _inGameView.JoinLobbyRequested += InGameView_JoinLobbyRequested;
+                    }
+                    _inGameView.SetLobbyCode(_activeLobby?.Code ?? _postedLobbyCode);
+                    GameButton.Visibility = Visibility.Visible;
+                    ShowView(_inGameView, showSidebar: true);
+                });
+
+                if (!string.IsNullOrEmpty(_config.ServerUrl) && !_config.ServerUrl.Contains("yourserver.com"))
+                {
+                    var url = _config.ServerUrl;
+                    Task.Run(async () => await _pipeServer.BroadcastMessageAsync("set_server_url", new { url }));
                 }
-                _inGameView.SetLobbyCode(_activeLobby?.Code ?? _postedLobbyCode);
-                GameButton.Visibility = Visibility.Visible;
-                ShowView(_inGameView, showSidebar: true);
-            });
 
-            var mods = await GetInstalledModSetAsync();
-            Dispatcher.Invoke(() =>
-            {
-                _inGameView?.SetMods(mods.Select(m => m.FileName).ToList());
-                if (_lobbyPlayerNames.Count > 0)
-                    _inGameView?.SetPlayers(new List<string>(_lobbyPlayerNames));
-            });
+                var tcs = _gameReadyTcs;
+                Task.Run(async () =>
+                {
+                    await Task.Delay(250);
+                    tcs?.TrySetResult(true);
+                });
 
-            if (!string.IsNullOrEmpty(_config.ServerUrl) && !_config.ServerUrl.Contains("yourserver.com"))
-            {
-                var url = _config.ServerUrl;
-                Task.Run(async () => await _pipeServer.BroadcastMessageAsync("set_server_url", new { url }));
+                // Populate mods/players AFTER returning the ack so file hashing
+                // doesn't block the pipe loop or delay game_ready_ack.
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        var mods = await GetInstalledModSetAsync();
+                        Dispatcher.Invoke(() =>
+                        {
+                            _inGameView?.SetMods(mods.Select(m => m.FileName).ToList());
+                            if (_lobbyPlayerNames.Count > 0)
+                                _inGameView?.SetPlayers(new List<string>(_lobbyPlayerNames));
+                        });
+                    }
+                    catch (Exception ex)
+                    {
+                        LogDebug($"[Launcher] Failed to populate mods after game_ready: {ex.Message}");
+                    }
+                });
+
+                return new { type = "game_ready_ack", restart = false };
             }
-
-            var tcs = _gameReadyTcs;
-            Task.Run(async () =>
+            catch (Exception ex)
             {
-                await Task.Delay(250);
-                tcs?.TrySetResult(true);
-            });
-
-            return new { type = "game_ready_ack", restart = false };
+                LogDebug($"[Launcher] game_ready handler failed: {ex.Message}");
+                return new { type = "game_ready_ack", restart = false };
+            }
         });
 
         // Handler: lobby_created
