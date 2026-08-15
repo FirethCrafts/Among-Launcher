@@ -103,6 +103,7 @@
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
                         <RowDefinition Height="*"/>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
@@ -118,8 +119,21 @@
                               Fill="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}"/>
                     </Button>
 
-                    <!-- Library (below home) -->
-                    <Button x:Name="LibraryButton" Grid.Row="1" Tag="LibraryView"
+                    <!-- In Game (shown when game is running) -->
+                    <Button x:Name="GameButton" Grid.Row="1" Tag="InGameView"
+                            Click="NavButton_Click"
+                            Style="{StaticResource NavButton}"
+                            Margin="0,0,0,8" ToolTip="In Game"
+                            Visibility="Collapsed">
+                        <Path Data="M6 12h4m-2-2v4m7-1h.01M18 10h.01M17.32 5H6.68a4 4 0 00-3.978 3.59c-.006.052-.01.105-.012.158-.024.444.06.885.245 1.292l2.52 5.4A3 3 0 0011.065 18h1.87a3 3 0 002.61-1.56l2.52-5.4c.185-.407.269-.848.245-1.292a2.064 2.064 0 00-.012-.158A4 4 0 0017.32 5z"
+                              Stretch="Uniform" Width="24" Height="24"
+                              Stroke="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}"
+                              StrokeThickness="1.5" StrokeLineJoin="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                              Fill="Transparent"/>
+                    </Button>
+
+                    <!-- Library (below game) -->
+                    <Button x:Name="LibraryButton" Grid.Row="2" Tag="LibraryView"
                             Click="NavButton_Click"
                             Style="{StaticResource NavButton}"
                             Margin="0,0,0,8" ToolTip="Library">
@@ -128,7 +142,7 @@
                     </Button>
 
                     <!-- Lobby / Host Panel -->
-                    <Button x:Name="LobbyButton" Grid.Row="2" Tag="HostPanel"
+                    <Button x:Name="LobbyButton" Grid.Row="3" Tag="HostPanel"
                             Click="NavButton_Click"
                             Style="{StaticResource NavButton}"
                             Margin="0,0,0,8" ToolTip="Lobby"
@@ -141,10 +155,10 @@
                     </Button>
 
                     <!-- Spacer -->
-                    <StackPanel Grid.Row="2"/>
+                    <StackPanel Grid.Row="3"/>
 
                     <!-- Settings (above logout) -->
-                    <Button x:Name="SettingsButton" Grid.Row="3" Tag="SettingsView"
+                    <Button x:Name="SettingsButton" Grid.Row="4" Tag="SettingsView"
                             Click="NavButton_Click"
                             Style="{StaticResource NavButton}"
                             Margin="0,0,0,8" ToolTip="Settings">
@@ -153,7 +167,7 @@
                     </Button>
 
                     <!-- Logout (above avatar) -->
-                    <Button x:Name="LogoutButton" Grid.Row="4"
+                    <Button x:Name="LogoutButton" Grid.Row="5"
                             Click="Logout_Click"
                             Style="{StaticResource NavButton}"
                             Margin="0,0,0,8" ToolTip="Logout">
@@ -162,7 +176,7 @@
                     </Button>
 
                     <!-- Avatar (bottom) -->
-                    <Grid Grid.Row="5" Width="40" Height="40" Margin="0,0,0,16">
+                    <Grid Grid.Row="6" Width="40" Height="40" Margin="0,0,0,16">
                         <Grid.Style>
                             <Style TargetType="Grid">
                                 <Setter Property="Effect">

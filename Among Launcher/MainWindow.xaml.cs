@@ -18,6 +18,7 @@ public partial class MainWindow
     private readonly SettingsView _settingsView = new();
     private readonly WelcomeView _welcomeView = new();
     private readonly LibraryView _libraryView = new();
+    private Views.InGameView? _inGameView;
 
     public MainView MainView => _mainView;
     private readonly PipeServer _pipeServer = new();
@@ -88,13 +89,30 @@ public partial class MainWindow
         };
 
         // Handler: game_ready
-        _pipeServer.RegisterHandler("game_ready", element =>
+        _pipeServer.RegisterHandler("game_ready", async element =>
         {
             LogDebug("[Launcher] game_ready received from mod!");
             Dispatcher.Invoke(() =>
             {
                 if (ContentArea.Content is MainView mv)
                     mv.UpdateModStatusText("Game loaded — AmongAPI active");
+
+                if (_inGameView == null)
+                {
+                    _inGameView = new Views.InGameView();
+                    _inGameView.JoinLobbyRequested += InGameView_JoinLobbyRequested;
+                }
+                _inGameView.SetLobbyCode(_activeLobby?.Code ?? _postedLobbyCode);
+                GameButton.Visibility = Visibility.Visible;
+                ShowView(_inGameView, showSidebar: true);
+            });
+
+            var mods = await GetInstalledModSetAsync();
+            Dispatcher.Invoke(() =>
+            {
+                _inGameView?.SetMods(mods.Select(m => m.FileName).ToList());
+                if (_lobbyPlayerNames.Count > 0)
+                    _inGameView?.SetPlayers(new List<string>(_lobbyPlayerNames));
             });
 
             if (!string.IsNullOrEmpty(_config.ServerUrl) && !_config.ServerUrl.Contains("yourserver.com"))
@@ -110,7 +128,7 @@ public partial class MainWindow
                 tcs?.TrySetResult(true);
             });
 
-            return Task.FromResult<object?>(new { type = "game_ready_ack", restart = false });
+            return new { type = "game_ready_ack", restart = false };
         });
 
         // Handler: lobby_created
@@ -986,6 +1004,7 @@ public partial class MainWindow
 
         if (_hostPanel != null)
             Dispatcher.Invoke(() => _hostPanel.UpdatePlayers(BuildPlayerList()));
+        Dispatcher.Invoke(() => _inGameView?.SetPlayers(new List<string>(_lobbyPlayerNames)));
         return Task.FromResult<object?>(null);
     }
 
@@ -1042,6 +1061,21 @@ public partial class MainWindow
         _hostPanel = panel;
         ShowView(panel, showSidebar: true);
         LobbyButton.Visibility = Visibility.Visible;
+    }
+
+    private async void InGameView_JoinLobbyRequested(object? sender, string code)
+    {
+        code = code.Trim().ToUpperInvariant();
+        if (string.IsNullOrEmpty(code))
+            return;
+
+        var region = _activeLobby?.Code == code ? _activeLobby.Region : "";
+        var regionIp = _activeLobby?.Code == code ? _activeLobby.RegionIp : "";
+        var regionPort = _activeLobby?.Code == code ? _activeLobby.RegionPort : 22023;
+
+        LogDebug($"[Launcher] InGame join requested for code={code}, region={region}, regionIp={regionIp}, regionPort={regionPort}");
+        await _pipeServer.BroadcastMessageAsync("join_lobby",
+            new { code, region, regionIp, regionPort });
     }
 
     private async Task ConfirmDisbandAsync(string code)
@@ -1180,6 +1214,7 @@ public partial class MainWindow
             "MainView" => _mainView,
             "LibraryView" => _libraryView,
             "SettingsView" => _settingsView,
+            "InGameView" => _inGameView ?? (object)_mainView,
             _ => ContentArea.Content
         };
 
@@ -1219,6 +1254,7 @@ public partial class MainWindow
             var active = view == _mainView ? HomeButton
                        : view == _libraryView ? LibraryButton
                        : view == _hostPanel ? LobbyButton
+                       : view == _inGameView ? GameButton
                        : SettingsButton;
             SetActiveNav(active);
         }
@@ -1227,7 +1263,7 @@ public partial class MainWindow
     private void SetActiveNav(Button active)
     {
         var activeBg = new SolidColorBrush(Color.FromRgb(0x22, 0x22, 0x26));
-        foreach (var btn in new[] { HomeButton, LibraryButton, LobbyButton, SettingsButton, LogoutButton })
+        foreach (var btn in new[] { HomeButton, LibraryButton, GameButton, LobbyButton, SettingsButton, LogoutButton })
         {
             var isActive = btn == active;
             btn.Foreground = new SolidColorBrush(isActive ? Colors.White : (Color)FindResource("NavIconColor"));
