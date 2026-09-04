@@ -156,26 +156,26 @@ public class ChatCommandHandler : IDisposable
         try
         {
             var hudManagerType = GameAssembly.Type("HudManager");
-            if (hudManagerType?.BaseType == null)
+            if (hudManagerType == null)
             {
                 FileLogger.Warn("[ChatCommandHandler] HudManager type not found");
                 return null;
             }
-            var hudManager = GameAssembly.GetStaticProp(hudManagerType.BaseType, "Instance");
+            var hudManager = GameAssembly.GetStaticMember(hudManagerType, "Instance");
             if (hudManager == null)
             {
                 FileLogger.Warn("[ChatCommandHandler] HudManager.Instance is null");
                 return null;
             }
 
-            var chat = GameAssembly.GetInstanceProp(hudManager, "Chat");
+            var chat = GameAssembly.GetInstanceMember(hudManager, "Chat");
             if (chat == null)
             {
                 FileLogger.Warn("[ChatCommandHandler] Chat is null");
                 return null;
             }
 
-            return GameAssembly.GetInstanceProp(chat, "freeChatField");
+            return GameAssembly.GetInstanceMember(chat, "freeChatField");
         }
         catch (Exception ex)
         {

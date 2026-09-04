@@ -45,6 +45,6 @@ public partial class HostControlPanelView : System.Windows.Controls.UserControl
     private void KickButton_Click(object sender, RoutedEventArgs e)
     {
         if (sender is FrameworkElement { DataContext: LobbyPlayer player })
-            KickRequested?.Invoke(this, player.DiscordUserId);
+            KickRequested?.Invoke(this, player.PlayerName ?? "");
     }
 }

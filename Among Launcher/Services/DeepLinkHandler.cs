@@ -76,6 +76,10 @@ public static class DeepLinkHandler
         if (!Uri.TryCreate(deepLink, UriKind.Absolute, out var uri))
             return requests;
 
+        // Only accept the registered amongus-launcher scheme for install links.
+        if (!string.Equals(uri.Scheme, Scheme, StringComparison.OrdinalIgnoreCase))
+            return requests;
+
         // amongus-launcher://install?mods=<url1>,<url2>,<url3>
         if (!string.Equals(uri.Host, "install", StringComparison.OrdinalIgnoreCase))
             return requests;

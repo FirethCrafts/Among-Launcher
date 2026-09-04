@@ -53,6 +53,8 @@ public class LobbyBackendClient
             {
                 Code = body.Code,
                 Region = body.Region,
+                RegionIp = body.RegionIp ?? string.Empty,
+                RegionPort = body.RegionPort ?? 0,
                 ModSet = (body.Mods ?? new List<ModInfoEntry>())
                     .Select(m => new ModSetEntry
                     {
@@ -61,7 +63,7 @@ public class LobbyBackendClient
                         Sha256 = m.FileHash,
                         DownloadUrl = !string.IsNullOrEmpty(m.DownloadUrl)
                             ? m.DownloadUrl
-                            : GetModDownloadUrl(m.Name)
+                            : GetAbsoluteModDownloadUrl(m.Name)
                     })
                     .ToList(),
                 Host = body.Host,
@@ -137,6 +139,9 @@ public class LobbyBackendClient
     }
 
         public string GetModDownloadUrl(string modId) => $"api/v1/mods/{modId}/download";
+
+        public string GetAbsoluteModDownloadUrl(string modId) =>
+            new Uri(_http.BaseAddress!, GetModDownloadUrl(modId)).ToString();
 
         public Task<bool> RepostAsync(string code, CancellationToken ct) =>
             PostNoContent($"api/v1/lobbies/{code}/repost", ct);

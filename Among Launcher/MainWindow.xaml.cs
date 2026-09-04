@@ -40,6 +40,7 @@ public partial class MainWindow
     private bool _joining;
     private bool _lobbyPostedToBackend;
     private string _postedLobbyCode = "";
+    private bool _isExiting;
 
     public ModalOverlay ModalOverlayControl => ModalOverlay;
 
@@ -166,15 +167,15 @@ public partial class MainWindow
             var maxPlayers = p.TryGetProperty("maxPlayers", out var mp) && mp.GetInt32() > 0
                 ? mp.GetInt32()
                 : 15;
-            var gameVersion = p.TryGetProperty("gameVersion", out var gv) ? gv.GetString() : null;
-            var mapName = p.TryGetProperty("mapName", out var mn) ? mn.GetString() : null;
+            var gameVersion = p.TryGetProperty("game_version", out var gv) ? gv.GetString() : null;
+            var mapName = p.TryGetProperty("map_name", out var mn) ? mn.GetString() : null;
             var language = p.TryGetProperty("language", out var lg) ? lg.GetString() : null;
-            var chatType = p.TryGetProperty("chatType", out var ct) ? ct.GetString() : null;
+            var chatType = p.TryGetProperty("chat_type", out var ct) ? ct.GetString() : null;
             var info = new LobbyInfo
             {
-                Code = p.GetProperty("code").GetString() ?? "",
-                Region = p.GetProperty("region").GetString() ?? "",
-                RegionIp = p.GetProperty("regionIp").GetString() ?? "",
+                Code = p.TryGetProperty("code", out var codeProp2) ? codeProp2.GetString() ?? "" : "",
+                Region = p.TryGetProperty("region", out var regionProp) ? regionProp.GetString() ?? "" : "",
+                RegionIp = p.TryGetProperty("regionIp", out var regionIpProp) ? regionIpProp.GetString() ?? "" : "",
                 RegionPort = regionPort,
                 ModSet = await GetInstalledModSetAsync(),
                 HostUserId = _userId,
@@ -187,51 +188,66 @@ public partial class MainWindow
             };
             _activeLobby = info;
             _lobbyPlayerNames.Clear();
-            if (!string.IsNullOrWhiteSpace(host) && !host.Equals("UNKNOWN", StringComparison.OrdinalIgnoreCase))
+            if (p.TryGetProperty("playerNames", out var namesArr) && namesArr.GetArrayLength() > 0)
+            {
+                foreach (var n in namesArr.EnumerateArray())
+                {
+                    var name = n.GetString();
+                    if (!string.IsNullOrWhiteSpace(name) &&
+                        !name.Equals("UNKNOWN", StringComparison.OrdinalIgnoreCase) &&
+                        !name.Equals("<unknown>", StringComparison.OrdinalIgnoreCase) &&
+                        !_lobbyPlayerNames.Contains(name))
+                    {
+                        _lobbyPlayerNames.Add(name);
+                    }
+                }
+            }
+            else if (!string.IsNullOrWhiteSpace(host) && !host.Equals("UNKNOWN", StringComparison.OrdinalIgnoreCase))
+            {
                 _lobbyPlayerNames.Add(host);
+            }
             Services.LauncherLog.Write($"[Launcher] lobby_created handler started. Code={info.Code}, Region={info.Region}, Host={info.Host}, PlayerCount={info.PlayerCount}, MaxPlayers={info.MaxPlayers}");
 
             var modEntries = new List<ModInfoEntry>();
-            var moddedPath = GetModdedPath();
-            foreach (var entry in info.ModSet)
-            {
-                var filePath = Path.Combine(moddedPath!, "BepInEx", "plugins", entry.FileName);
-                if (!File.Exists(filePath)) continue;
-
-                var uploaded = await _backend.UploadModAsync(
-                    File.OpenRead(filePath), entry.FileName, entry.Version, CancellationToken.None);
-
-                modEntries.Add(uploaded ?? new ModInfoEntry(entry.FileName, entry.Version, entry.Sha256));
-            }
-
-            int? hostLevel = p.TryGetProperty("playerLevels", out var plArr) && plArr.GetArrayLength() > 0
-                ? plArr[0].GetInt32() : null;
-            int? hostPing = p.TryGetProperty("playerPings", out var ppArr) && ppArr.GetArrayLength() > 0
-                ? ppArr[0].GetInt32() : null;
-            var players = new List<PlayerInfoEntry>
-            {
-                new(_userId, host, true, hostLevel, hostPing)
-            };
-
+            var players = new List<PlayerInfoEntry>();
             if (_config.AutoPostLobby)
             {
+                var moddedPath = GetModdedPath();
+                foreach (var entry in info.ModSet)
+                {
+                    var filePath = Path.Combine(moddedPath!, "BepInEx", "plugins", entry.FileName);
+                    if (!File.Exists(filePath)) continue;
+
+                    var uploaded = await _backend.UploadModAsync(
+                        File.OpenRead(filePath), entry.FileName, entry.Version, CancellationToken.None);
+
+                    modEntries.Add(uploaded ?? new ModInfoEntry(entry.FileName, entry.Version, entry.Sha256));
+                }
+
+                int? hostLevel = p.TryGetProperty("playerLevels", out var plArr) && plArr.GetArrayLength() > 0
+                    ? plArr[0].GetInt32() : null;
+                int? hostPing = p.TryGetProperty("playerPings", out var ppArr) && ppArr.GetArrayLength() > 0
+                    ? ppArr[0].GetInt32() : null;
+                players.Add(new PlayerInfoEntry(_userId, host, true, hostLevel, hostPing));
+
                 Services.LauncherLog.Write($"[Launcher] Creating lobby on backend. Host={host}, MaxPlayers={info.MaxPlayers}");
-                var createResult = await _backend.CreateLobbyAsync(new CreateLobbyRequest(info.Code, info.Region, info.Host, "modded", modEntries, info.MaxPlayers, info.GameVersion, info.MapName, info.Language, info.ChatType, players), CancellationToken.None);
+                var createResult = await _backend.CreateLobbyAsync(new CreateLobbyRequest(info.Code, info.Region, info.Host, "modded", modEntries, info.MaxPlayers, info.GameVersion, info.MapName, info.Language, info.ChatType, players, info.RegionIp, info.RegionPort), CancellationToken.None);
                 Services.LauncherLog.Write($"[Launcher] Backend response: {createResult}");
                 _lobbyPostedToBackend = true;
                 _postedLobbyCode = info.Code;
+
+                if (string.IsNullOrEmpty(_userId))
+                {
+                    Services.LauncherLog.Write($"[Launcher] WARNING: _userId is empty when sending heartbeat for lobby {info.Code}. Heartbeat may be rejected by backend.");
+                }
+                Services.LauncherLog.Write($"[Launcher] Sending heartbeat. Code={info.Code}, UserId={_userId}");
+                var heartbeatResult = await _backend.HeartbeatAsync(info.Code, _userId, CancellationToken.None);
+                Services.LauncherLog.Write($"[Launcher] Heartbeat response: {heartbeatResult}");
+                Services.LauncherLog.Write($"[Launcher] Starting periodic heartbeat for {info.Code}");
+                StartHeartbeat(info.Code);
+                _ = _ws.ConnectAsync(info.Code, CancellationToken.None);
             }
-            // Always send heartbeat and start periodic heartbeat when we are the host
-            if (string.IsNullOrEmpty(_userId))
-            {
-                Services.LauncherLog.Write($"[Launcher] WARNING: _userId is empty when sending heartbeat for lobby {info.Code}. Heartbeat may be rejected by backend.");
-            }
-            Services.LauncherLog.Write($"[Launcher] Sending heartbeat. Code={info.Code}, UserId={_userId}");
-            var heartbeatResult = await _backend.HeartbeatAsync(info.Code, _userId, CancellationToken.None);
-            Services.LauncherLog.Write($"[Launcher] Heartbeat response: {heartbeatResult}");
-            Services.LauncherLog.Write($"[Launcher] Starting periodic heartbeat for {info.Code}");
-            StartHeartbeat(info.Code);
-            _ = _ws.ConnectAsync(info.Code, CancellationToken.None);
+
             if (string.IsNullOrEmpty(_userId) || _userId == info.HostUserId)
             {
                 Dispatcher.Invoke(() => ShowHostPanel(info));
@@ -247,14 +263,19 @@ public partial class MainWindow
             if (_lobbyPostedToBackend && code == _postedLobbyCode)
             {
                 await _backend.DisbandAsync(code, CancellationToken.None);
-                StopHeartbeat();
-                _ws.Disconnect();
                 _lobbyPostedToBackend = false;
                 _postedLobbyCode = "";
             }
+            StopHeartbeat();
+            _ws.Disconnect();
+            Dispatcher.Invoke(() =>
+            {
+                if (ContentArea.Content == _hostPanel)
+                    ShowView(_mainView, showSidebar: true);
+                LobbyButton.Visibility = Visibility.Collapsed;
+            });
             _activeLobby = null;
             _hostPanel = null;
-            Dispatcher.Invoke(() => LobbyButton.Visibility = Visibility.Collapsed);
             return new { type = "lobby_closed_ack" };
         });
 
@@ -306,11 +327,13 @@ public partial class MainWindow
                 }
                 else
                 {
+                    _isExiting = true;
                     Application.Current.Shutdown();
                     return;
                 }
             }
             
+            await CheckAmongApiUpdatesAsync();
             await CheckAndShowChangelogAsync();
             SetupTrayIcon();
         };
@@ -324,17 +347,35 @@ public partial class MainWindow
         return version ?? "1.0.0";
     }
 
+    private async Task CheckAmongApiUpdatesAsync()
+    {
+        var moddedPath = GetModdedPath();
+        if (string.IsNullOrEmpty(moddedPath))
+        {
+            // No modded install to update; nothing to check.
+            _amongApiUpdateAvailable = false;
+            _amongApiDownloadUrl = null;
+            return;
+        }
+
+        var (updateAvailable, _, downloadUrl) =
+            await Services.VersionChecker.CheckForUpdateAsync(_httpClient, moddedPath);
+
+        _amongApiUpdateAvailable = updateAvailable;
+        _amongApiDownloadUrl = downloadUrl;
+    }
+
     private async Task CheckAndShowChangelogAsync()
     {
         var currentVersion = GetCurrentVersion();
         if (string.IsNullOrEmpty(currentVersion)) return;
 
-        var showUpdateButtons = _amongApiUpdateAvailable;
+        var showUpdate = _amongApiUpdateAvailable;
 
-        if (!showUpdateButtons && _config.LastSeenVersion == currentVersion) return;
+        if (!showUpdate && _config.LastSeenVersion == currentVersion) return;
 
-        var changelog = showUpdateButtons ? "" : LoadChangelogSince(_config.LastSeenVersion);
-        if (string.IsNullOrEmpty(changelog) && !showUpdateButtons)
+        var changelog = LoadChangelogSince(_config.LastSeenVersion);
+        if (string.IsNullOrEmpty(changelog) && !showUpdate)
         {
             _config.LastSeenVersion = currentVersion;
             _config.Save();
@@ -342,11 +383,11 @@ public partial class MainWindow
         }
 
         var modal = new ChangelogModal();
-        modal.Configure(currentVersion, showUpdateButtons ? "" : (string.IsNullOrEmpty(changelog) ? "No new changes." : changelog));
+        modal.Configure(currentVersion, string.IsNullOrEmpty(changelog) ? "No new changes." : changelog);
 
-        if (showUpdateButtons)
+        if (showUpdate)
         {
-            modal.ShowUpdateButtons();
+            modal.ShowUpdateAvailable();
             modal.UpdateRequested += (_, _) =>
             {
                 ModalOverlay.Hide();
@@ -357,13 +398,13 @@ public partial class MainWindow
         modal.Closed += (_, _) =>
         {
             ModalOverlay.Hide();
-            if (!showUpdateButtons)
+            if (!showUpdate)
             {
                 _config.LastSeenVersion = currentVersion;
                 _config.Save();
             }
         };
-        ModalOverlay.Show("Update Available", modal);
+        ModalOverlay.Show(showUpdate ? "Update Available" : "What's New", modal);
     }
 
     private static string LoadChangelogSince(string lastSeenVersion)
@@ -528,7 +569,14 @@ public partial class MainWindow
 
     protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
     {
+        if (_isExiting)
+        {
+            base.OnClosing(e);
+            return;
+        }
+
         e.Cancel = true;
+        base.OnClosing(e);
         ShowInTaskbar = false;
         WindowState = WindowState.Minimized;
         Hide();
@@ -547,15 +595,18 @@ public partial class MainWindow
         StopHeartbeat();
         _ws.Disconnect();
 
+        _isExiting = true;
         ShowInTaskbar = true;
         Closing -= (_, _) => SaveWindowState();
         Close();
+        Application.Current.Shutdown();
     }
 
     private void RefreshConfig()
     {
         _config = Config.LauncherConfig.Load();
         _backend = new Services.Lobby.LobbyBackendClient(_httpClient, _config);
+        _ws?.Disconnect();
         _ws = new Services.Lobby.LobbyWebSocketClient(_config);
         _commands = new Services.Lobby.LobbyCommandService(_ws,
             killGame: () =>
@@ -637,14 +688,12 @@ public partial class MainWindow
             return;
         }
 
-        LogDebug($"[Launcher] TryParseJoin returned null for: '{deepLink}'");
-        Dispatcher.Invoke(() => ShowJoinError(
-            $"Could not extract a valid lobby code from the link.\n\nLink: {deepLink}"));
-
         var requests = Services.DeepLinkHandler.Parse(deepLink);
         if (requests.Count == 0)
         {
-            LogDebug($"[Launcher] Unrecognized deep link: {deepLink}");
+            LogDebug($"[Launcher] TryParseJoin returned null and Parse found no mods for: '{deepLink}'");
+            Dispatcher.Invoke(() => ShowJoinError(
+                $"Could not extract a valid lobby code from the link.\n\nLink: {deepLink}"));
             return;
         }
 
@@ -1014,7 +1063,9 @@ public partial class MainWindow
         if (_activeLobby != null && playerCount >= 0)
             _activeLobby.PlayerCount = playerCount;
 
-        if (!string.IsNullOrEmpty(playerName) && !playerName.Equals("UNKNOWN", StringComparison.OrdinalIgnoreCase))
+        if (!string.IsNullOrEmpty(playerName) &&
+            !playerName.Equals("UNKNOWN", StringComparison.OrdinalIgnoreCase) &&
+            !playerName.Equals("<unknown>", StringComparison.OrdinalIgnoreCase))
         {
             if (joined && !_lobbyPlayerNames.Contains(playerName))
                 _lobbyPlayerNames.Add(playerName);
@@ -1030,7 +1081,7 @@ public partial class MainWindow
 
     private List<LobbyPlayer> BuildPlayerList()
     {
-        var players = _lobbyPlayerNames.Select(n => new LobbyPlayer("", n, false)).ToList();
+        var players = _lobbyPlayerNames.Select(n => new LobbyPlayer(n, n, false)).ToList();
 
         var hostName = _activeLobby?.Host ?? _config.UserName;
         var hostIndex = players.FindIndex(p =>
@@ -1071,10 +1122,11 @@ public partial class MainWindow
                 Dispatcher.Invoke(() =>
                 {
                     if (ContentArea.Content is MainView mv)
-                        mv.UpdateModStatusText("Cannot kick: player has no resolved Discord ID");
+                        mv.UpdateModStatusText("Cannot kick: player has no name");
                 });
                 return;
             }
+            // The backend kick broadcasts by target_id; we send the player's in-game name.
             await _backend.KickAsync(info.Code, targetUserId, CancellationToken.None);
         };
         panel.UpdatePlayers(BuildPlayerList());

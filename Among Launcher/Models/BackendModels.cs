@@ -13,7 +13,9 @@ public record CreateLobbyRequest(
     [property: JsonPropertyName("map_name")] string? MapName = null,
     [property: JsonPropertyName("language")] string? Language = null,
     [property: JsonPropertyName("chat_type")] string? ChatType = null,
-    List<PlayerInfoEntry>? Players = null);
+    List<PlayerInfoEntry>? Players = null,
+    [property: JsonPropertyName("region_ip")] string? RegionIp = null,
+    [property: JsonPropertyName("region_port")] int? RegionPort = 0);
 
 public record LobbyResponse(
     string Code,
@@ -22,7 +24,9 @@ public record LobbyResponse(
     [property: JsonPropertyName("mod_type")] string ModType,
     List<ModInfoEntry> Mods,
     List<PlayerInfoEntry> Players,
-    [property: JsonPropertyName("max_players")] int MaxPlayers = 15);
+    [property: JsonPropertyName("max_players")] int MaxPlayers = 15,
+    [property: JsonPropertyName("region_ip")] string? RegionIp = null,
+    [property: JsonPropertyName("region_port")] int? RegionPort = 0);
 
 public record LobbyDetailedResponse(
     string Code,

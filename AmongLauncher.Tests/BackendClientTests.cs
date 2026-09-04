@@ -10,7 +10,7 @@ namespace AmongLauncher.Tests;
 
 public class BackendClientTests
 {
-    private const string ServerUrl = "https://test-server.example.com/api";
+    private const string ServerUrl = "https://test-server.example.com";
 
     private static LauncherConfig CreateConfig(string? token = null) =>
         new()
@@ -378,14 +378,14 @@ public class BackendClientTests
     [Fact]
     public void IsConfigured_ReturnsFalse_ForDefaultUrl()
     {
-        var config = new LauncherConfig { ServerUrl = "https://yourserver.com/api" };
+        var config = new LauncherConfig { ServerUrl = "https://yourserver.com" };
         Assert.False(LobbyBackendClient.IsConfigured(config));
     }
 
     [Fact]
     public void IsConfigured_ReturnsTrue_ForCustomUrl()
     {
-        var config = new LauncherConfig { ServerUrl = "https://among-us2.mel-homes.com/api" };
+        var config = new LauncherConfig { ServerUrl = "https://among-us2.mel-homes.com" };
         Assert.True(LobbyBackendClient.IsConfigured(config));
     }
 

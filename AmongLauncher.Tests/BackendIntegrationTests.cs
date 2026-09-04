@@ -7,7 +7,7 @@ using AmongLauncher.Config;
 namespace AmongLauncher.Tests;
 
 /// <summary>
-/// Integration tests that hit the live backend at https://among-us.mel-homes.com/api.
+/// Integration tests that hit the live backend at https://among-us.mel-homes.com.
 /// Each test generates a unique transient lobby code (TST + 4 random hex chars) and
 /// cleans up after itself in a best-effort finally block that never masks primary failures.
 /// </summary>

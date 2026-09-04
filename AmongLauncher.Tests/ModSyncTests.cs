@@ -63,7 +63,7 @@ public class ModSyncTests : IDisposable
 
     private static LobbyBackendClient CreateBackendClient(HttpClient http)
     {
-        return new LobbyBackendClient(http, new Config.LauncherConfig { ServerUrl = "https://test-server.example.com/api" });
+        return new LobbyBackendClient(http, new Config.LauncherConfig { ServerUrl = "https://test-server.example.com" });
     }
 
     [Fact]

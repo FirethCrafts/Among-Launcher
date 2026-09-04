@@ -17,7 +17,7 @@ public class LauncherConfig
         "AmongLauncher", "ModdedAmongUs");
 
     public Storefront? Storefront { get; set; }
-    public string ServerUrl { get; set; } = "https://yourserver.com/api";
+    public string ServerUrl { get; set; } = "https://yourserver.com";
     public string ModdedInstallPath { get; set; } = DefaultModdedPath();
     public string AvatarUrl { get; set; } = string.Empty;
     public string UserName { get; set; } = string.Empty;

@@ -80,9 +80,11 @@ public class Plugin : BasePlugin
             Log.LogInfo($"[{MyPluginInfo.PLUGIN_NAME}] Connected to launcher.");
 
             // Wait for game to fully load (splash + connecting + logging in)
-            FileLogger.Info("Waiting 30 seconds for game to fully load...");
-            await Task.Delay(30000);
-            FileLogger.Info("Done waiting.");
+            FileLogger.Info("Waiting for game to be ready...");
+            if (!await WaitForGameReadyAsync())
+            {
+                FileLogger.Warn("Game did not reach ready state; proceeding anyway.");
+            }
 
             pipe.RegisterHandler("set_server_url", element =>
             {
@@ -430,5 +432,60 @@ public class Plugin : BasePlugin
         if (prop.ValueKind == JsonValueKind.Number)
             return prop.GetInt32();
         return int.TryParse(prop.GetString(), out var value) ? value : 0;
+    }
+
+    /// <summary>
+    /// Polls the game for a stable "NotJoined" state, which indicates the game
+    /// is fully loaded, connected to the Among Us servers, and sitting at the
+    /// main menu. Requires 3 consecutive stable ticks (1.5s) to confirm,
+    /// with an 8s minimum floor to avoid the previous "join during login" crash.
+    /// Returns false after 30s if the game never reaches ready state.
+    /// </summary>
+    private static async Task<bool> WaitForGameReadyAsync()
+    {
+        const int PollIntervalMs = 500;
+        const int MinReadyTicks = 3;          // 3 × 500ms = 1.5s of stable NotJoined
+        const int MinWaitMs = 8_000;          // minimum time from plugin load
+        const int TimeoutMs = 30_000;
+
+        // Resolve the type + nested enum ONCE before the loop (not per-tick).
+        var gameStateEnum = GameAssembly.Type("InnerNet.InnerNetClient")?.GetNestedType("GameStates");
+        var notJoined = gameStateEnum != null ? GameAssembly.EnumValue(gameStateEnum, "NotJoined") : null;
+
+        var startTime = DateTime.UtcNow;
+        int stableTicks = 0;
+
+        while ((DateTime.UtcNow - startTime).TotalMilliseconds < TimeoutMs)
+        {
+            await Task.Delay(PollIntervalMs);
+
+            double elapsedMs = (DateTime.UtcNow - startTime).TotalMilliseconds;
+            if (elapsedMs < MinWaitMs)
+                continue;  // still within the minimum wait floor
+
+            var client = GameAssembly.AmongUsClient();
+            if (client == null) continue;
+
+            if (notJoined == null) continue; // type not found — skip this tick
+
+            var state = GameAssembly.GetInstanceProp(client, "GameState");
+
+            if (GameAssembly.EnumEquals(state, notJoined))
+            {
+                stableTicks++;
+                if (stableTicks >= MinReadyTicks)
+                {
+                    FileLogger.Info($"Game ready after {(int)elapsedMs}ms ({stableTicks} stable ticks).");
+                    return true;
+                }
+            }
+            else
+            {
+                stableTicks = 0;  // reset on any non-NotJoined state
+            }
+        }
+
+        FileLogger.Warn("Game readiness poll timed out.");
+        return false;
     }
 }

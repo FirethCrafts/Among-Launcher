@@ -20,16 +20,11 @@
         </Border>
 
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
-            <Button x:Name="UpdateButton" Content="Update AmongAPI"
+            <Button x:Name="UpdateButton" Content="Update"
                     Click="UpdateButton_Click"
-                    Background="#5865F2" Foreground="White" FontWeight="SemiBold"
+                    Background="#22C55E" Foreground="White" FontWeight="SemiBold"
                     BorderThickness="0" Cursor="Hand" HorizontalContentAlignment="Center"
                     Height="36" Padding="20,8"
-                    Visibility="Collapsed"/>
-            <Button x:Name="ViewChangelogButton" Content="Changelog"
-                    Click="ViewChangelogButton_Click"
-                    Style="{StaticResource SecondaryButton}"
-                    Height="36" Padding="20,8" Margin="8,0,0,0"
                     Visibility="Collapsed"/>
             <Button x:Name="CloseButton" Content="Got it"
                     Click="CloseButton_Click"

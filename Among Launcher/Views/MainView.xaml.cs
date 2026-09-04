@@ -217,9 +217,16 @@ public partial class MainView
             return;
         }
 
-        _gameManager.LaunchGame(exePath, GetLaunchArguments());
-        SetPlayButtonRunning(true);
-        ModStatusText.Text = "Game launched. AmongAPI.dll will load via BepInEx.";
+        var launched = _gameManager.LaunchGame(exePath, GetLaunchArguments());
+        if (launched)
+        {
+            SetPlayButtonRunning(true);
+            ModStatusText.Text = "Game launched. AmongAPI.dll will load via BepInEx.";
+        }
+        else
+        {
+            ModStatusText.Text = "Failed to launch Among Us. The game may already be running or the process could not be started.";
+        }
     }
 
     public void StopGame()
@@ -244,9 +251,16 @@ public partial class MainView
         var exePath = System.IO.Path.Combine(_moddedPath, "Among Us.exe");
         if (!System.IO.File.Exists(exePath)) return;
 
-        _gameManager.LaunchGame(exePath, GetLaunchArguments());
-        SetPlayButtonRunning(true);
-        ModStatusText.Text = "Game launched. AmongAPI.dll will load via BepInEx.";
+        var launched = _gameManager.LaunchGame(exePath, GetLaunchArguments());
+        if (launched)
+        {
+            SetPlayButtonRunning(true);
+            ModStatusText.Text = "Game launched. AmongAPI.dll will load via BepInEx.";
+        }
+        else
+        {
+            ModStatusText.Text = "Failed to launch Among Us. The game may already be running or the process could not be started.";
+        }
     }
 
     private string? GetLaunchArguments()
@@ -626,8 +640,20 @@ public partial class MainView
                 .Select(m => new ModSetEntry { FileName = Path.GetFileName(m.FilePath) })
                 .ToList();
             new ModProfileManager(LauncherConfig.Load()).SaveProfile(name, entries);
+
+            // Preserve the profile's mods in the library so they survive removal from the game.
+            var library = new LibraryManager(LauncherConfig.Load());
+            var copied = 0;
+            foreach (var mod in mods)
+            {
+                if (!string.IsNullOrEmpty(mod.FilePath) && library.AddToLibrary(mod.FilePath))
+                    copied++;
+            }
+
             RefreshProfiles();
-            ModStatusText.Text = $"Profile '{name}' saved with {entries.Count} mod(s).";
+            ModStatusText.Text = copied > 0
+                ? $"Profile '{name}' saved with {entries.Count} mod(s) ({copied} copied to library)."
+                : $"Profile '{name}' saved with {entries.Count} mod(s).";
         };
 
         cancelButton.Click += (_, _) => mainWindow.ModalOverlayControl.Hide();
@@ -656,33 +682,50 @@ public partial class MainView
 
         var pluginsDir = Path.Combine(_moddedPath, "BepInEx", "plugins");
         var sync = new ModSetSync(pluginsDir, _httpClient);
+        var library = new LibraryManager(LauncherConfig.Load());
 
         try
         {
             ShowProgress($"Syncing profile '{profile.Name}'...");
             var missing = await sync.DiffAsync(profile.Mods, CancellationToken.None);
-            if (missing.Count > 0)
+
+            // Restore missing mods from the library first; profiles save their
+            // mods to the library so they survive removal from the game.
+            var restoredFromLibrary = 0;
+            var trulyMissing = new List<ModSetEntry>();
+            foreach (var mod in missing)
             {
-                ProgressText.Text = $"Installing {missing.Count} missing mod(s)...";
-                await sync.InstallAsync(missing, CancellationToken.None);
+                if (library.InstallToPlugins(mod.FileName, pluginsDir))
+                    restoredFromLibrary++;
+                else
+                    trulyMissing.Add(mod);
+            }
+
+            if (trulyMissing.Count > 0)
+            {
+                ProgressText.Text = $"Installing {trulyMissing.Count} missing mod(s)...";
+                await sync.InstallAsync(trulyMissing, CancellationToken.None);
+                RefreshModsList();
+            }
+            else if (restoredFromLibrary > 0)
+            {
                 RefreshModsList();
             }
 
             // Move any installed mods that don't belong to this profile into the library.
             var keepNames = profile.Mods.Select(m => m.FileName).ToList();
-            var library = new LibraryManager(LauncherConfig.Load());
             var moved = library.MoveNonListedToLibrary(pluginsDir, keepNames);
             if (moved.Count > 0)
-            {
                 RefreshModsList();
-                ModStatusText.Text = $"Profile '{profile.Name}' applied. Moved {moved.Count} mod(s) to library.";
-            }
-            else
-            {
-                ModStatusText.Text = $"Profile '{profile.Name}' applied.";
-            }
 
-            LaunchGame();
+            var parts = new List<string> { $"Profile '{profile.Name}' applied." };
+            if (restoredFromLibrary > 0)
+                parts.Add($"{restoredFromLibrary} mod(s) restored from library.");
+            if (trulyMissing.Count > 0)
+                parts.Add($"{trulyMissing.Count} mod(s) could not be restored.");
+            if (moved.Count > 0)
+                parts.Add($"Moved {moved.Count} mod(s) to library.");
+            ModStatusText.Text = string.Join(" ", parts);
         }
         catch (Exception ex)
         {
@@ -704,9 +747,22 @@ public partial class MainView
         var mainWindow = Window.GetWindow(this) as MainWindow;
         if (mainWindow == null) return;
 
+        var fileName = Path.GetFileName(mod.FilePath);
+        var profilesReferencing = new ModProfileManager(LauncherConfig.Load()).LoadProfiles()
+            .Where(p => p.Mods.Any(m => string.Equals(m.FileName, fileName, StringComparison.OrdinalIgnoreCase)))
+            .Select(p => p.Name)
+            .ToList();
+
+        var message = $"Are you sure you want to remove '{mod.Name}'?\n\nThis action cannot be undone.";
+        if (profilesReferencing.Count > 0)
+        {
+            message += $"\n\nWarning: this mod is still referenced by the profile(s): " +
+                       $"{string.Join(", ", profilesReferencing)}. Removing it will break those profile(s).";
+        }
+
         var confirmModal = new ConfirmationModal();
         confirmModal.Configure(
-            $"Are you sure you want to remove '{mod.Name}'?\n\nThis action cannot be undone.",
+            message,
             "Remove",
             isDanger: true);
 

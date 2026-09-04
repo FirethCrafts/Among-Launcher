@@ -445,7 +445,7 @@ public static class GameAssembly
     public static bool InLobby()
     {
         var lobbyBehaviour = Type("LobbyBehaviour");
-        if (GetStaticProp(lobbyBehaviour, "Instance") != null)
+        if (GetStaticMember(lobbyBehaviour, "Instance") != null)
             return true;
 
         var client = AmongUsClient();
@@ -460,12 +460,12 @@ public static class GameAssembly
         return ToBool(GetInstanceProp(client, "InOnlineScene"));
     }
 
-    public static object? AmongUsClient() => GetStaticProp(Type("AmongUsClient"), "Instance");
+    public static object? AmongUsClient() => GetStaticMember(Type("AmongUsClient"), "Instance");
 
     public static string CurrentRegionName()
     {
         var serverManagerType = Type("ServerManager");
-        var serverManager = serverManagerType != null ? GetStaticProp(serverManagerType, "Instance") : null;
+        var serverManager = serverManagerType != null ? GetStaticMember(serverManagerType, "Instance") : null;
         if (serverManager == null)
             return "UNKNOWN";
 
@@ -477,152 +477,60 @@ public static class GameAssembly
         return string.IsNullOrEmpty(name) ? "UNKNOWN" : name;
     }
 
-    public static string LocalPlayerName()
+public static string LocalPlayerName()
     {
-        FileLogger.Info("[GameAssembly] LocalPlayerName: Starting name resolution...");
-        
-        var playerControlType = Type("PlayerControl");
-        FileLogger.Info($"[GameAssembly] LocalPlayerName: PlayerControl type resolved={playerControlType != null}");
-        
-        if (playerControlType == null)
+        // Path 1: PlayerControl.LocalPlayer.Data.PlayerName (standard Among Us path)
+        try
         {
-            FileLogger.Warn("[GameAssembly] LocalPlayerName: PlayerControl type not found");
-            return "UNKNOWN";
-        }
-
-        var localPlayer = GetStaticMember(playerControlType, "LocalPlayer");
-        FileLogger.Info($"[GameAssembly] LocalPlayerName: LocalPlayer={localPlayer != null}");
-        
-        if (localPlayer == null)
-        {
-            FileLogger.Warn("[GameAssembly] LocalPlayerName: PlayerControl.LocalPlayer is null");
-            
-            // Try alternative: GameData.Instance.AllPlayers to find local player by ID
-            var localName = TryGetLocalPlayerFromGameData();
-            if (!string.IsNullOrEmpty(localName))
+            var playerControlType = Type("PlayerControl");
+            var localPlayer = playerControlType != null ? GetStaticMember(playerControlType, "LocalPlayer") : null;
+            if (localPlayer != null)
             {
-                FileLogger.Info($"[GameAssembly] LocalPlayerName: Found via GameData fallback: '{localName}'");
-                return localName;
-            }
-            
-            return "UNKNOWN";
-        }
-
-        var localPlayerType = localPlayer.GetType();
-        FileLogger.Info($"[GameAssembly] LocalPlayerName: LocalPlayer type={localPlayerType.FullName}");
-        
-        // Debug: List all properties and fields on localPlayer
-        DebugObjectProperties(localPlayer, "LocalPlayer");
-
-        // Try Data.PlayerName (standard path)
-        var data = GetInstanceProp(localPlayer, "Data");
-        FileLogger.Info($"[GameAssembly] LocalPlayerName: Data={data != null}");
-        
-        if (data != null)
-        {
-            var dataType = data.GetType();
-            FileLogger.Info($"[GameAssembly] LocalPlayerName: Data type={dataType.FullName}");
-            
-            // Debug: List all properties and fields on Data object
-            DebugObjectProperties(data, "LocalPlayer.Data");
-            
-            var name = ToStr(GetInstanceProp(data, "PlayerName"));
-            FileLogger.Info($"[GameAssembly] LocalPlayerName: Data.PlayerName='{name}'");
-            if (!string.IsNullOrEmpty(name) && name != "UNKNOWN")
-                return name;
-        }
-        else
-        {
-            FileLogger.Warn("[GameAssembly] LocalPlayerName: Data is null");
-        }
-
-        // Try direct PlayerName property on PlayerControl
-        var directName = ToStr(GetInstanceProp(localPlayer, "PlayerName"));
-        FileLogger.Info($"[GameAssembly] LocalPlayerName: direct PlayerName='{directName}'");
-        if (!string.IsNullOrEmpty(directName) && directName != "UNKNOWN")
-            return directName;
-
-        // Try name property (Unity Object.name)
-        var unityName = ToStr(GetInstanceProp(localPlayer, "name"));
-        FileLogger.Info($"[GameAssembly] LocalPlayerName: name='{unityName}'");
-        if (!string.IsNullOrEmpty(unityName) && unityName != "UNKNOWN")
-            return unityName;
-
-        // Try AmongUsClient.GetPlayerName (alternative method)
-        var client = AmongUsClient();
-        if (client != null)
-        {
-            var methodName = HasInstanceMethod(client, "GetPlayerName", 0) ? "GetPlayerName" : null;
-            if (methodName != null)
-            {
-                var result = CallInstanceMethod(client, methodName);
-                var clientName = ToStr(result);
-                FileLogger.Info($"[GameAssembly] LocalPlayerName: client.GetPlayerName()='{clientName}'");
-                if (!string.IsNullOrEmpty(clientName) && clientName != "UNKNOWN")
-                    return clientName;
+                var data = GetInstanceProp(localPlayer, "Data");
+                if (data != null)
+                {
+                    var name = ToStr(GetInstanceProp(data, "PlayerName"));
+                    if (!string.IsNullOrEmpty(name) && name != "UNKNOWN")
+                        return name;
+                }
             }
         }
+        catch { }
 
-        // Try getting name from PlayerId field
-        var playerId = GetInstanceProp(localPlayer, "PlayerId");
-        FileLogger.Info($"[GameAssembly] LocalPlayerName: PlayerId={playerId}");
-        if (playerId != null)
+        // Path 2: Direct PlayerName on PlayerControl
+        try
         {
-            var playerNameFromId = TryGetPlayerNameById(ToInt(playerId));
-            if (!string.IsNullOrEmpty(playerNameFromId))
+            var playerControlType = Type("PlayerControl");
+            var localPlayer = playerControlType != null ? GetStaticMember(playerControlType, "LocalPlayer") : null;
+            if (localPlayer != null)
             {
-                FileLogger.Info($"[GameAssembly] LocalPlayerName: Found via PlayerId: '{playerNameFromId}'");
-                return playerNameFromId;
+                var name = ToStr(GetInstanceProp(localPlayer, "PlayerName"));
+                if (!string.IsNullOrEmpty(name) && name != "UNKNOWN")
+                    return name;
             }
         }
+        catch { }
+
+        // Path 3: GameData.Players lookup by PlayerId
+        try
+        {
+            var playerControlType = Type("PlayerControl");
+            var localPlayer = playerControlType != null ? GetStaticMember(playerControlType, "LocalPlayer") : null;
+            if (localPlayer != null)
+            {
+                var playerId = ToInt(GetInstanceProp(localPlayer, "PlayerId"));
+                if (playerId > 0)
+                {
+                    var name = TryGetPlayerNameById(playerId);
+                    if (!string.IsNullOrEmpty(name))
+                        return name;
+                }
+            }
+        }
+        catch { }
 
         FileLogger.Warn("[GameAssembly] LocalPlayerName: all attempts failed, returning UNKNOWN");
         return "UNKNOWN";
-    }
-
-    private static string? TryGetLocalPlayerFromGameData()
-    {
-        try
-        {
-            var gameDataType = Type("GameData");
-            if (gameDataType == null) return null;
-            
-            var gameDataInstance = GetStaticProp(gameDataType, "Instance");
-            if (gameDataInstance == null) return null;
-            
-            var allPlayers = GetInstanceProp(gameDataInstance, "AllPlayers");
-            if (allPlayers == null) return null;
-            
-            var countObj = GetInstanceProp(allPlayers, "Count");
-            var count = ToInt(countObj);
-            FileLogger.Info($"[GameAssembly] TryGetLocalPlayerFromGameData: AllPlayers.Count={count}");
-            
-            for (int i = 0; i < count; i++)
-            {
-                try
-                {
-                    var playerInfo = CallInstanceMethod(allPlayers, "get_Item", new object[] { i }, new[] { typeof(int) });
-                    if (playerInfo == null) continue;
-                    
-                    var isLocal = ToBool(GetInstanceProp(playerInfo, "IsLocal"));
-                    if (isLocal)
-                    {
-                        var name = ToStr(GetInstanceProp(playerInfo, "PlayerName"));
-                        FileLogger.Info($"[GameAssembly] TryGetLocalPlayerFromGameData: Found local player at index {i}: '{name}'");
-                        return name;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    FileLogger.Warn($"[GameAssembly] TryGetLocalPlayerFromGameData: player[{i}] failed: {ex.Message}");
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            FileLogger.Warn($"[GameAssembly] TryGetLocalPlayerFromGameData failed: {ex.Message}");
-        }
-        return null;
     }
 
     private static string? TryGetPlayerNameById(int playerId)

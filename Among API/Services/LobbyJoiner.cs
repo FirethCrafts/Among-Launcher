@@ -379,7 +379,7 @@ public class LobbyJoiner : IDisposable
             var serverManagerType = GameAssembly.Type("ServerManager");
             if (serverManagerType == null) return false;
 
-            var serverManager = GameAssembly.GetStaticProp(serverManagerType, "Instance");
+            var serverManager = GameAssembly.GetStaticMember(serverManagerType, "Instance");
             if (serverManager == null)
             {
                 FileLogger.Warn("[LobbyJoiner] ServerManager unavailable");
