@@ -31,7 +31,7 @@ public static class VersionChecker
         return new Version(major, minor, build, revision);
     }
 
-    public static async Task<(bool UpdateAvailable, Version? LatestVersion, string? DownloadUrl)> CheckForUpdateAsync(
+    public static async Task<(bool UpdateAvailable, Version? LatestVersion, string? DownloadUrl, string? Changelog)> CheckForUpdateAsync(
         HttpClient http, string moddedPath)
     {
         var current = GetCurrentVersion(moddedPath);
@@ -56,8 +56,15 @@ public static class VersionChecker
 
             var tag = root.TryGetProperty("tag_name", out var tagEl) ? tagEl.GetString() : null;
             Services.LauncherLog.Write($"[VersionCheck] Tag: {tag ?? "null"}");
+
+            string? modChangelog = null;
+            if (root.TryGetProperty("body", out var bodyEl))
+            {
+                var (launcherChangelog, mod) = ReleaseChangelogParser.Parse(bodyEl.GetString());
+                modChangelog = mod;
+            }
             
-            if (string.IsNullOrEmpty(tag)) return (false, null, null);
+            if (string.IsNullOrEmpty(tag)) return (false, null, null, modChangelog);
 
             var versionStr = tag.StartsWith('v') ? tag[1..] : tag;
             Services.LauncherLog.Write($"[VersionCheck] Version string: {versionStr}");
@@ -91,29 +98,29 @@ public static class VersionChecker
                 if (downloadUrl != null)
                 {
                     Services.LauncherLog.Write($"[VersionCheck] Tag unparsable, but asset found - update available");
-                    return (true, null, downloadUrl);
+                    return (true, null, downloadUrl, modChangelog);
                 }
                 Services.LauncherLog.Write($"[VersionCheck] No parseable version and no asset");
-                return (false, null, null);
+                return (false, null, null, modChangelog);
             }
 
             if (current == null)
             {
                 Services.LauncherLog.Write($"[VersionCheck] No current version, update available: {downloadUrl != null}");
-                return (downloadUrl != null, latest, downloadUrl);
+                return (downloadUrl != null, latest, downloadUrl, modChangelog);
             }
 
             var latestNorm = NormalizeVersion(latest);
             var currentNorm = NormalizeVersion(current);
             Services.LauncherLog.Write($"[VersionCheck] Comparing: latest={latestNorm}, current={currentNorm}, update={latestNorm > currentNorm}");
-            if (latestNorm <= currentNorm) return (false, null, null);
+            if (latestNorm <= currentNorm) return (false, null, null, modChangelog);
 
-            return (true, latest, downloadUrl);
+            return (true, latest, downloadUrl, modChangelog);
         }
         catch (Exception ex)
         {
             Services.LauncherLog.Write($"[VersionCheck] Error: {ex.Message}");
-            return (false, null, null);
+            return (false, null, null, null);
         }
     }
 

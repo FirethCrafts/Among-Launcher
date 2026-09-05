@@ -13,9 +13,11 @@ public partial class LauncherUpdateModal : UserControl
         InitializeComponent();
     }
 
-    public void Configure(string message)
+    public void Configure(string message, string? changelog = null)
     {
         MessageText.Text = message;
+        ChangelogContent.Text = changelog ?? "";
+        ChangelogBorder.Visibility = string.IsNullOrWhiteSpace(changelog) ? Visibility.Collapsed : Visibility.Visible;
     }
 
     private void UpdateButton_Click(object sender, RoutedEventArgs e)

@@ -4,7 +4,7 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              mc:Ignorable="d"
-             d:DesignHeight="240" d:DesignWidth="460">
+             d:DesignHeight="420" d:DesignWidth="460">
     <StackPanel>
         <StackPanel Orientation="Horizontal" Margin="0,0,0,18">
             <Border Background="#22222A" CornerRadius="10" Width="44" Height="44"
@@ -21,7 +21,13 @@
         </StackPanel>
 
         <TextBlock x:Name="MessageText" Text="" FontSize="14"
-                   Foreground="{StaticResource TextBody}" TextWrapping="Wrap" Margin="0,0,0,24"/>
+                   Foreground="{StaticResource TextBody}" TextWrapping="Wrap" Margin="0,0,0,12"/>
+
+        <Border x:Name="ChangelogBorder" Background="{StaticResource GlassSurfaceWeak}" CornerRadius="8" Margin="0,0,0,16" Visibility="Collapsed">
+            <ScrollViewer MaxHeight="220" VerticalScrollBarVisibility="Auto" Padding="16">
+                <TextBlock x:Name="ChangelogContent" FontSize="13" Foreground="{StaticResource TextBody}" TextWrapping="Wrap" LineHeight="22" FontFamily="Segoe UI"/>
+            </ScrollViewer>
+        </Border>
 
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
             <Button x:Name="CloseButton" Content="Close"

@@ -377,7 +377,7 @@ public partial class MainWindow
             return;
         }
 
-        var (updateAvailable, _, downloadUrl) =
+        var (updateAvailable, _, downloadUrl, _) =
             await Services.VersionChecker.CheckForUpdateAsync(_httpClient, moddedPath);
 
         _amongApiUpdateAvailable = updateAvailable;
@@ -550,7 +550,7 @@ public partial class MainWindow
         var tcs = new TaskCompletionSource<bool?>();
         var modal = new LauncherUpdateModal();
         modal.Configure(
-            "A new version of Among Launcher is available. Update to continue?");
+            "A new version of Among Launcher is available. Update to continue?", UpdateService.PendingLauncherChangelog);
 
         modal.UpdateRequested += (_, _) =>
         {
