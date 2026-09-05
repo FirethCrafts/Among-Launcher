@@ -124,13 +124,38 @@ public static class VersionChecker
             : new Version(v.Major, v.Minor, v.Build >= 0 ? v.Build : 0, 0);
     }
 
-    public static async Task<bool> DownloadAndUpdateAsync(HttpClient http, string downloadUrl, string moddedPath)
+    public static async Task<bool> DownloadAndUpdateAsync(HttpClient http, string downloadUrl, string moddedPath, Action<int>? progress = null, Action<string>? status = null)
     {
         try
         {
             var pluginsDir = Path.Combine(moddedPath, "BepInEx", "plugins");
             Directory.CreateDirectory(pluginsDir);
             var destPath = Path.Combine(pluginsDir, AssetName);
+            var tempPath = destPath + ".download";
+
+            var response = await http.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead);
+            response.EnsureSuccessStatusCode();
+
+            var total = response.Content.Headers.ContentLength ?? -1L;
+
+            await using var stream = await response.Content.ReadAsStreamAsync();
+            await using (var fileStream = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None))
+            {
+                var buffer = new byte[8192];
+                long read = 0;
+                int bytesRead;
+
+                while ((bytesRead = await stream.ReadAsync(buffer)) > 0)
+                {
+                    await fileStream.WriteAsync(buffer.AsMemory(0, bytesRead));
+                    read += bytesRead;
+
+                    if (total > 0)
+                        progress?.Invoke(Math.Clamp((int)(read * 100 / total), 0, 100));
+                }
+            }
+
+            status?.Invoke("Installing...");
 
             // Backup current version
             if (File.Exists(destPath))
@@ -139,12 +164,7 @@ public static class VersionChecker
                 File.Copy(destPath, backupPath, overwrite: true);
             }
 
-            var response = await http.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead);
-            response.EnsureSuccessStatusCode();
-
-            await using var stream = await response.Content.ReadAsStreamAsync();
-            await using var fileStream = new FileStream(destPath, FileMode.Create, FileAccess.Write, FileShare.None);
-            await stream.CopyToAsync(fileStream);
+            File.Move(tempPath, destPath, overwrite: true);
 
             return true;
         }

@@ -322,8 +322,27 @@ public partial class MainWindow
                 var result = await ShowLauncherUpdatePopup();
                 if (result == true)
                 {
-                    await UpdateService.ApplyUpdateAsync();
-                    return;
+                    var progressModal = new UpdateProgressModal();
+                    progressModal.SetStatus("Downloading...");
+                    progressModal.SetProgress(0);
+                    ModalOverlay.Show("Updating...", progressModal);
+
+                    try
+                    {
+                        await UpdateService.ApplyUpdateAsync(
+                            progress: p => Dispatcher.Invoke(() => progressModal.SetProgress(p)),
+                            status: s => Dispatcher.Invoke(() => progressModal.SetStatus(s)));
+                        return;
+                    }
+                    catch
+                    {
+                        ModalOverlay.Hide();
+                        var errorModal = new ConfirmationModal();
+                        errorModal.Configure("Failed to update Among Launcher. Please try again later.", "OK");
+                        errorModal.Confirmed += (_, _) => ModalOverlay.Hide();
+                        ModalOverlay.Show("Update Failed", errorModal);
+                        return;
+                    }
                 }
                 else
                 {
@@ -529,33 +548,33 @@ public partial class MainWindow
     private async Task<bool?> ShowLauncherUpdatePopup()
     {
         var tcs = new TaskCompletionSource<bool?>();
-        var confirmModal = new ConfirmationModal();
-        confirmModal.Configure(
-            "A new version of Among Launcher is available. Update to continue?",
-            "Update",
-            isDanger: false);
+        var modal = new LauncherUpdateModal();
+        modal.Configure(
+            "A new version of Among Launcher is available. Update to continue?");
 
-        // Override button colors for launcher update: green Update, red Close
-        confirmModal.ConfirmButton.Background = new System.Windows.Media.SolidColorBrush(
-            System.Windows.Media.Color.FromRgb(0x22, 0xC5, 0x5E)); // Green
-
-        // Rename Cancel to Close and make it red
-        confirmModal.CancelButton.Content = "Close";
-        confirmModal.CancelButton.Background = new System.Windows.Media.SolidColorBrush(
-            System.Windows.Media.Color.FromRgb(0xDC, 0x26, 0x26)); // Red
-
-        confirmModal.Confirmed += (_, _) =>
+        modal.UpdateRequested += (_, _) =>
         {
-            ModalOverlay.Hide();
             tcs.TrySetResult(true);
-        };
-        confirmModal.Cancelled += (_, _) =>
-        {
             ModalOverlay.Hide();
+        };
+        modal.CloseRequested += (_, _) =>
+        {
             tcs.TrySetResult(false);
+            ModalOverlay.Hide();
         };
 
-        ModalOverlay.Show("Update Available", confirmModal);
+        ModalOverlay.Show("Update Available", modal);
+
+        // Guard against a TCS hang: the overlay backdrop/✕ hides the modal without
+        // resolving the task. Treat a dismissed/ignored popup as declining instead
+        // of awaiting forever.
+        var timeout = Task.Delay(TimeSpan.FromSeconds(60));
+        var completed = await Task.WhenAny(tcs.Task, timeout);
+        if (completed != tcs.Task)
+        {
+            ModalOverlay.Hide();
+            return false;
+        }
         return await tcs.Task;
     }
 
@@ -629,6 +648,8 @@ public partial class MainWindow
         var moddedPath = GetModdedPath();
         if (string.IsNullOrEmpty(moddedPath)) return;
 
+        var downloadUrl = _amongApiDownloadUrl;
+
         var confirmModal = new ConfirmationModal();
         confirmModal.Configure(
             $"An AmongAPI update is available.\n\nUpdating will replace the current AmongApi.dll. The game will be stopped if running.\n\nProceed?",
@@ -640,8 +661,25 @@ public partial class MainWindow
             ModalOverlay.Hide();
             _mainView.StopGame();
 
-            var success = await Services.VersionChecker.DownloadAndUpdateAsync(
-                _httpClient, _amongApiDownloadUrl, moddedPath);
+            var progressModal = new UpdateProgressModal();
+            progressModal.SetStatus("Downloading...");
+            progressModal.SetProgress(0);
+            ModalOverlay.Show("Updating AmongAPI", progressModal);
+
+            bool success;
+            try
+            {
+                success = await Services.VersionChecker.DownloadAndUpdateAsync(
+                    _httpClient, downloadUrl, moddedPath,
+                    progress: p => Dispatcher.Invoke(() => progressModal.SetProgress(p)),
+                    status: s => Dispatcher.Invoke(() => progressModal.SetStatus(s)));
+            }
+            catch
+            {
+                success = false;
+            }
+
+            ModalOverlay.Hide();
 
             if (success)
             {
@@ -652,6 +690,14 @@ public partial class MainWindow
                 _config.Save();
                 Dispatcher.Invoke(() => _mainView.HideUpdateAmongApiButton());
                 _mainView.UpdateModStatusText("AmongAPI updated successfully.");
+
+                Dispatcher.Invoke(() =>
+                {
+                    var okModal = new ConfirmationModal();
+                    okModal.Configure("AmongAPI updated successfully.", "OK");
+                    okModal.Confirmed += (_, _) => ModalOverlay.Hide();
+                    ModalOverlay.Show("Update Complete", okModal);
+                });
             }
             else
             {

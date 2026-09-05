@@ -31,11 +31,12 @@ public static class UpdateService
         }
     }
     
-    public static async Task ApplyUpdateAsync()
+    public static async Task ApplyUpdateAsync(Action<int>? progress = null, Action<string>? status = null)
     {
         if (UpdateManager == null || _pendingUpdate == null) return;
         
-        await UpdateManager.DownloadUpdatesAsync(_pendingUpdate);
+        await UpdateManager.DownloadUpdatesAsync(_pendingUpdate, progress);
+        status?.Invoke("Installing...");
         UpdateManager.ApplyUpdatesAndRestart(_pendingUpdate);
     }
 }
