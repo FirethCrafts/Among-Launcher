@@ -37,8 +37,11 @@ public static class UpdateService
                 return true;
             }
             
-            // Velopack couldn't find a matching asset. Fall back to GitHub API version comparison.
-            return await CheckGitHubReleaseFallbackAsync();
+            // Velopack couldn't find a matching asset — can't auto-update the launcher.
+            // Return false so the caller can proceed (e.g., check AmongAPI updates).
+            _pendingLauncherChangelog = null;
+            _pendingModChangelog = null;
+            return false;
         }
         catch
         {
