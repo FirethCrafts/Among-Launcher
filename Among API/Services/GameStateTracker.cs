@@ -27,12 +27,16 @@ public class GameStateTracker : IDisposable
 {
     private const int PollIntervalMs = 500;
 
+    private const int InitialDelayMs = 5000;
+    private const int ExceptionLogCooldownMs = 5000;
+
     private readonly ManualLogSource _log;
     private readonly object _lock = new();
     private CancellationTokenSource? _cts;
     private bool _wasInLobby;
     private bool _lastWasHost;
     private int _lastPlayerCount = -1;
+    private DateTime _lastExceptionLogTime = DateTime.MinValue;
 
     public event EventHandler<LobbyInfo>? LobbyCreated;
     public event EventHandler<string>? LobbyClosed;
@@ -44,7 +48,11 @@ public class GameStateTracker : IDisposable
     public void Start()
     {
         _cts = new CancellationTokenSource();
-        _ = Task.Run(LoopAsync);
+        _ = Task.Run(async () =>
+        {
+            try { await Task.Delay(InitialDelayMs, _cts.Token); } catch { return; }
+            await LoopAsync();
+        });
     }
 
     public void Stop()
@@ -70,7 +78,12 @@ public class GameStateTracker : IDisposable
             }
             catch (Exception ex)
             {
-                _log.LogWarning($"[GameStateTracker] Tick failed: {ex}");
+                var now = DateTime.UtcNow;
+                if ((now - _lastExceptionLogTime).TotalMilliseconds >= ExceptionLogCooldownMs)
+                {
+                    _lastExceptionLogTime = now;
+                    _log.LogWarning($"[GameStateTracker] Tick failed: {ex}");
+                }
             }
             try
             {
@@ -247,6 +260,11 @@ public class GameStateTracker : IDisposable
             }
 
             // Fallback: HostId == CurrentClient
+            if (innerNetClientType == null)
+            {
+                FileLogger.Warn("[GameStateTracker] IsHost fallback: InnerNetClient type is null, cannot determine host.");
+                return false;
+            }
             var hostIdObj = GameAssembly.GetInstanceMember(client, "HostId");
             var currentClientObj = GameAssembly.GetStaticMember(innerNetClientType, "CurrentClient");
             var hostId = GameAssembly.ToInt(hostIdObj);
