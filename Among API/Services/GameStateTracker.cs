@@ -82,7 +82,7 @@ public class GameStateTracker : IDisposable
                 if ((now - _lastExceptionLogTime).TotalMilliseconds >= ExceptionLogCooldownMs)
                 {
                     _lastExceptionLogTime = now;
-                    _log.LogWarning($"[GameStateTracker] Tick failed: {ex}");
+                    _log.LogWarning($"[GameStateTracker] Tick failed: {ex.Message}");
                 }
             }
             try
@@ -118,7 +118,12 @@ public class GameStateTracker : IDisposable
             }
             catch (Exception ex)
             {
-                _log.LogWarning($"[GameStateTracker] State read failed: {ex}");
+                var now = DateTime.UtcNow;
+                if ((now - _lastExceptionLogTime).TotalMilliseconds >= ExceptionLogCooldownMs)
+                {
+                    _lastExceptionLogTime = now;
+                    _log.LogWarning($"[GameStateTracker] State read failed: {ex.Message}");
+                }
                 return;
             }
 
@@ -209,7 +214,12 @@ public class GameStateTracker : IDisposable
                 }
                 catch (Exception ex)
                 {
-                    _log.LogWarning($"[GameStateTracker] Tick lock block failed: {ex}");
+                    var now = DateTime.UtcNow;
+                    if ((now - _lastExceptionLogTime).TotalMilliseconds >= ExceptionLogCooldownMs)
+                    {
+                        _lastExceptionLogTime = now;
+                        _log.LogWarning($"[GameStateTracker] Tick lock block failed: {ex.Message}");
+                    }
                 }
             }
         }
