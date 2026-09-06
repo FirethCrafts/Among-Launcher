@@ -27,7 +27,7 @@ public class GameStateTracker : IDisposable
 {
     private const int PollIntervalMs = 500;
 
-    private const int InitialDelayMs = 5000;
+    private const int InitialDelayMs = 10000;
     private const int ExceptionLogCooldownMs = 5000;
 
     private readonly ManualLogSource _log;
@@ -104,6 +104,10 @@ public class GameStateTracker : IDisposable
     {
         try
         {
+            // Guard: don't try to read game state until AmongUsClient exists
+            var client = GameAssembly.AmongUsClient();
+            if (client == null) return;
+
             bool inLobby;
             string code;
             int count;
