@@ -47,6 +47,8 @@ public partial class LibraryView : UserControl
         var fileName = entry.FileName;
         if (string.IsNullOrEmpty(fileName)) return;
 
+        if (_library == null) return;
+
         var pluginsDir = GetPluginsDir();
         if (pluginsDir == null)
         {
@@ -80,6 +82,8 @@ public partial class LibraryView : UserControl
             MessageBoxImage.Warning);
 
         if (result != MessageBoxResult.Yes) return;
+
+        if (_library == null) return;
 
         _library.RemoveFromLibrary(fileName);
         RefreshLibrary();

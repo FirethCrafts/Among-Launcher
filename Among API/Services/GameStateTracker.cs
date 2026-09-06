@@ -27,7 +27,6 @@ public class GameStateTracker : IDisposable
 {
     private const int PollIntervalMs = 500;
 
-    private const int InitialDelayMs = 10000;
     private const int ExceptionLogCooldownMs = 5000;
 
     private readonly ManualLogSource _log;
@@ -50,7 +49,6 @@ public class GameStateTracker : IDisposable
         _cts = new CancellationTokenSource();
         _ = Task.Run(async () =>
         {
-            try { await Task.Delay(InitialDelayMs, _cts.Token); } catch { return; }
             await LoopAsync();
         });
     }

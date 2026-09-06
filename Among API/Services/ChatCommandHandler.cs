@@ -109,7 +109,17 @@ public class ChatCommandHandler : IDisposable
 
         // Clear the chat input on the Unity main thread to prevent the
         // command from being sent as a normal chat message.
-        MainThreadDispatcher.Enqueue(() => TryClearInput());
+        MainThreadDispatcher.Enqueue(() =>
+        {
+            try
+            {
+                TryClearInput();
+            }
+            catch (Exception ex)
+            {
+                FileLogger.Warn($"[ChatCommandHandler] TryClearInput failed: {ex.Message}");
+            }
+        });
         _lastHandledText = text;
     }
 
