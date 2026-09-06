@@ -72,7 +72,10 @@ public class GameStateTracker : IDisposable
         {
             try
             {
-                Tick();
+                // Marshal the whole Tick to the Unity main thread: reading
+                // Unity/IL2CPP objects from a background thread raises native
+                // NullReferenceExceptions that bypass C# try/catch.
+                await MainThreadDispatcher.EnqueueAsync(Tick);
             }
             catch (Exception ex)
             {
