@@ -22,8 +22,7 @@
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
             <Button x:Name="UpdateButton" Content="Update"
                     Click="UpdateButton_Click"
-                    Background="#22C55E" Foreground="White" FontWeight="SemiBold"
-                    BorderThickness="0" Cursor="Hand" HorizontalContentAlignment="Center"
+                    Style="{StaticResource PlayButton}"
                     Height="36" Padding="20,8"
                     Visibility="Collapsed"/>
             <Button x:Name="CloseButton" Content="Got it"

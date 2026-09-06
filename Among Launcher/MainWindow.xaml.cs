@@ -381,7 +381,11 @@ public partial class MainWindow
                             {
                                 _amongApiUpdateAvailable = false;
                                 _amongApiDownloadUrl = null;
-                                Dispatcher.Invoke(() => _mainView.UpdateModStatusText("AmongAPI updated successfully."));
+                                Dispatcher.Invoke(() =>
+                                {
+                                    _mainView.RefreshModsList();
+                                    _mainView.UpdateModStatusText("AmongAPI updated successfully.");
+                                });
                             }
                             else
                             {
@@ -772,7 +776,11 @@ public partial class MainWindow
                 var currentVersion = GetCurrentVersion();
                 _config.LastSeenVersion = currentVersion;
                 _config.Save();
-                Dispatcher.Invoke(() => _mainView.HideUpdateAmongApiButton());
+                Dispatcher.Invoke(() =>
+                {
+                    _mainView.HideUpdateAmongApiButton();
+                    _mainView.RefreshModsList();
+                });
                 _mainView.UpdateModStatusText("AmongAPI updated successfully.");
 
                 Dispatcher.Invoke(() =>
