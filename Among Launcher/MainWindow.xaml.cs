@@ -35,6 +35,8 @@ public partial class MainWindow
     private string? _amongApiDownloadUrl;
     private Views.HostControlPanelView? _hostPanel;
     private readonly List<string> _lobbyPlayerNames = new();
+    private readonly Dictionary<string, int?> _lobbyPlayerLevels = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, int?> _lobbyPlayerPings = new(StringComparer.OrdinalIgnoreCase);
     private TaskCompletionSource<bool>? _gameReadyTcs;
     private System.Windows.Forms.NotifyIcon? _trayIcon;
     private bool _joining;
@@ -105,7 +107,7 @@ public partial class MainWindow
                         _inGameView = new Views.InGameView();
                         _inGameView.JoinLobbyRequested += InGameView_JoinLobbyRequested;
                     }
-                    _inGameView.SetLobbyCode(_activeLobby?.Code ?? _postedLobbyCode);
+                    PrefillInGameCode(_activeLobby?.Code ?? _postedLobbyCode);
                     GameButton.Visibility = Visibility.Visible;
                     ShowView(_inGameView, showSidebar: true);
                 });
@@ -188,8 +190,19 @@ public partial class MainWindow
             };
             _activeLobby = info;
             _lobbyPlayerNames.Clear();
-            if (p.TryGetProperty("playerNames", out var namesArr) && namesArr.GetArrayLength() > 0)
+            _lobbyPlayerLevels.Clear();
+            _lobbyPlayerPings.Clear();
+            var seedLevels = new List<int?>();
+            if (p.TryGetProperty("playerLevels", out var seedLevelsArr) && seedLevelsArr.ValueKind == JsonValueKind.Array)
+                foreach (var lv in seedLevelsArr.EnumerateArray())
+                    seedLevels.Add(lv.ValueKind == JsonValueKind.Number ? lv.GetInt32() : null);
+            var seedPings = new List<int?>();
+            if (p.TryGetProperty("playerPings", out var seedPingsArr) && seedPingsArr.ValueKind == JsonValueKind.Array)
+                foreach (var pg in seedPingsArr.EnumerateArray())
+                    seedPings.Add(pg.ValueKind == JsonValueKind.Number ? pg.GetInt32() : null);
+            if (p.TryGetProperty("playerNames", out var namesArr) && namesArr.ValueKind == JsonValueKind.Array && namesArr.GetArrayLength() > 0)
             {
+                var index = 0;
                 foreach (var n in namesArr.EnumerateArray())
                 {
                     var name = n.GetString();
@@ -199,7 +212,12 @@ public partial class MainWindow
                         !_lobbyPlayerNames.Contains(name))
                     {
                         _lobbyPlayerNames.Add(name);
+                        if (index < seedLevels.Count && seedLevels[index].HasValue)
+                            _lobbyPlayerLevels[name] = seedLevels[index];
+                        if (index < seedPings.Count && seedPings[index].HasValue)
+                            _lobbyPlayerPings[name] = seedPings[index];
                     }
+                    index++;
                 }
             }
             else if (!string.IsNullOrWhiteSpace(host) && !host.Equals("UNKNOWN", StringComparison.OrdinalIgnoreCase))
@@ -224,11 +242,13 @@ public partial class MainWindow
                     modEntries.Add(uploaded ?? new ModInfoEntry(entry.FileName, entry.Version, entry.Sha256));
                 }
 
-                int? hostLevel = p.TryGetProperty("playerLevels", out var plArr) && plArr.GetArrayLength() > 0
+                int? hostLevel = p.TryGetProperty("playerLevels", out var plArr) && plArr.ValueKind == JsonValueKind.Array && plArr.GetArrayLength() > 0 && plArr[0].ValueKind == JsonValueKind.Number
                     ? plArr[0].GetInt32() : null;
-                int? hostPing = p.TryGetProperty("playerPings", out var ppArr) && ppArr.GetArrayLength() > 0
+                int? hostPing = p.TryGetProperty("playerPings", out var ppArr) && ppArr.ValueKind == JsonValueKind.Array && ppArr.GetArrayLength() > 0 && ppArr[0].ValueKind == JsonValueKind.Number
                     ? ppArr[0].GetInt32() : null;
                 players.Add(new PlayerInfoEntry(_userId, host, true, hostLevel, hostPing));
+                if (hostLevel.HasValue) _lobbyPlayerLevels[host] = hostLevel;
+                if (hostPing.HasValue) _lobbyPlayerPings[host] = hostPing;
 
                 Services.LauncherLog.Write($"[Launcher] Creating lobby on backend. Host={host}, MaxPlayers={info.MaxPlayers}");
                 var createResult = await _backend.CreateLobbyAsync(new CreateLobbyRequest(info.Code, info.Region, info.Host, "modded", modEntries, info.MaxPlayers, info.GameVersion, info.MapName, info.Language, info.ChatType, players, info.RegionIp, info.RegionPort), CancellationToken.None);
@@ -253,6 +273,14 @@ public partial class MainWindow
                 Dispatcher.Invoke(() => ShowHostPanel(info));
             }
 
+            PrefillInGameCode(info.Code);
+            var seededPlayers = BuildPlayerList();
+            Dispatcher.Invoke(() =>
+            {
+                _hostPanel?.UpdatePlayers(new List<LobbyPlayer>(seededPlayers));
+                _inGameView?.SetPlayers(new List<string>(_lobbyPlayerNames));
+            });
+
             return new { type = "lobby_created_ack" };
         });
 
@@ -276,6 +304,9 @@ public partial class MainWindow
             });
             _activeLobby = null;
             _hostPanel = null;
+            _lobbyPlayerNames.Clear();
+            _lobbyPlayerLevels.Clear();
+            _lobbyPlayerPings.Clear();
             return new { type = "lobby_closed_ack" };
         });
 
@@ -288,14 +319,14 @@ public partial class MainWindow
             var ok = p.GetProperty("success").GetBoolean();
             var error = p.TryGetProperty("error", out var errEl) ? errEl.GetString() : null;
             LogDebug($"[Launcher] join_lobby_result received: success={ok}, error={error}");
-            if (!ok)
+            var statusMessage = ok ? $"Joined lobby" : $"Join failed: {error}";
+            Dispatcher.Invoke(() =>
             {
-                Dispatcher.Invoke(() =>
-                {
-                    if (ContentArea.Content is MainView mv)
-                        mv.UpdateModStatusText($"Join failed: {error}");
-                });
-            }
+                _inGameView?.SetBusy(false);
+                _inGameView?.SetStatus(statusMessage);
+                if (ContentArea.Content is MainView mv)
+                    mv.UpdateModStatusText(statusMessage);
+            });
             return null;
         });
 
@@ -867,6 +898,7 @@ public partial class MainWindow
         try
         {
             LogDebug($"[Launcher] Joining lobby {code}...");
+            PrefillInGameCode(code);
             Dispatcher.Invoke(() =>
             {
                 if (ContentArea.Content is MainView mv)
@@ -1208,7 +1240,18 @@ public partial class MainWindow
             if (joined && !_lobbyPlayerNames.Contains(playerName))
                 _lobbyPlayerNames.Add(playerName);
             else if (!joined)
+            {
                 _lobbyPlayerNames.Remove(playerName);
+                _lobbyPlayerLevels.Remove(playerName);
+                _lobbyPlayerPings.Remove(playerName);
+            }
+            if (joined)
+            {
+                if (TryGetPayloadInt(p, "playerLevel", "level", out var lvl))
+                    _lobbyPlayerLevels[playerName] = lvl;
+                if (TryGetPayloadInt(p, "playerPing", "ping", out var png))
+                    _lobbyPlayerPings[playerName] = png;
+            }
         }
 
         if (_hostPanel != null)
@@ -1217,9 +1260,28 @@ public partial class MainWindow
         return Task.FromResult<object?>(null);
     }
 
+    private static bool TryGetPayloadInt(JsonElement payload, string key1, string key2, out int value)
+    {
+        foreach (var key in new[] { key1, key2 })
+        {
+            if (payload.TryGetProperty(key, out var el) && el.ValueKind == JsonValueKind.Number)
+            {
+                value = el.GetInt32();
+                return true;
+            }
+        }
+        value = 0;
+        return false;
+    }
+
     private List<LobbyPlayer> BuildPlayerList()
     {
-        var players = _lobbyPlayerNames.Select(n => new LobbyPlayer(n, n, false)).ToList();
+        var players = _lobbyPlayerNames.Select(n => new LobbyPlayer(
+            n,
+            n,
+            false,
+            _lobbyPlayerLevels.TryGetValue(n, out var lvl) ? lvl : null,
+            _lobbyPlayerPings.TryGetValue(n, out var png) ? png : null)).ToList();
 
         var hostName = _activeLobby?.Host ?? _config.UserName;
         var hostIndex = players.FindIndex(p =>
@@ -1233,44 +1295,132 @@ public partial class MainWindow
         return players;
     }
 
+    private void PrefillInGameCode(string? code)
+    {
+        // Never blank a non-empty box: ignore empty codes entirely
+        // (InGameView.SetLobbyCode also guards against blanking).
+        if (string.IsNullOrWhiteSpace(code)) return;
+        Dispatcher.Invoke(() =>
+        {
+            if (_inGameView == null)
+            {
+                _inGameView = new Views.InGameView();
+                _inGameView.JoinLobbyRequested += InGameView_JoinLobbyRequested;
+            }
+            _inGameView.SetLobbyCode(code);
+        });
+    }
+
     private void ShowHostPanel(LobbyInfo info)
     {
         var panel = new Views.HostControlPanelView(info);
-        panel.RePostRequested += async (_, _) =>
-        {
-            try
-            {
-                await _backend.RepostAsync(info.Code, CancellationToken.None);
-            }
-            catch (Exception ex)
-            {
-                LogDebug($"[Launcher] Repost failed: {ex.Message}");
-                Dispatcher.Invoke(() =>
-                {
-                    if (ContentArea.Content is MainView mv)
-                        mv.UpdateModStatusText($"Repost failed: {ex.Message}");
-                });
-            }
-        };
+        panel.PostRequested += (_, _) => _ = PostLobbyAsync(info);
         panel.DisbandRequested += (_, _) => _ = ConfirmDisbandAsync(info.Code);
-        panel.KickRequested += async (_, targetUserId) =>
+        panel.KickRequested += (_, targetUserId) =>
         {
             if (string.IsNullOrEmpty(targetUserId))
             {
                 Dispatcher.Invoke(() =>
                 {
+                    panel.SetStatus("Cannot kick: player has no name.");
                     if (ContentArea.Content is MainView mv)
                         mv.UpdateModStatusText("Cannot kick: player has no name");
                 });
                 return;
             }
-            // The backend kick broadcasts by target_id; we send the player's in-game name.
-            await _backend.KickAsync(info.Code, targetUserId, CancellationToken.None);
+            var confirmModal = new ConfirmationModal();
+            confirmModal.Configure(
+                $"Kick {targetUserId}?",
+                "Kick",
+                isDanger: true);
+            confirmModal.Confirmed += async (_, _) =>
+            {
+                ModalOverlay.Hide();
+                try
+                {
+                    // The backend kick broadcasts by target_id; we send the player's in-game name.
+                    var ok = await _backend.KickAsync(info.Code, targetUserId, CancellationToken.None);
+                    Dispatcher.Invoke(() => panel.SetStatus(ok
+                        ? $"Kicked {targetUserId}."
+                        : $"Failed to kick {targetUserId}."));
+                }
+                catch (Exception ex)
+                {
+                    LogDebug($"[Launcher] Kick failed: {ex.Message}");
+                    Dispatcher.Invoke(() => panel.SetStatus($"Kick failed: {ex.Message}"));
+                }
+            };
+            confirmModal.Cancelled += (_, _) => ModalOverlay.Hide();
+            ModalOverlay.Show("Kick Player", confirmModal);
         };
         panel.UpdatePlayers(BuildPlayerList());
+        if (_lobbyPostedToBackend && _postedLobbyCode == info.Code)
+            panel.SetPosted(true);
         _hostPanel = panel;
         ShowView(panel, showSidebar: true);
         LobbyButton.Visibility = Visibility.Visible;
+    }
+
+    private async Task PostLobbyAsync(LobbyInfo info)
+    {
+        try
+        {
+            Dispatcher.Invoke(() => _hostPanel?.SetStatus($"Posting lobby {info.Code}..."));
+            var moddedPath = GetModdedPath();
+            var modEntries = new List<ModInfoEntry>();
+            if (!string.IsNullOrEmpty(moddedPath))
+            {
+                foreach (var entry in info.ModSet)
+                {
+                    var filePath = Path.Combine(moddedPath, "BepInEx", "plugins", entry.FileName);
+                    if (!File.Exists(filePath)) continue;
+
+                    var uploaded = await _backend.UploadModAsync(
+                        File.OpenRead(filePath), entry.FileName, entry.Version, CancellationToken.None);
+
+                    modEntries.Add(uploaded ?? new ModInfoEntry(entry.FileName, entry.Version, entry.Sha256));
+                }
+            }
+
+            var players = new List<PlayerInfoEntry>
+            {
+                new(_userId, info.Host, true,
+                    _lobbyPlayerLevels.TryGetValue(info.Host, out var lvl) ? lvl : null,
+                    _lobbyPlayerPings.TryGetValue(info.Host, out var png) ? png : null)
+            };
+
+            Services.LauncherLog.Write($"[Launcher] Posting lobby on backend. Code={info.Code}, Host={info.Host}");
+            var created = await _backend.CreateLobbyAsync(new CreateLobbyRequest(info.Code, info.Region, info.Host, "modded", modEntries, info.MaxPlayers, info.GameVersion, info.MapName, info.Language, info.ChatType, players, info.RegionIp, info.RegionPort), CancellationToken.None);
+            if (!created)
+            {
+                Dispatcher.Invoke(() => _hostPanel?.SetStatus("Post failed: backend rejected the lobby."));
+                return;
+            }
+            _lobbyPostedToBackend = true;
+            _postedLobbyCode = info.Code;
+
+            Services.LauncherLog.Write($"[Launcher] Sending heartbeat. Code={info.Code}, UserId={_userId}");
+            await _backend.HeartbeatAsync(info.Code, _userId, CancellationToken.None);
+            StartHeartbeat(info.Code);
+            _ = _ws.ConnectAsync(info.Code, CancellationToken.None);
+            Dispatcher.Invoke(() =>
+            {
+                _hostPanel?.SetPosted(true);
+                _hostPanel?.SetStatus($"Lobby {info.Code} posted.");
+                if (ContentArea.Content is MainView mv)
+                    mv.UpdateModStatusText($"Lobby {info.Code} posted.");
+            });
+        }
+        catch (Exception ex)
+        {
+            LogDebug($"[Launcher] Post failed: {ex.Message}");
+            Dispatcher.Invoke(() =>
+            {
+                _hostPanel?.SetStatus($"Post failed: {ex.Message}");
+                if (ContentArea.Content is MainView mv)
+                    mv.UpdateModStatusText($"Post failed: {ex.Message}");
+            });
+        }
     }
 
     private async void InGameView_JoinLobbyRequested(object? sender, string code)
@@ -1279,13 +1429,86 @@ public partial class MainWindow
         if (string.IsNullOrEmpty(code))
             return;
 
-        var region = _activeLobby?.Code == code ? _activeLobby.Region : "";
-        var regionIp = _activeLobby?.Code == code ? _activeLobby.RegionIp : "";
-        var regionPort = _activeLobby?.Code == code ? _activeLobby.RegionPort : 22023;
+        Dispatcher.Invoke(() =>
+        {
+            _inGameView?.SetBusy(true);
+            _inGameView?.SetStatus($"Looking up lobby {code}...");
+        });
 
-        LogDebug($"[Launcher] InGame join requested for code={code}, region={region}, regionIp={regionIp}, regionPort={regionPort}");
-        await _pipeServer.BroadcastMessageAsync("join_lobby",
-            new { code, region, regionIp, regionPort });
+        try
+        {
+            var lobby = await _backend.GetLobbyAsync(code, CancellationToken.None);
+            if (lobby == null)
+            {
+                LogDebug($"[Launcher] InGame join: lobby {code} not on backend — joining with current mods");
+                Dispatcher.Invoke(() => _inGameView?.SetStatus("Lobby not on backend — joining with current mods"));
+                await EnsureGameReadyForJoinAsync();
+                await _pipeServer.BroadcastMessageAsync("join_lobby",
+                    new { code, region = "", regionIp = "", regionPort = 22023 });
+                Dispatcher.Invoke(() => _inGameView?.SetStatus("Join request sent..."));
+                return;
+            }
+
+            LogDebug($"[Launcher] InGame join: lobby {code} found, region={lobby.Region}, syncing {lobby.ModSet.Count} mods");
+            Dispatcher.Invoke(() => _inGameView?.SetStatus($"Syncing {lobby.ModSet.Count} mods..."));
+            await SyncModsForJoinAsync(lobby);
+
+            await EnsureGameReadyForJoinAsync();
+
+            LogDebug($"[Launcher] InGame join requested for code={code}, region={lobby.Region}, regionIp={lobby.RegionIp}, regionPort={lobby.RegionPort}");
+            await _pipeServer.BroadcastMessageAsync("join_lobby",
+                new { code, region = lobby.Region, regionIp = lobby.RegionIp, regionPort = lobby.RegionPort });
+            Dispatcher.Invoke(() => _inGameView?.SetStatus("Join request sent..."));
+            _ = _ws.ConnectAsync(code, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            LogDebug($"[Launcher] InGame join failed: {ex.Message}");
+            Dispatcher.Invoke(() => _inGameView?.SetStatus($"Join failed: {ex.Message}"));
+        }
+        finally
+        {
+            Dispatcher.Invoke(() => _inGameView?.SetBusy(false));
+        }
+    }
+
+    private async Task SyncModsForJoinAsync(LobbyInfo lobby)
+    {
+        var moddedPath = GetModdedPath();
+        if (string.IsNullOrEmpty(moddedPath)) return;
+
+        var pluginsDir = Path.Combine(moddedPath, "BepInEx", "plugins");
+        var cleanupEngine = new Services.Lobby.ModCleanupEngine(pluginsDir);
+        await cleanupEngine.QuarantineAsync(
+            lobby.ModSet.Select(m => m.FileName).ToList(),
+            CancellationToken.None);
+
+        var modSetSync = new Services.Lobby.ModSetSync(pluginsDir, _httpClient, _backend);
+        var missing = await modSetSync.DiffAsync(lobby.ModSet, CancellationToken.None);
+        if (missing.Count > 0)
+        {
+            Dispatcher.Invoke(() => _inGameView?.SetStatus($"Downloading {missing.Count} mods..."));
+            await StopGameAndWaitAsync();
+            await modSetSync.InstallAsync(missing, CancellationToken.None);
+            var mods = await GetInstalledModSetAsync();
+            Dispatcher.Invoke(() => _inGameView?.SetMods(mods.Select(m => m.FileName).ToList()));
+        }
+    }
+
+    private async Task EnsureGameReadyForJoinAsync()
+    {
+        if (IsAmongUsRunning()) return;
+
+        Dispatcher.Invoke(() => _inGameView?.SetStatus("Launching game..."));
+        _gameReadyTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        Dispatcher.Invoke(() =>
+        {
+            if (ContentArea.Content is MainView mv)
+                mv.LaunchGame();
+        });
+        var ready = await WaitForGameReadyAsync();
+        if (!ready)
+            throw new InvalidOperationException("Game did not become ready in time.");
     }
 
     private async Task ConfirmDisbandAsync(string code)
@@ -1317,7 +1540,17 @@ public partial class MainWindow
             StopHeartbeat();
             _activeLobby = null;
             _hostPanel = null;
-            Dispatcher.Invoke(() => _mainView.StopGame());
+            _lobbyPostedToBackend = false;
+            _postedLobbyCode = "";
+            _lobbyPlayerNames.Clear();
+            _lobbyPlayerLevels.Clear();
+            _lobbyPlayerPings.Clear();
+            Dispatcher.Invoke(() =>
+            {
+                _mainView.StopGame();
+                ShowView(_mainView, showSidebar: true);
+                LobbyButton.Visibility = Visibility.Collapsed;
+            });
         };
         confirmModal.Cancelled += (_, _) => ModalOverlay.Hide();
 

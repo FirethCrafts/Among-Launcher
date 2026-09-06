@@ -3,68 +3,148 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-             mc:Ignorable="d" d:DesignHeight="800" d:DesignWidth="1000">
-    <Grid Margin="40">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*"/>
-            <RowDefinition Height="*"/>
-        </Grid.RowDefinitions>
-        
-        <!-- Title -->
-        <TextBlock Text="In Game" FontSize="32" FontWeight="Bold" Foreground="White" Margin="0,0,0,24"/>
-        
-        <!-- Join lobby section -->
-        <Border Grid.Row="1" Background="#18181B" BorderBrush="#2EFFFFFF" BorderThickness="1"
-                CornerRadius="16" Padding="24" Margin="0,0,0,24">
-            <StackPanel>
-                <TextBlock Text="Join a Lobby" FontSize="18" FontWeight="SemiBold" Foreground="White" Margin="0,0,0,16"/>
-                <StackPanel Orientation="Horizontal">
-                    <TextBox x:Name="LobbyCodeTextBox" Width="200" FontSize="16" Padding="10,8"
-                             Foreground="White" Background="#222226" BorderBrush="#3F3F46"
-                             CharacterCasing="Upper" MaxLength="6"/>
-                    <Button x:Name="JoinButton" Content="Join" Margin="12,0,0,0" Padding="24,10"
-                            Background="#5865F2" Foreground="White" FontWeight="SemiBold"
-                            Click="JoinButton_Click" Cursor="Hand"/>
+             mc:Ignorable="d" d:DesignHeight="680" d:DesignWidth="560">
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <Grid Margin="10">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <!-- Title -->
+            <TextBlock Grid.Row="0" Text="In Game" Style="{StaticResource PageTitle}"/>
+
+            <!-- Join lobby card -->
+            <Border Grid.Row="1" Style="{StaticResource GlassCard}">
+                <StackPanel>
+                    <TextBlock Text="JOIN LOBBY" Style="{StaticResource CardHeader}"/>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBox x:Name="LobbyCodeTextBox" Grid.Column="0"
+                                 Style="{StaticResource GlassInput}"
+                                 CharacterCasing="Upper" MaxLength="8"
+                                 VerticalAlignment="Center" Margin="0,0,12,0"
+                                 KeyDown="LobbyCodeTextBox_KeyDown"/>
+                        <Button x:Name="JoinButton" Grid.Column="1" Content="JOIN"
+                                Style="{StaticResource PlayButton}"
+                                Click="JoinButton_Click" VerticalAlignment="Center"/>
+                    </Grid>
+                    <TextBlock Text="6-letter code, e.g. ABCDEF"
+                               Foreground="{StaticResource TextMuted}" FontSize="12"
+                               Margin="0,8,0,0"/>
+                    <TextBlock x:Name="JoinErrorText"
+                               Foreground="Red" FontSize="13"
+                               Margin="0,8,0,0" TextWrapping="Wrap"
+                               Visibility="Collapsed"/>
+                    <TextBlock x:Name="JoinStatusText"
+                               Foreground="{StaticResource TextMuted}" FontSize="13"
+                               Margin="0,8,0,0" TextWrapping="Wrap"
+                               Visibility="Collapsed"/>
                 </StackPanel>
-            </StackPanel>
-        </Border>
-        
-        <!-- Players section -->
-        <Border Grid.Row="2" Background="#18181B" BorderBrush="#2EFFFFFF" BorderThickness="1"
-                CornerRadius="16" Padding="24" Margin="0,0,0,24">
-            <StackPanel>
-                <TextBlock Text="Players in Lobby" FontSize="18" FontWeight="SemiBold" Foreground="White" Margin="0,0,0,16"/>
-                <ListBox x:Name="PlayersList" Background="Transparent" BorderThickness="0"
-                         Foreground="White" MaxHeight="300">
-                    <ListBox.ItemTemplate>
-                        <DataTemplate>
-                            <StackPanel Orientation="Horizontal" Margin="0,4">
-                                <TextBlock Text="{Binding}" Foreground="#A1A1AA" FontSize="14"/>
-                            </StackPanel>
-                        </DataTemplate>
-                    </ListBox.ItemTemplate>
-                </ListBox>
-            </StackPanel>
-        </Border>
-        
-        <!-- Mods section -->
-        <Border Grid.Row="3" Background="#18181B" BorderBrush="#2EFFFFFF" BorderThickness="1"
-                CornerRadius="16" Padding="24">
-            <StackPanel>
-                <TextBlock Text="Your Mods" FontSize="18" FontWeight="SemiBold" Foreground="White" Margin="0,0,0,16"/>
-                <ListBox x:Name="ModsList" Background="Transparent" BorderThickness="0"
-                         Foreground="White" MaxHeight="300">
-                    <ListBox.ItemTemplate>
-                        <DataTemplate>
-                            <StackPanel Orientation="Horizontal" Margin="0,4">
-                                <TextBlock Text="{Binding}" Foreground="#A1A1AA" FontSize="14"/>
-                            </StackPanel>
-                        </DataTemplate>
-                    </ListBox.ItemTemplate>
-                </ListBox>
-            </StackPanel>
-        </Border>
-    </Grid>
+            </Border>
+
+            <!-- Players card -->
+            <Border Grid.Row="2" Style="{StaticResource GlassCard}">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+                    <TextBlock x:Name="PlayersHeaderText" Text="PLAYERS" Style="{StaticResource CardHeader}"/>
+                    <Grid Grid.Row="1">
+                        <ListBox x:Name="PlayersList"
+                                 Background="Transparent" BorderThickness="0"
+                                 Foreground="{StaticResource TextBody}"
+                                 MaxHeight="260"
+                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                 ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                 ItemContainerStyle="{StaticResource PlayerListItemStyle}">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Background="{StaticResource GlassSurfaceWeak}"
+                                            CornerRadius="8" Padding="14,10" Margin="0,0,0,4">
+                                        <StackPanel>
+                                            <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="14"
+                                                       Foreground="{StaticResource TextBody}"/>
+                                            <TextBlock Text="{Binding Detail}"
+                                                       Foreground="{StaticResource TextMuted}" FontSize="12"
+                                                       Margin="0,2,0,0">
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock">
+                                                        <Style.Triggers>
+                                                            <Trigger Property="Text" Value="">
+                                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                                            </Trigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
+                                        </StackPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                        <TextBlock x:Name="PlayersEmptyText" Text="No players yet"
+                                   Foreground="{StaticResource TextMuted}" FontSize="13"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"
+                                   Margin="0,12"/>
+                    </Grid>
+                </Grid>
+            </Border>
+
+            <!-- Mods card -->
+            <Border Grid.Row="3" Style="{StaticResource GlassCard}">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <TextBlock x:Name="ModsHeaderText" Text="MODS" Style="{StaticResource CardHeader}"/>
+                    <Grid Grid.Row="1">
+                        <ListBox x:Name="ModsList"
+                                 Background="Transparent" BorderThickness="0"
+                                 Foreground="{StaticResource TextBody}"
+                                 MaxHeight="200"
+                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                 ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                 ItemContainerStyle="{StaticResource PlayerListItemStyle}">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Background="{StaticResource GlassSurfaceWeak}"
+                                            CornerRadius="8" Padding="14,10" Margin="0,0,0,4">
+                                        <StackPanel>
+                                            <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="14"
+                                                       Foreground="{StaticResource TextBody}"/>
+                                            <TextBlock Text="{Binding Detail}"
+                                                       Foreground="{StaticResource TextMuted}" FontSize="12"
+                                                       Margin="0,2,0,0">
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock">
+                                                        <Style.Triggers>
+                                                            <Trigger Property="Text" Value="">
+                                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                                            </Trigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
+                                        </StackPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                        <TextBlock x:Name="ModsEmptyText" Text="No mods installed — vanilla"
+                                   Foreground="{StaticResource TextMuted}" FontSize="13"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"
+                                   Margin="0,12"/>
+                    </Grid>
+                </Grid>
+            </Border>
+        </Grid>
+    </ScrollViewer>
 </UserControl>

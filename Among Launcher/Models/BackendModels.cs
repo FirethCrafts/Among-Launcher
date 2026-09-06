@@ -57,4 +57,4 @@ public record PlayerInfoEntry(
     int? Level = null,
     int? Ping = null);
 
-public record LobbyPlayer(string DiscordUserId, string? PlayerName, bool IsHost);
+public record LobbyPlayer(string DiscordUserId, string? PlayerName, bool IsHost, int? Level = null, int? Ping = null);

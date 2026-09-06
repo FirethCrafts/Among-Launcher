@@ -4,112 +4,173 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              mc:Ignorable="d"
-             d:DesignHeight="560" d:DesignWidth="680">
-    <UserControl.Resources>
-    </UserControl.Resources>
+             d:DesignHeight="560" d:DesignWidth="900">
+    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="10">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
 
-    <Grid Margin="10">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*"/>
-            <RowDefinition Height="Auto"/>
-        </Grid.RowDefinitions>
-
-        <TextBlock Grid.Row="0" Text="Host Control Panel" Style="{StaticResource PageTitle}"/>
-
-        <!-- Lobby card: code + copy + region -->
-        <Border Grid.Row="1" Style="{StaticResource GlassCard}">
-            <StackPanel>
-                <TextBlock Text="LOBBY CODE" Style="{StaticResource CardHeader}"/>
-                <StackPanel Orientation="Horizontal">
-                    <TextBlock x:Name="CodeText" FontSize="42" FontWeight="Bold"
-                               Foreground="{StaticResource TextTitle}" VerticalAlignment="Center"/>
-                    <Button x:Name="CopyCodeButton" Content="COPY"
-                            Click="CopyCodeButton_Click"
-                            Style="{StaticResource SecondaryButton}"
-                            Height="28" Padding="12,4" FontSize="11"
-                            Margin="12,0,0,0" VerticalAlignment="Center"/>
-                </StackPanel>
-                <TextBlock x:Name="RegionText" FontSize="13"
-                           Foreground="{StaticResource TextMuted}" Margin="0,8,0,0"/>
+            <!-- Header -->
+            <TextBlock Grid.Row="0" Text="Host Control Panel" Style="{StaticResource PageTitle}" Margin="0,0,0,4"/>
+            <StackPanel Grid.Row="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,0,16">
+                <Ellipse Width="8" Height="8" VerticalAlignment="Center">
+                    <Ellipse.Fill>
+                        <SolidColorBrush Color="{StaticResource PlayColor}"/>
+                    </Ellipse.Fill>
+                </Ellipse>
+                <TextBlock x:Name="SubtitleText" FontSize="13"
+                           Foreground="{StaticResource TextMuted}"
+                           Margin="8,0,0,0" VerticalAlignment="Center"/>
             </StackPanel>
-        </Border>
 
-        <!-- Players card -->
-        <Border Grid.Row="2" Style="{StaticResource GlassCard}">
-            <Grid>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="*"/>
-                </Grid.RowDefinitions>
-                <Grid Margin="0,0,0,12">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
-                    </Grid.ColumnDefinitions>
-                    <TextBlock Text="PLAYERS" Style="{StaticResource CardHeader}" Margin="0"/>
-                    <TextBlock x:Name="PlayersCountText" Grid.Column="1" Text="0 players"
-                               FontSize="12" Foreground="{StaticResource TextMuted}"/>
-                </Grid>
-                <ListBox Grid.Row="1" x:Name="PlayersList" ItemsSource="{Binding Players}"
-                         Background="Transparent" BorderThickness="0"
-                         Foreground="{StaticResource TextBody}"
-                         ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                         ScrollViewer.VerticalScrollBarVisibility="Auto"
-                         ItemContainerStyle="{StaticResource PlayerListItemStyle}">
-                    <ListBox.ItemTemplate>
-                        <DataTemplate>
-                            <Border Background="{StaticResource GlassSurfaceWeak}"
-                                    BorderBrush="{StaticResource GlassBorder}" BorderThickness="1"
-                                    CornerRadius="8" Padding="14,10" Margin="0,0,0,4">
-                                <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock FontSize="14" FontWeight="SemiBold"
-                                               Foreground="{StaticResource TextTitle}"
-                                               Text="{Binding PlayerName}"
-                                               VerticalAlignment="Center"/>
-                                    <Border Grid.Column="1" Background="#2210B981" CornerRadius="4"
-                                            Padding="8,3" Margin="10,0,0,0" VerticalAlignment="Center"
-                                            Visibility="{Binding IsHost, Converter={StaticResource BoolToVisibilityConverter}}">
-                                        <TextBlock Text="HOST" FontSize="10" FontWeight="Bold"
-                                                   Foreground="#10B981"/>
+            <!-- Lobby card: code + copy + meta -->
+            <Border Grid.Row="2" Style="{StaticResource GlassCard}">
+                <StackPanel>
+                    <TextBlock Text="LOBBY CODE" Style="{StaticResource CardHeader}"/>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                            <TextBlock x:Name="CodeText" FontFamily="Consolas" FontSize="42" FontWeight="Bold"
+                                       Foreground="{StaticResource TextTitle}" VerticalAlignment="Center"/>
+                            <TextBlock x:Name="CopiedLabel" Text="Copied!" FontSize="12" FontWeight="SemiBold"
+                                       Foreground="#10B981" Margin="12,0,0,0"
+                                       VerticalAlignment="Center" Visibility="Collapsed"/>
+                        </StackPanel>
+                        <Button Grid.Column="1" x:Name="CopyCodeButton" Content="COPY"
+                                Click="CopyCodeButton_Click"
+                                Style="{StaticResource SecondaryButton}"
+                                Padding="12,4" FontSize="11"
+                                Margin="12,0,0,0" VerticalAlignment="Stretch"/>
+                    </Grid>
+                    <UniformGrid Columns="4" Margin="0,16,0,0">
+                        <StackPanel Margin="0,0,12,0">
+                            <TextBlock Text="REGION" Style="{StaticResource CardHeader}" Margin="0,0,0,4"/>
+                            <TextBlock x:Name="RegionText" FontSize="14" FontWeight="SemiBold"
+                                       Foreground="{StaticResource TextTitle}"/>
+                        </StackPanel>
+                        <StackPanel Margin="0,0,12,0">
+                            <TextBlock Text="HOST" Style="{StaticResource CardHeader}" Margin="0,0,0,4"/>
+                            <TextBlock x:Name="HostText" FontSize="14" FontWeight="SemiBold"
+                                       Foreground="{StaticResource TextTitle}"
+                                       TextTrimming="CharacterEllipsis"/>
+                        </StackPanel>
+                        <StackPanel Margin="0,0,12,0">
+                            <TextBlock Text="PLAYERS" Style="{StaticResource CardHeader}" Margin="0,0,0,4"/>
+                            <TextBlock x:Name="PlayersMetaText" FontSize="14" FontWeight="SemiBold"
+                                       Foreground="{StaticResource TextTitle}"/>
+                        </StackPanel>
+                        <StackPanel>
+                            <TextBlock Text="STATUS" Style="{StaticResource CardHeader}" Margin="0,0,0,4"/>
+                            <TextBlock x:Name="MetaStatusText" FontSize="14" FontWeight="SemiBold"
+                                       Foreground="{StaticResource TextMuted}" Text="LOCAL"/>
+                        </StackPanel>
+                    </UniformGrid>
+                </StackPanel>
+            </Border>
+
+            <!-- Players card -->
+            <Border Grid.Row="3" Style="{StaticResource GlassCard}">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <TextBlock Grid.Row="0" x:Name="PlayersHeaderText" Text="PLAYERS (0/15)"
+                               Style="{StaticResource CardHeader}" Margin="0,0,0,12"/>
+                    <Grid Grid.Row="1" MinHeight="120">
+                        <ListBox x:Name="PlayersList" ItemsSource="{Binding Players}"
+                                 Background="Transparent" BorderThickness="0"
+                                 Foreground="{StaticResource TextBody}"
+                                 MaxHeight="320"
+                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                 ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                 ItemContainerStyle="{StaticResource PlayerListItemStyle}">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Background="{StaticResource GlassSurfaceWeak}"
+                                            BorderBrush="{StaticResource GlassBorder}" BorderThickness="1"
+                                            CornerRadius="8" Padding="14,10" Margin="0,0,0,4">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                                <TextBlock FontSize="14" FontWeight="SemiBold"
+                                                           Foreground="{StaticResource TextTitle}"
+                                                           Text="{Binding DisplayName}"
+                                                           TextTrimming="CharacterEllipsis"
+                                                           ToolTip="{Binding DisplayName}"
+                                                           VerticalAlignment="Center"/>
+                                                <TextBlock FontSize="12"
+                                                           Foreground="{StaticResource TextMuted}"
+                                                           Text="{Binding DetailText}"
+                                                           Margin="0,2,0,0"
+                                                           Visibility="{Binding HasDetail, Converter={StaticResource BoolToVisibilityConverter}}"/>
+                                            </StackPanel>
+                                            <Border Grid.Column="1" Background="#2210B981" CornerRadius="4"
+                                                    Padding="8,3" Margin="10,0,0,0" VerticalAlignment="Center"
+                                                    Visibility="{Binding IsHost, Converter={StaticResource BoolToVisibilityConverter}}">
+                                                <TextBlock Text="HOST" FontSize="10" FontWeight="Bold"
+                                                           VerticalAlignment="Center">
+                                                    <TextBlock.Foreground>
+                                                        <SolidColorBrush Color="{StaticResource PlayColor}"/>
+                                                    </TextBlock.Foreground>
+                                                </TextBlock>
+                                            </Border>
+                                            <Button Grid.Column="2" Content="KICK" Click="KickButton_Click"
+                                                    Height="26" Padding="12,4" FontSize="11"
+                                                    Margin="10,0,0,0" VerticalAlignment="Center">
+                                                <Button.Style>
+                                                    <Style TargetType="Button" BasedOn="{StaticResource SecondaryButton}">
+                                                        <Setter Property="Height" Value="26"/>
+                                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IsHost}" Value="False">
+                                                                <Setter Property="Visibility" Value="Visible"/>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </Button.Style>
+                                            </Button>
+                                        </Grid>
                                     </Border>
-                                    <Button Grid.Column="2" Content="Kick" Click="KickButton_Click"
-                                            Height="26" Padding="12,4" FontSize="11"
-                                            VerticalAlignment="Center">
-                                        <Button.Style>
-                                            <Style TargetType="Button" BasedOn="{StaticResource SecondaryButton}">
-                                                <Setter Property="Visibility" Value="Collapsed"/>
-                                                <Style.Triggers>
-                                                    <DataTrigger Binding="{Binding IsHost}" Value="False">
-                                                        <Setter Property="Visibility" Value="Visible"/>
-                                                    </DataTrigger>
-                                                </Style.Triggers>
-                                            </Style>
-                                        </Button.Style>
-                                    </Button>
-                                </Grid>
-                            </Border>
-                        </DataTemplate>
-                    </ListBox.ItemTemplate>
-                </ListBox>
-            </Grid>
-        </Border>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                        <TextBlock x:Name="PlayersEmptyText" Text="Waiting for players… Share your code."
+                                   FontSize="13" Foreground="{StaticResource TextMuted}"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"
+                                   Visibility="Collapsed"/>
+                    </Grid>
+                </Grid>
+            </Border>
 
-        <!-- Actions -->
-        <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
-            <Button x:Name="RePostButton" Content="RE-POST"
-                    Click="RePostButton_Click"
-                    Style="{StaticResource SecondaryButton}"
-                    Margin="0,0,12,0"/>
-            <Button x:Name="DisbandButton" Content="DISBAND"
-                    Click="DisbandButton_Click"
-                    Style="{StaticResource StopButton}"/>
-        </StackPanel>
-    </Grid>
+            <!-- Actions -->
+            <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
+                <Button x:Name="PostButton" Content="POST LOBBY"
+                        Click="PostButton_Click"
+                        Style="{StaticResource PlayButton}"
+                        ToolTip="Publish this lobby to the server browser"
+                        Margin="0,0,12,0"/>
+                <Button x:Name="DisbandButton" Content="DISBAND"
+                        Click="DisbandButton_Click"
+                        Style="{StaticResource StopButton}"/>
+            </StackPanel>
+            <TextBlock Grid.Row="5" x:Name="StatusLine" FontSize="13"
+                       Foreground="{StaticResource TextMuted}"
+                       TextWrapping="Wrap" Margin="0,8,0,0"
+                       Visibility="Collapsed"/>
+        </Grid>
+    </ScrollViewer>
 </UserControl>
