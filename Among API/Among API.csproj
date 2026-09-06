@@ -4,8 +4,8 @@
     <TargetFramework>net6.0</TargetFramework>
     <AssemblyName>AmongApi</AssemblyName>
     <Product>Among API</Product>
-    <Version>1.0.9</Version>
-    <FileVersion>1.0.9</FileVersion>
+    <Version>1.0.10</Version>
+    <FileVersion>1.0.10</FileVersion>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
