@@ -113,11 +113,11 @@ public partial class MainWindow
                 if (!string.IsNullOrEmpty(_config.ServerUrl) && !_config.ServerUrl.Contains("yourserver.com"))
                 {
                     var url = _config.ServerUrl;
-                    Task.Run(async () => await _pipeServer.BroadcastMessageAsync("set_server_url", new { url }));
+                    _ = Task.Run(async () => await _pipeServer.BroadcastMessageAsync("set_server_url", new { url }));
                 }
 
                 var tcs = _gameReadyTcs;
-                Task.Run(async () =>
+                _ = Task.Run(async () =>
                 {
                     await Task.Delay(250);
                     tcs?.TrySetResult(true);

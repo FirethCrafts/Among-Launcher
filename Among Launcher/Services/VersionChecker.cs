@@ -66,7 +66,7 @@ public static class VersionChecker
             
             if (string.IsNullOrEmpty(tag)) return (false, null, null, modChangelog);
 
-            var versionStr = tag.StartsWith('v') ? tag[1..] : tag;
+            var versionStr = tag.TrimStart('v', 'V');
             Services.LauncherLog.Write($"[VersionCheck] Version string: {versionStr}");
             
             Version? latest = null;
@@ -97,8 +97,13 @@ public static class VersionChecker
             {
                 if (downloadUrl != null)
                 {
-                    Services.LauncherLog.Write($"[VersionCheck] Tag unparsable, but asset found - update available");
-                    return (true, null, downloadUrl, modChangelog);
+                    if (current == null)
+                    {
+                        Services.LauncherLog.Write($"[VersionCheck] Tag unparsable, asset found, no current version - needs install");
+                        return (true, null, downloadUrl, modChangelog);
+                    }
+                    Services.LauncherLog.Write($"[VersionCheck] Tag unparsable, asset found, current version exists - assuming up to date");
+                    return (false, null, null, modChangelog);
                 }
                 Services.LauncherLog.Write($"[VersionCheck] No parseable version and no asset");
                 return (false, null, null, modChangelog);
