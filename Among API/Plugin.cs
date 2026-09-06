@@ -86,6 +86,12 @@ public class Plugin : BasePlugin
                 FileLogger.Warn("Game did not reach ready state; proceeding anyway.");
             }
 
+            // Re-capture SynchronizationContext now that Unity is fully initialized.
+            // The initial capture in Load() fails because Unity's context isn't set up
+            // during BepInEx chainloader init. This ensures MainThreadDispatcher.Enqueue
+            // actually posts to the Unity main thread instead of falling back to Task.Run.
+            MainThreadDispatcher.CaptureContext();
+
             pipe.RegisterHandler("set_server_url", element =>
             {
                 var p = element.GetProperty("payload");
