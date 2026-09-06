@@ -193,6 +193,10 @@ public class Plugin : BasePlugin
             };
             tracker.Start();
 
+            // ChatCommandHandler disabled: polling HudManager.Instance via reflection
+            // triggers IL2CPP native NullReferenceExceptions that bypass C# try-catch,
+            // causing game crashes. Use launcher UI buttons (Repost/Disband) instead.
+            /*
             var commands = new ChatCommandHandler(Log);
             commands.OnRepost = () =>
             {
@@ -272,9 +276,10 @@ public class Plugin : BasePlugin
                 }
             };
             commands.Start();
+            */
 
             pipe.Disconnected += (_, _) => tracker.Stop();
-            pipe.Disconnected += (_, _) => commands.Dispose();
+            // commands disposed above (ChatCommandHandler disabled)
 
             FileLogger.Info($"Auto-post: {_autoPost}, Server URL: {_serverUrl}");
             await Task.Delay(Timeout.Infinite);
