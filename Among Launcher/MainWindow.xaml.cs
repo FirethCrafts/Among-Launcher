@@ -351,9 +351,7 @@ public partial class MainWindow
                     return;
                 }
             }
-            
-            await CheckAmongApiUpdatesAsync();
-            await CheckAndShowChangelogAsync();
+
             SetupTrayIcon();
         };
 
