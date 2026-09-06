@@ -352,6 +352,62 @@ public partial class MainWindow
                 }
             }
 
+            var moddedPath = GetModdedPath();
+            if (!string.IsNullOrEmpty(moddedPath))
+            {
+                var (amongApiUpdate, amongApiDownloadUrl, amongApiChangelog) = await UpdateService.CheckAmongApiUpdateAsync(moddedPath);
+                if (amongApiUpdate && !string.IsNullOrEmpty(amongApiDownloadUrl))
+                {
+                    _amongApiUpdateAvailable = true;
+                    _amongApiDownloadUrl = amongApiDownloadUrl;
+                    var amongApiResult = await ShowAmongApiUpdatePopup(amongApiChangelog);
+                    if (amongApiResult == true)
+                    {
+                        var progressModal = new UpdateProgressModal();
+                        progressModal.SetStatus("Downloading AmongAPI...");
+                        progressModal.SetProgress(0);
+                        ModalOverlay.Show("Updating AmongAPI", progressModal);
+
+                        try
+                        {
+                            var success = await VersionChecker.DownloadAndUpdateAsync(
+                                _httpClient, amongApiDownloadUrl, moddedPath,
+                                progress: p => Dispatcher.Invoke(() => progressModal.SetProgress(p)),
+                                status: s => Dispatcher.Invoke(() => progressModal.SetStatus(s)));
+
+                            ModalOverlay.Hide();
+
+                            if (success)
+                            {
+                                _amongApiUpdateAvailable = false;
+                                _amongApiDownloadUrl = null;
+                                Dispatcher.Invoke(() => _mainView.UpdateModStatusText("AmongAPI updated successfully."));
+                            }
+                            else
+                            {
+                                var errorModal = new ConfirmationModal();
+                                errorModal.Configure("Failed to update AmongAPI. Please try again later.", "OK");
+                                errorModal.Confirmed += (_, _) => ModalOverlay.Hide();
+                                ModalOverlay.Show("Update Failed", errorModal);
+                            }
+                        }
+                        catch
+                        {
+                            ModalOverlay.Hide();
+                            var errorModal = new ConfirmationModal();
+                            errorModal.Configure("Failed to update AmongAPI. Please try again later.", "OK");
+                            errorModal.Confirmed += (_, _) => ModalOverlay.Hide();
+                            ModalOverlay.Show("Update Failed", errorModal);
+                        }
+                    }
+                    else
+                    {
+                        _amongApiUpdateAvailable = false;
+                        _amongApiDownloadUrl = null;
+                    }
+                }
+            }
+
             SetupTrayIcon();
         };
 
@@ -566,6 +622,36 @@ public partial class MainWindow
         // Guard against a TCS hang: the overlay backdrop/✕ hides the modal without
         // resolving the task. Treat a dismissed/ignored popup as declining instead
         // of awaiting forever.
+        var timeout = Task.Delay(TimeSpan.FromSeconds(60));
+        var completed = await Task.WhenAny(tcs.Task, timeout);
+        if (completed != tcs.Task)
+        {
+            ModalOverlay.Hide();
+            return false;
+        }
+        return await tcs.Task;
+    }
+
+    private async Task<bool?> ShowAmongApiUpdatePopup(string? changelog)
+    {
+        var tcs = new TaskCompletionSource<bool?>();
+        var modal = new LauncherUpdateModal();
+        modal.Configure(
+            "A new version of AmongAPI is available. Update to continue?", changelog);
+
+        modal.UpdateRequested += (_, _) =>
+        {
+            tcs.TrySetResult(true);
+            ModalOverlay.Hide();
+        };
+        modal.CloseRequested += (_, _) =>
+        {
+            tcs.TrySetResult(false);
+            ModalOverlay.Hide();
+        };
+
+        ModalOverlay.Show("AmongAPI Update Available", modal);
+
         var timeout = Task.Delay(TimeSpan.FromSeconds(60));
         var completed = await Task.WhenAny(tcs.Task, timeout);
         if (completed != tcs.Task)

@@ -143,4 +143,12 @@ public static class UpdateService
         status?.Invoke("Installing...");
         UpdateManager.ApplyUpdatesAndRestart(_pendingUpdate);
     }
+    
+    public static async Task<(bool UpdateAvailable, string? DownloadUrl, string? Changelog)> CheckAmongApiUpdateAsync(string moddedPath)
+    {
+        using var http = new HttpClient();
+        http.DefaultRequestHeaders.UserAgent.ParseAdd("AmongUsLauncher");
+        var (updateAvailable, _, downloadUrl, changelog) = await VersionChecker.CheckForUpdateAsync(http, moddedPath);
+        return (updateAvailable, downloadUrl, changelog);
+    }
 }
