@@ -9,6 +9,7 @@
         <AssemblyName>AmongLauncher</AssemblyName>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
         <Version>1.0.0</Version>
         <StartupObject>AmongLauncher.App</StartupObject>
     </PropertyGroup>
@@ -20,6 +21,7 @@
     <ItemGroup>
         <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
         <PackageReference Include="Velopack" Version="*" />
+        <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.*" />
     </ItemGroup>
 
 </Project>

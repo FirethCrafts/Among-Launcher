@@ -9,8 +9,6 @@ namespace AmongLauncher.Views;
 
 public partial class WelcomeView : UserControl
 {
-    private readonly DiscordAuthService _authService = new();
-
     public WelcomeView()
     {
         InitializeComponent();
@@ -71,28 +69,39 @@ public partial class WelcomeView : UserControl
                 });
     }
 
-    private async void DiscordLogin_Click(object sender, RoutedEventArgs e)
+    private void DiscordLogin_Click(object sender, RoutedEventArgs e)
     {
-        DiscordUserProfile? profile = null;
+        var mainWindow = Window.GetWindow(this) as MainWindow;
+        if (mainWindow == null) return;
 
-        try
-        {
-            using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
-            profile = await _authService.LoginAsync(cts.Token);
-        }
-        catch (Exception ex)
-        {
-            ShowError($"Login failed:\n{ex.Message}");
-            return;
-        }
+        var loginView = new DiscordLoginView();
 
-        if (profile is null)
+        loginView.LoginCodeReceived += async (_, code) =>
         {
-            ShowError("Login was cancelled (you closed the browser or denied access).");
-            return;
-        }
+            mainWindow.ModalOverlayControl.Hide();
+            try
+            {
+                using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
+                var authService = new DiscordAuthService();
+                var profile = await authService.ExchangeCodeAndFetchProfileAsync(code, cts.Token);
+                if (profile != null)
+                    LoginCompleted?.Invoke(this, profile);
+                else
+                    ShowError("Failed to get user profile.");
+            }
+            catch (Exception ex)
+            {
+                ShowError($"Login failed: {ex.Message}");
+            }
+        };
 
-        LoginCompleted?.Invoke(this, profile);
+        loginView.LoginCancelled += (_, _) =>
+        {
+            mainWindow.ModalOverlayControl.Hide();
+            ShowError("Login was cancelled.");
+        };
+
+        mainWindow.ModalOverlayControl.Show("Log in with Discord", loginView);
     }
 
     private void ShowError(string message)

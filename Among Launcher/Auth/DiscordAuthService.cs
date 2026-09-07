@@ -18,6 +18,13 @@ public class DiscordAuthService
         "&redirect_uri=http%3A%2F%2Flocalhost%3A5000%2Fcallback%2F" +
         "&scope=identify";
 
+    public async Task<DiscordUserProfile?> ExchangeCodeAndFetchProfileAsync(string code, CancellationToken ct)
+    {
+        var token = await ExchangeCodeForTokenAsync(code, ct);
+        if (token == null) return null;
+        return await FetchUserProfileAsync(token, ct);
+    }
+
     public async Task<DiscordUserProfile?> LoginAsync(CancellationToken ct = default)
     {
         if (ClientSecret == "REPLACE_WITH_CLIENT_SECRET")
