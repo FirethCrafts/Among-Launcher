@@ -1550,6 +1550,7 @@ public partial class MainWindow
                 _mainView.StopGame();
                 ShowView(_mainView, showSidebar: true);
                 LobbyButton.Visibility = Visibility.Collapsed;
+                HideInGameScreen();
             });
         };
         confirmModal.Cancelled += (_, _) => ModalOverlay.Hide();
@@ -1755,7 +1756,25 @@ public partial class MainWindow
 
     private void OnGameStateChanged(object? sender, bool isRunning)
     {
-        Dispatcher.Invoke(() => UpdateStatusBadge(isRunning));
+        Dispatcher.Invoke(() =>
+        {
+            UpdateStatusBadge(isRunning);
+            if (!isRunning)
+            {
+                HideInGameScreen();
+            }
+        });
+    }
+
+    private void HideInGameScreen()
+    {
+        GameButton.Visibility = Visibility.Collapsed;
+        if (_inGameView != null && ContentArea.Content == _inGameView)
+            ShowView(_mainView, showSidebar: true);
+        _inGameView?.SetPlayers(new List<string>());
+        _inGameView?.SetMods(new List<string>());
+        _inGameView?.SetStatus(null);
+        _inGameView?.SetBusy(false);
     }
 
     private void UpdateStatusBadge(bool isRunning)
@@ -1810,14 +1829,17 @@ public partial class MainWindow
     {
         Dispatcher.Invoke(() =>
         {
-            if (ContentArea.Content is MainView mv)
-                mv.StopGame();
+            _mainView.StopGame();
         });
         var waited = 0;
         while (IsAmongUsRunning() && waited < 30)
         {
             await Task.Delay(500);
             waited++;
+        }
+        if (!IsAmongUsRunning())
+        {
+            Dispatcher.Invoke(() => HideInGameScreen());
         }
     }
 
