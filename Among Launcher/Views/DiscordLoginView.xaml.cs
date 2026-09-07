@@ -24,6 +24,9 @@ public partial class DiscordLoginView : UserControl
         try
         {
             await Browser.EnsureCoreWebView2Async();
+            // Set desktop Edge User-Agent so Discord serves the web login form
+            // instead of redirecting to the Discord app
+            Browser.CoreWebView2.Settings.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0";
             Browser.CoreWebView2.NavigationStarting += OnNavigationStarting;
             Browser.Source = new Uri(AuthorizeUrl);
         }
@@ -35,6 +38,13 @@ public partial class DiscordLoginView : UserControl
 
     private void OnNavigationStarting(object? sender, CoreWebView2NavigationStartingEventArgs e)
     {
+        // Ignore discord:// app-protocol redirects; the web flow handles auth without the app
+        if (e.Uri.StartsWith("discord://", StringComparison.OrdinalIgnoreCase))
+        {
+            e.Cancel = true;
+            return;
+        }
+
         if (e.Uri.StartsWith(CallbackPrefix, StringComparison.OrdinalIgnoreCase))
         {
             e.Cancel = true;
