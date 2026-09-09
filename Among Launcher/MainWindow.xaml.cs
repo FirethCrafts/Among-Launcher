@@ -70,6 +70,7 @@ public partial class MainWindow
         _mainView.GameStateChanged += OnGameStateChanged;
         _mainView.AmongApiUpdateRequested += OnAmongApiUpdateRequested;
         _welcomeView.LoginCompleted += OnLoginCompleted;
+        _settingsView.SignOutRequested += (_, _) => Logout_Click(this, new RoutedEventArgs());
 
         _pipeServer.ClientConnected += (_, _) =>
         {
@@ -112,9 +113,8 @@ public partial class MainWindow
                     ShowView(_inGameView, showSidebar: true);
                 });
 
-                if (!string.IsNullOrEmpty(_config.ServerUrl) && !_config.ServerUrl.Contains("yourserver.com"))
                 {
-                    var url = _config.ServerUrl;
+                    var url = Config.LauncherConfig.BackendServerUrl;
                     _ = Task.Run(async () => await _pipeServer.BroadcastMessageAsync("set_server_url", new { url }));
                 }
 
@@ -916,20 +916,6 @@ public partial class MainWindow
                 debugModal.AppendStatus("🔍", "Searching for lobby in backend...", "", JoinDebugModal.StatusKind.Info);
             }
 
-            if (!Services.Lobby.LobbyBackendClient.IsConfigured(_config))
-            {
-                if (debug)
-                {
-                    debugModal?.AppendStatus("❌", "Backend not configured", "Set the server URL in Settings.", JoinDebugModal.StatusKind.Error);
-                }
-                else
-                {
-                    Dispatcher.Invoke(() => ShowJoinError(
-                        "No lobby server is configured.\n\nSet the server URL in Settings, then try the link again."));
-                }
-                return;
-            }
-
             var lobby = await _backend.GetLobbyAsync(code, CancellationToken.None);
             if (lobby == null)
             {
@@ -1718,12 +1704,14 @@ public partial class MainWindow
     private void OnLoginCompleted(object? sender, DiscordUserProfile profile)
     {
         _userId = profile.Id;
+        _settingsView.SetDiscordUserId(profile.Id);
 
         _config.AvatarUrl = profile.AvatarUrl;
         _config.UserName = profile.GlobalName ?? profile.Username;
         _config.Save();
 
         LoadAvatar(profile.AvatarUrl);
+        _settingsView.RefreshAccount();
         ShowView(_mainView, showSidebar: true);
     }
 

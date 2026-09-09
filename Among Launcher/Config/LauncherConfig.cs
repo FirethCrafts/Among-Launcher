@@ -16,12 +16,13 @@ public class LauncherConfig
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "AmongLauncher", "ModdedAmongUs");
 
+    public const string BackendServerUrl = "https://among-us.mel-homes.com";
+    public const string BackendWebSocketUrl = "wss://among-us.mel-homes.com/ws";
+
     public Storefront? Storefront { get; set; }
-    public string ServerUrl { get; set; } = "https://yourserver.com";
     public string ModdedInstallPath { get; set; } = DefaultModdedPath();
     public string AvatarUrl { get; set; } = string.Empty;
     public string UserName { get; set; } = string.Empty;
-    public string BackendWssUrl { get; set; } = "wss://yourserver.com/ws";
     public string DiscordAccessToken { get; set; } = string.Empty;
     public List<ModProfile> Profiles { get; set; } = new();
     public List<LibraryEntry> Library { get; set; } = new();

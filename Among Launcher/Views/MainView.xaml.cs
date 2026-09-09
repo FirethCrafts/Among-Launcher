@@ -234,9 +234,13 @@ public partial class MainView
         if (_gameManager.IsGameRunning())
         {
             _gameManager.KillGame();
-            SetPlayButtonRunning(false);
             ModStatusText.Text = "Game closed.";
         }
+
+        // Always reset the badge so a stale red pill can never stick,
+        // even when the tracked process handle is already gone.
+        // SetPlayButtonRunning(false) raises GameStateChanged.
+        SetPlayButtonRunning(false);
     }
 
     public void LaunchGame()
@@ -278,8 +282,7 @@ public partial class MainView
         var config = Config.LauncherConfig.Load();
         args.Add(config.AutoPostLobby ? "--autopost" : "--no-autopost");
 
-        if (!string.IsNullOrEmpty(config.ServerUrl) && !config.ServerUrl.Contains("yourserver.com"))
-            args.Add($"--server-url={config.ServerUrl}");
+        args.Add($"--server-url={Config.LauncherConfig.BackendServerUrl}");
 
         return args.Count > 0 ? string.Join(" ", args) : null;
     }

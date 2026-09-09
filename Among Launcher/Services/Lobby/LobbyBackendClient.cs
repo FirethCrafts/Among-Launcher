@@ -10,16 +10,14 @@ public class LobbyBackendClient
     private readonly HttpClient _http;
     private readonly LauncherConfig _config;
 
-    public static bool IsConfigured(LauncherConfig config) =>
-        !string.IsNullOrWhiteSpace(config.ServerUrl) &&
-        !config.ServerUrl.Contains("yourserver.com", StringComparison.OrdinalIgnoreCase);
+    public static bool IsConfigured(LauncherConfig config) => true;
 
     public LobbyBackendClient(HttpClient http, LauncherConfig config)
     {
         _http = http;
         _config = config;
         _http.Timeout = TimeSpan.FromSeconds(8);
-        _http.BaseAddress = new Uri(config.ServerUrl.TrimEnd('/') + "/");
+        _http.BaseAddress = new Uri(LauncherConfig.BackendServerUrl.TrimEnd('/') + "/");
     }
 
     private void ApplyAuth(HttpRequestMessage msg)

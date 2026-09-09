@@ -16,116 +16,255 @@
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <TextBlock Grid.Row="0" Text="Settings" Style="{StaticResource PageTitle}"/>
+        <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,24">
+            <TextBlock Text="Settings" Style="{StaticResource PageTitle}" Margin="0"/>
+            <TextBlock Text=" / " FontSize="28" FontWeight="Bold"
+                       Foreground="{StaticResource TextMuted}" VerticalAlignment="Center"/>
+            <TextBlock x:Name="BreadcrumbSectionText" Text="Account" FontSize="28" FontWeight="Bold"
+                       Foreground="{StaticResource TextMuted}" VerticalAlignment="Center"/>
+        </StackPanel>
 
-        <!-- Game Path -->
-        <Border Grid.Row="1" Style="{StaticResource GlassCard}">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="Auto"/>
-                </Grid.ColumnDefinitions>
-                <StackPanel Grid.Column="0">
-                    <TextBlock Text="AMONG US PATH" Style="{StaticResource CardHeader}"/>
-                    <ComboBox x:Name="StorefrontCombo" Style="{StaticResource GlassCombo}"
-                              SelectionChanged="StorefrontCombo_SelectionChanged"
-                              Margin="0,4,0,8" Width="200" HorizontalAlignment="Left"/>
-                    <TextBlock x:Name="GamePathText" Text="Auto-detecting..."
-                               TextTrimming="CharacterEllipsis" FontSize="13"
-                               Foreground="{StaticResource TextMuted}"/>
-                    <TextBlock x:Name="StorefrontStatusText" Text="" FontSize="11"
-                               Foreground="{StaticResource TextMuted}" Margin="0,4,0,0"/>
-                </StackPanel>
-                <Button Grid.Column="1" Click="BrowseGamePath_Click"
-                        Style="{StaticResource IconButton}" ToolTip="Browse">
-                    <Path Data="{StaticResource FolderIcon}" Fill="White"
-                          Stretch="Uniform" Width="22" Height="22"/>
-                </Button>
-            </Grid>
-        </Border>
+        <!-- Sub-navigation (owned by shell agent) -->
+        <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,16">
+            <Button x:Name="AccountNavButton" Content="Account" Tag="Account"
+                    Click="NavButton_Click" Style="{StaticResource SecondaryButton}"
+                    Height="32" Padding="14,0" FontSize="12" Margin="0,0,8,0"/>
+            <Button x:Name="ConnectionsNavButton" Content="Connections" Tag="Connections"
+                    Click="NavButton_Click" Style="{StaticResource SecondaryButton}"
+                    Height="32" Padding="14,0" FontSize="12" Margin="0,0,8,0"/>
+            <Button x:Name="StorageNavButton" Content="Storage" Tag="Storage"
+                    Click="NavButton_Click" Style="{StaticResource SecondaryButton}"
+                    Height="32" Padding="14,0" FontSize="12" Margin="0,0,8,0"/>
+            <Button x:Name="AboutNavButton" Content="About" Tag="About"
+                    Click="NavButton_Click" Style="{StaticResource SecondaryButton}"
+                    Height="32" Padding="14,0" FontSize="12"/>
+        </StackPanel>
 
-        <!-- Server URL -->
-        <Border Grid.Row="2" Style="{StaticResource GlassCard}">
+        <!-- Account section (owned by shell agent) -->
+        <Grid x:Name="AccountSection" Grid.Row="2" Visibility="Visible">
             <StackPanel>
-                <TextBlock Text="SERVER URL" Style="{StaticResource CardHeader}"/>
-                <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
-                    </Grid.ColumnDefinitions>
-                    <TextBox x:Name="ServerUrlTextBox" Grid.Column="0"
-                             Text="https://yourserver.com/api"
-                             Style="{StaticResource GlassInput}"/>
-                    <Button Grid.Column="1" Content="Save" Click="SaveServerUrl_Click"
-                            Style="{StaticResource SecondaryButton}"
-                            Height="32" Padding="14,0" FontSize="12"
-                            Margin="8,0,0,0" VerticalAlignment="Center"/>
-                </Grid>
+                <Border Style="{StaticResource GlassCard}">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <Image x:Name="AccountAvatarImage" Grid.Column="0"
+                               Width="64" Height="64" Margin="0,0,16,0">
+                            <Image.Clip>
+                                <EllipseGeometry Center="32,32" RadiusX="32" RadiusY="32"/>
+                            </Image.Clip>
+                        </Image>
+                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                            <TextBlock Text="DISCORD ACCOUNT" Style="{StaticResource CardHeader}"/>
+                            <TextBlock x:Name="AccountUsernameText" Text="Not signed in"
+                                       FontSize="13"
+                                       Foreground="{StaticResource TextMuted}"/>
+                        </StackPanel>
+                        <Button Grid.Column="2" Content="Sign out" Click="SignOutButton_Click"
+                                Style="{StaticResource SecondaryButton}"
+                                Height="32" Padding="14,0" FontSize="12"
+                                Margin="8,0,0,0" VerticalAlignment="Center"/>
+                    </Grid>
+                </Border>
             </StackPanel>
-        </Border>
+        </Grid>
 
-        <!-- Modded Install Path -->
-        <Border Grid.Row="3" Style="{StaticResource GlassCard}">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="Auto"/>
-                </Grid.ColumnDefinitions>
-                <StackPanel Grid.Column="0">
-                    <TextBlock Text="MODDED INSTALL PATH" Style="{StaticResource CardHeader}"/>
-                    <TextBlock Text="%LocalAppData%\AmongLauncher\ModdedAmongUs"
-                               TextTrimming="CharacterEllipsis" FontSize="13"
-                               Foreground="{StaticResource TextMuted}"/>
-                </StackPanel>
-                <Button Grid.Column="1" Click="ResetInstall_Click"
-                        Style="{StaticResource IconButton}" ToolTip="Reset">
-                    <Path Data="{StaticResource TrashIcon}" Fill="#F87171"
-                          Stretch="Uniform" Width="22" Height="22"/>
-                </Button>
-            </Grid>
-        </Border>
+        <!-- Connections section (owned by shell agent) -->
+        <Grid x:Name="ConnectionsSection" Grid.Row="2" Visibility="Collapsed">
+            <StackPanel>
+                <Border Style="{StaticResource GlassCard}">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <Image x:Name="ConnectionAvatarImage" Grid.Column="0"
+                               Width="64" Height="64" Margin="0,0,16,0">
+                            <Image.Clip>
+                                <EllipseGeometry Center="32,32" RadiusX="32" RadiusY="32"/>
+                            </Image.Clip>
+                        </Image>
+                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                            <TextBlock Text="DISCORD CONNECTION" Style="{StaticResource CardHeader}"/>
+                            <TextBlock x:Name="ConnectionUsernameText" Text="@unknown"
+                                       FontSize="13"
+                                       Foreground="{StaticResource TextMuted}"/>
+                            <TextBlock x:Name="ConnectionIdText" Text="" FontSize="11"
+                                       Foreground="{StaticResource TextMuted}" Margin="0,4,0,0"/>
+                        </StackPanel>
+                        <Button Grid.Column="2" Content="Disconnect" Click="DisconnectButton_Click"
+                                Style="{StaticResource SecondaryButton}"
+                                Height="32" Padding="14,0" FontSize="12"
+                                Margin="8,0,0,0" VerticalAlignment="Center"/>
+                    </Grid>
+                </Border>
+            </StackPanel>
+        </Grid>
 
-        <!-- Debug Mode -->
-        <Border Grid.Row="4" Style="{StaticResource GlassCard}">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="Auto"/>
-                </Grid.ColumnDefinitions>
-                <StackPanel Grid.Column="0">
-                    <TextBlock Text="DEBUG MODE" Style="{StaticResource CardHeader}"/>
-                    <TextBlock Text="Shows detailed join progress popup when clicking lobby links"
-                               FontSize="12" Foreground="{StaticResource TextMuted}"/>
-                </StackPanel>
-                <ToggleButton Grid.Column="1" x:Name="DebugModeToggle"
-                              Checked="DebugModeToggle_Changed"
-                              Unchecked="DebugModeToggle_Changed"
-                              IsChecked="False"
-                              Style="{StaticResource GlassToggle}"
-                              VerticalAlignment="Center" Margin="8,0,0,0"/>
-            </Grid>
-        </Border>
+        <!-- Storage section -->
+        <Grid x:Name="StorageSection" Grid.Row="2" Visibility="Collapsed">
+            <StackPanel>
+                <!-- Game Path -->
+                <Border Style="{StaticResource GlassCard}">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0">
+                            <TextBlock Text="AMONG US PATH" Style="{StaticResource CardHeader}"/>
+                            <ComboBox x:Name="StorefrontCombo" Style="{StaticResource GlassCombo}"
+                                      SelectionChanged="StorefrontCombo_SelectionChanged"
+                                      Margin="0,4,0,8" Width="200" HorizontalAlignment="Left"/>
+                            <TextBlock x:Name="GamePathText" Text="Auto-detecting..."
+                                       TextTrimming="CharacterEllipsis" FontSize="13"
+                                       Foreground="{StaticResource TextMuted}"/>
+                            <TextBlock x:Name="StorefrontStatusText" Text="" FontSize="11"
+                                       Foreground="{StaticResource TextMuted}" Margin="0,4,0,0"/>
+                        </StackPanel>
+                        <Button Grid.Column="1" Click="BrowseGamePath_Click"
+                                Style="{StaticResource IconButton}" ToolTip="Browse">
+                            <Path Data="{StaticResource FolderIcon}" Fill="White"
+                                  Stretch="Uniform" Width="22" Height="22"/>
+                        </Button>
+                    </Grid>
+                </Border>
 
-        <!-- Auto-Post Lobby -->
-        <Border Grid.Row="5" Style="{StaticResource GlassCard}">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="Auto"/>
-                </Grid.ColumnDefinitions>
-                <StackPanel Grid.Column="0">
-                    <TextBlock Text="AUTO-POST LOBBY" Style="{StaticResource CardHeader}"/>
-                    <TextBlock Text="Automatically posts lobby to backend on game start. Off = use /postlobby in chat."
-                               FontSize="12" Foreground="{StaticResource TextMuted}" TextWrapping="Wrap"/>
-                </StackPanel>
-                <ToggleButton Grid.Column="1" x:Name="AutoPostToggle"
-                              Checked="AutoPostToggle_Changed"
-                              Unchecked="AutoPostToggle_Changed"
-                              IsChecked="False"
-                              Style="{StaticResource GlassToggle}"
-                              VerticalAlignment="Center" Margin="8,0,0,0"/>
-            </Grid>
-        </Border>
+                <!-- Modded Install Path -->
+                <Border Style="{StaticResource GlassCard}">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0">
+                            <TextBlock Text="MODDED INSTALL PATH" Style="{StaticResource CardHeader}"/>
+                            <TextBlock Text="%LocalAppData%\AmongLauncher\ModdedAmongUs"
+                                       TextTrimming="CharacterEllipsis" FontSize="13"
+                                       Foreground="{StaticResource TextMuted}"/>
+                        </StackPanel>
+                        <Button Grid.Column="1" Click="ResetInstall_Click"
+                                Style="{StaticResource IconButton}" ToolTip="Reset">
+                            <Path Data="{StaticResource TrashIcon}" Fill="#F87171"
+                                  Stretch="Uniform" Width="22" Height="22"/>
+                        </Button>
+                    </Grid>
+                </Border>
+            </StackPanel>
+        </Grid>
+
+        <!-- About section -->
+        <Grid x:Name="AboutSection" Grid.Row="2" Visibility="Collapsed">
+            <StackPanel>
+                <!-- Version -->
+                <Border Style="{StaticResource GlassCard}">
+                    <StackPanel>
+                        <TextBlock Text="VERSION" Style="{StaticResource CardHeader}"/>
+                        <TextBlock x:Name="AppVersionText" Text="Among Launcher"
+                                   FontSize="13"
+                                   Foreground="{StaticResource TextMuted}"/>
+                    </StackPanel>
+                </Border>
+
+                <!-- Updates -->
+                <Border Style="{StaticResource GlassCard}">
+                    <StackPanel>
+                        <TextBlock Text="UPDATES" Style="{StaticResource CardHeader}"/>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock x:Name="UpdateStatusText" Grid.Column="0"
+                                       Text="Update check runs on launch."
+                                       FontSize="12" Foreground="{StaticResource TextMuted}"
+                                       VerticalAlignment="Center" TextWrapping="Wrap"/>
+                            <Button x:Name="CheckUpdatesButton" Grid.Column="1"
+                                    Content="Check for updates" Click="CheckForUpdates_Click"
+                                    Style="{StaticResource SecondaryButton}"
+                                    Height="32" Padding="14,0" FontSize="12"
+                                    Margin="8,0,0,0" VerticalAlignment="Center"/>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+
+                <!-- Diagnostics -->
+                <Border Style="{StaticResource GlassCard}">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0">
+                            <TextBlock Text="DIAGNOSTICS" Style="{StaticResource CardHeader}"/>
+                            <TextBlock Text="Export launcher and BepInEx logs into a .zip file."
+                                       FontSize="12" Foreground="{StaticResource TextMuted}"
+                                       TextWrapping="Wrap"/>
+                        </StackPanel>
+                        <Button Grid.Column="1" Content="Export logs" Click="ExportLogs_Click"
+                                Style="{StaticResource SecondaryButton}"
+                                Height="32" Padding="14,0" FontSize="12"
+                                Margin="8,0,0,0" VerticalAlignment="Center"/>
+                    </Grid>
+                </Border>
+
+                <!-- Changelog -->
+                <Border Style="{StaticResource GlassCard}">
+                    <StackPanel>
+                        <TextBlock Text="CHANGELOG" Style="{StaticResource CardHeader}"/>
+                        <ScrollViewer MaxHeight="200" VerticalScrollBarVisibility="Auto">
+                            <TextBlock x:Name="ChangelogText" Text="Loading..."
+                                       FontSize="12" Foreground="{StaticResource TextMuted}"
+                                       TextWrapping="Wrap"/>
+                        </ScrollViewer>
+                    </StackPanel>
+                </Border>
+
+                <!-- Launcher options -->
+                <Border Style="{StaticResource GlassCard}">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0">
+                            <TextBlock Text="DEBUG MODE" Style="{StaticResource CardHeader}"/>
+                            <TextBlock Text="Shows detailed join progress popup when clicking lobby links"
+                                       FontSize="12" Foreground="{StaticResource TextMuted}"/>
+                        </StackPanel>
+                        <ToggleButton Grid.Column="1" x:Name="DebugModeToggle"
+                                      Checked="DebugModeToggle_Changed"
+                                      Unchecked="DebugModeToggle_Changed"
+                                      IsChecked="False"
+                                      Style="{StaticResource GlassToggle}"
+                                      VerticalAlignment="Center" Margin="8,0,0,0"/>
+                    </Grid>
+                </Border>
+
+                <Border Style="{StaticResource GlassCard}">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0">
+                            <TextBlock Text="AUTO-POST LOBBY" Style="{StaticResource CardHeader}"/>
+                            <TextBlock Text="Automatically posts lobby to backend on game start. Off = use /postlobby in chat."
+                                       FontSize="12" Foreground="{StaticResource TextMuted}" TextWrapping="Wrap"/>
+                        </StackPanel>
+                        <ToggleButton Grid.Column="1" x:Name="AutoPostToggle"
+                                      Checked="AutoPostToggle_Changed"
+                                      Unchecked="AutoPostToggle_Changed"
+                                      IsChecked="False"
+                                      Style="{StaticResource GlassToggle}"
+                                      VerticalAlignment="Center" Margin="8,0,0,0"/>
+                    </Grid>
+                </Border>
+            </StackPanel>
+        </Grid>
     </Grid>
     </ScrollViewer>
 </UserControl>

@@ -10,12 +10,9 @@ namespace AmongLauncher.Tests;
 
 public class BackendClientTests
 {
-    private const string ServerUrl = "https://test-server.example.com";
-
     private static LauncherConfig CreateConfig(string? token = null) =>
         new()
         {
-            ServerUrl = ServerUrl,
             DiscordAccessToken = token ?? string.Empty
         };
 
@@ -49,7 +46,7 @@ public class BackendClientTests
 
         return new HttpClient(handler)
         {
-            BaseAddress = new Uri(ServerUrl + "/")
+            BaseAddress = new Uri(LauncherConfig.BackendServerUrl + "/")
         };
     }
 
@@ -60,7 +57,7 @@ public class BackendClientTests
 
         var http = new HttpClient(handler)
         {
-            BaseAddress = new Uri(ServerUrl + "/")
+            BaseAddress = new Uri(LauncherConfig.BackendServerUrl + "/")
         };
         return (http, handler);
     }
@@ -147,7 +144,7 @@ public class BackendClientTests
                 Content = new StringContent(JsonSerializer.Serialize(modInfo), Encoding.UTF8, "application/json")
             }));
 
-        using var http = new HttpClient(handler) { BaseAddress = new Uri(ServerUrl + "/") };
+        using var http = new HttpClient(handler) { BaseAddress = new Uri(LauncherConfig.BackendServerUrl + "/") };
 
         var config = CreateConfig();
         var client = new LobbyBackendClient(http, config);
@@ -210,7 +207,7 @@ public class BackendClientTests
                 Content = new StringContent(json, Encoding.UTF8, "application/json")
             }));
 
-        using var http = new HttpClient(handler) { BaseAddress = new Uri(ServerUrl + "/") };
+        using var http = new HttpClient(handler) { BaseAddress = new Uri(LauncherConfig.BackendServerUrl + "/") };
         var config = CreateConfig("discord_token_123");
         var client = new LobbyBackendClient(http, config);
 
@@ -232,7 +229,7 @@ public class BackendClientTests
                 Content = new StringContent(json, Encoding.UTF8, "application/json")
             }));
 
-        using var http = new HttpClient(handler) { BaseAddress = new Uri(ServerUrl + "/") };
+        using var http = new HttpClient(handler) { BaseAddress = new Uri(LauncherConfig.BackendServerUrl + "/") };
         var config = CreateConfig();
         var client = new LobbyBackendClient(http, config);
 
@@ -248,7 +245,7 @@ public class BackendClientTests
         var handler = new FakeHttpMessageHandler((_, _) => throw new TaskCanceledException("timeout"));
         using var http = new HttpClient(handler)
         {
-            BaseAddress = new Uri(ServerUrl + "/"),
+            BaseAddress = new Uri(LauncherConfig.BackendServerUrl + "/"),
             Timeout = TimeSpan.FromMilliseconds(100)
         };
 
@@ -376,23 +373,9 @@ public class BackendClientTests
     }
 
     [Fact]
-    public void IsConfigured_ReturnsFalse_ForDefaultUrl()
+    public void IsConfigured_AlwaysReturnsTrue()
     {
-        var config = new LauncherConfig { ServerUrl = "https://yourserver.com" };
-        Assert.False(LobbyBackendClient.IsConfigured(config));
-    }
-
-    [Fact]
-    public void IsConfigured_ReturnsTrue_ForCustomUrl()
-    {
-        var config = new LauncherConfig { ServerUrl = "https://among-us2.mel-homes.com" };
+        var config = new LauncherConfig();
         Assert.True(LobbyBackendClient.IsConfigured(config));
-    }
-
-    [Fact]
-    public void IsConfigured_ReturnsFalse_ForBlankUrl()
-    {
-        var config = new LauncherConfig { ServerUrl = "" };
-        Assert.False(LobbyBackendClient.IsConfigured(config));
     }
 }

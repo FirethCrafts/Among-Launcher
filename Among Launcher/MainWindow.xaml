@@ -47,7 +47,8 @@
                             Foreground="#FFFFFF" FontSize="11" FontWeight="SemiBold"
                             Padding="8,4"
                             Visibility="Collapsed"
-                            Click="StopGameButton_Click">
+                            Click="StopGameButton_Click"
+                            shell:WindowChrome.IsHitTestVisibleInChrome="True">
                         <Button.Style>
                             <Style TargetType="Button">
                                 <Setter Property="Template">

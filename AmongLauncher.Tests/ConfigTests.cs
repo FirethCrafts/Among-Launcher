@@ -25,8 +25,8 @@ public class ConfigTests : IDisposable
     {
         var config = new LauncherConfig();
 
-        Assert.Equal("https://yourserver.com", config.ServerUrl);
-        Assert.Equal("wss://yourserver.com/ws", config.BackendWssUrl);
+        Assert.Equal("https://among-us.mel-homes.com", LauncherConfig.BackendServerUrl);
+        Assert.Equal("wss://among-us.mel-homes.com/ws", LauncherConfig.BackendWebSocketUrl);
         Assert.Equal(string.Empty, config.DiscordAccessToken);
         Assert.False(config.DebugMode);
         Assert.False(config.AutoPostLobby);
@@ -43,7 +43,6 @@ public class ConfigTests : IDisposable
         var configPath = Path.Combine(_tempDir, "config.json");
         var config = new LauncherConfig
         {
-            ServerUrl = "https://custom-server.com",
             DiscordAccessToken = "test_token",
             DebugMode = true,
             AutoPostLobby = true
@@ -54,8 +53,7 @@ public class ConfigTests : IDisposable
         var loaded = JsonSerializer.Deserialize<LauncherConfig>(File.ReadAllText(configPath));
 
         Assert.NotNull(loaded);
-        Assert.Equal("https://custom-server.com", loaded!.ServerUrl);
-        Assert.Equal("test_token", loaded.DiscordAccessToken);
+        Assert.Equal("test_token", loaded!.DiscordAccessToken);
         Assert.True(loaded.DebugMode);
         Assert.True(loaded.AutoPostLobby);
     }
@@ -65,14 +63,14 @@ public class ConfigTests : IDisposable
     {
         var config = new LauncherConfig
         {
-            ServerUrl = "https://save-test.com"
+            DiscordAccessToken = "save-test-token"
         };
 
         var json = JsonSerializer.Serialize(config, new JsonSerializerOptions { WriteIndented = true });
         var parsed = JsonSerializer.Deserialize<LauncherConfig>(json);
 
         Assert.NotNull(parsed);
-        Assert.Equal("https://save-test.com", parsed!.ServerUrl);
+        Assert.Equal("save-test-token", parsed!.DiscordAccessToken);
     }
 
     [Fact]
@@ -87,7 +85,7 @@ public class ConfigTests : IDisposable
     {
         var config = new LauncherConfig();
 
-        Assert.Equal("https://yourserver.com", config.ServerUrl);
+        Assert.Equal("https://among-us.mel-homes.com", LauncherConfig.BackendServerUrl);
         Assert.Empty(config.Profiles);
         Assert.Empty(config.Library);
     }
@@ -142,11 +140,11 @@ public class ConfigTests : IDisposable
     [Fact]
     public void HandlePartialJson_ReturnsPartialConfig()
     {
-        var json = "{\"ServerUrl\":\"https://partial.com\"}";
+        var json = "{\"UserName\":\"partial-user\"}";
         var loaded = JsonSerializer.Deserialize<LauncherConfig>(json);
 
         Assert.NotNull(loaded);
-        Assert.Equal("https://partial.com", loaded!.ServerUrl);
+        Assert.Equal("partial-user", loaded!.UserName);
     }
 
     [Fact]
@@ -168,16 +166,9 @@ public class ConfigTests : IDisposable
     }
 
     [Fact]
-    public void IsConfigured_ReturnsFalse_ForDefaultServerUrl()
+    public void IsConfigured_AlwaysReturnsTrue()
     {
         var config = new LauncherConfig();
-        Assert.False(LobbyBackendClient.IsConfigured(config));
-    }
-
-    [Fact]
-    public void IsConfigured_ReturnsTrue_ForCustomServerUrl()
-    {
-        var config = new LauncherConfig { ServerUrl = "https://among-us2.mel-homes.com" };
         Assert.True(LobbyBackendClient.IsConfigured(config));
     }
 }

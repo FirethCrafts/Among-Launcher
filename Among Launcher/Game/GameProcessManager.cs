@@ -47,27 +47,69 @@ public class GameProcessManager
         return true;
     }
 
-    public void KillGame()
+    public bool KillGame()
     {
-        if (_gameProcess == null || _gameProcess.HasExited)
-            return;
+        var killedAnything = false;
 
-        try
-        {
-            if (_gameProcess.CloseMainWindow())
-                _gameProcess.WaitForExit(15000);
-        }
-        catch { }
-
-        if (!_gameProcess.HasExited)
+        if (_gameProcess != null)
         {
             try
             {
-                _gameProcess.Kill();
-                _gameProcess.WaitForExit(15000);
+                if (!_gameProcess.HasExited)
+                {
+                    try
+                    {
+                        if (_gameProcess.CloseMainWindow())
+                            _gameProcess.WaitForExit(15000);
+                    }
+                    catch { }
+
+                    try
+                    {
+                        if (!_gameProcess.HasExited)
+                        {
+                            _gameProcess.Kill();
+                            _gameProcess.WaitForExit(15000);
+                        }
+                    }
+                    catch { }
+
+                    try
+                    {
+                        if (_gameProcess.HasExited)
+                            killedAnything = true;
+                    }
+                    catch { }
+                }
             }
             catch { }
         }
+
+        // Fallback: tracked handle may be null (game launched externally,
+        // launcher restarted) or already exited. Kill by process name best-effort.
+        try
+        {
+            foreach (var proc in Process.GetProcessesByName("Among Us"))
+            {
+                try
+                {
+                    if (!proc.HasExited)
+                    {
+                        proc.Kill();
+                        proc.WaitForExit(15000);
+                    }
+                    killedAnything = true;
+                }
+                catch { }
+                finally
+                {
+                    proc.Dispose();
+                }
+            }
+        }
+        catch { }
+
+        return killedAnything;
     }
 
     public bool IsGameRunning()

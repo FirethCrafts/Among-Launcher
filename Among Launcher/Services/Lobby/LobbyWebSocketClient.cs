@@ -27,7 +27,7 @@ public class LobbyWebSocketClient
         {
             try
             {
-                var uri = $"{_config.BackendWssUrl}?code={lobbyCode}";
+                var uri = $"{LauncherConfig.BackendWebSocketUrl}?code={lobbyCode}";
                 _ws = new ClientWebSocket();
                 if (!string.IsNullOrEmpty(_config.DiscordAccessToken))
                     _ws.Options.SetRequestHeader("Authorization", $"Bearer {_config.DiscordAccessToken}");

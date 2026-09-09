@@ -13,9 +13,8 @@ namespace AmongLauncher.Tests;
 /// </summary>
 public class BackendIntegrationTests : IDisposable
 {
-    // LobbyBackendClient already prepends api/v1/... in its requests, so ServerUrl is just the base domain
+    // LobbyBackendClient uses LauncherConfig.BackendServerUrl (hardcoded base domain)
     private const string BaseUrl = "https://among-us.mel-homes.com";
-    private const string ServerUrl = BaseUrl;
 
     private static readonly HttpClient _sharedClient = new();
     private static bool? _backendAvailable;
@@ -27,10 +26,7 @@ public class BackendIntegrationTests : IDisposable
 
     public BackendIntegrationTests()
     {
-        _config = new LauncherConfig
-        {
-            ServerUrl = ServerUrl
-        };
+        _config = new LauncherConfig();
         _backendClient = new LobbyBackendClient(_httpClient, _config);
     }
 
