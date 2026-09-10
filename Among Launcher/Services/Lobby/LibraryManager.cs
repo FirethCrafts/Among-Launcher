@@ -18,6 +18,7 @@ public class LibraryManager
         _libraryDir = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "AmongLauncher", "Library");
+        try { Directory.CreateDirectory(_libraryDir); } catch { /* best effort */ }
     }
 
     public List<LibraryEntry> LoadLibrary()

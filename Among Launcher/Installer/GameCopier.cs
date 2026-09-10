@@ -11,10 +11,29 @@ public class GameCopier
 
         if (Directory.Exists(destinationPath))
         {
-            Directory.Delete(destinationPath, true);
+            // Preserve the BepInEx subdirectory (all user mods + configs).
+            // Delete everything inside the destination EXCEPT BepInEx/.
+            foreach (var entry in Directory.GetFileSystemEntries(destinationPath))
+            {
+                var name = Path.GetFileName(entry);
+                if (string.Equals(name, "BepInEx", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                if (Directory.Exists(entry))
+                    Directory.Delete(entry, true);
+                else
+                    File.Delete(entry);
+            }
+        }
+        else
+        {
+            Directory.CreateDirectory(destinationPath);
         }
 
-        var files = Directory.GetFiles(sourcePath, "*.*", SearchOption.AllDirectories);
+        var allFiles = Directory.GetFiles(sourcePath, "*.*", SearchOption.AllDirectories);
+        var files = allFiles
+            .Where(f => !SkipExtensions.Contains(Path.GetExtension(f).ToLowerInvariant()))
+            .ToArray();
         var totalFiles = files.Length;
         var copiedFiles = 0;
 
@@ -22,13 +41,6 @@ public class GameCopier
         {
             foreach (var file in files)
             {
-                var extension = Path.GetExtension(file).ToLowerInvariant();
-                if (SkipExtensions.Contains(extension))
-                {
-                    copiedFiles++;
-                    continue;
-                }
-
                 var relativePath = Path.GetRelativePath(sourcePath, file);
                 var destFile = Path.Combine(destinationPath, relativePath);
 

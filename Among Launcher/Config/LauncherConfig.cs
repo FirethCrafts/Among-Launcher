@@ -12,6 +12,8 @@ public class LauncherConfig
 
     private static readonly string ConfigPath = Path.Combine(ConfigDir, "config.json");
 
+    private static readonly string BackupPath = Path.Combine(ConfigDir, "config.json.bak");
+
     public static string DefaultModdedPath() => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "AmongLauncher", "ModdedAmongUs");
@@ -37,17 +39,28 @@ public class LauncherConfig
 
     public static LauncherConfig Load()
     {
-        try
+        // Primary config first, backup second, defaults last. A kill
+        // mid-save (e.g. Velopack update restart) can truncate config.json;
+        // the backup keeps a single bad write from wiping everything.
+        foreach (var path in new[] { ConfigPath, BackupPath })
         {
-            if (File.Exists(ConfigPath))
+            try
             {
-                var json = File.ReadAllText(ConfigPath);
-                return JsonSerializer.Deserialize<LauncherConfig>(json) ?? new LauncherConfig();
+                if (File.Exists(path))
+                {
+                    var json = File.ReadAllText(path);
+                    if (!string.IsNullOrWhiteSpace(json))
+                    {
+                        var parsed = JsonSerializer.Deserialize<LauncherConfig>(json);
+                        if (parsed != null)
+                            return parsed;
+                    }
+                }
             }
-        }
-        catch
-        {
-            // Config corrupted, return defaults
+            catch
+            {
+                // Corrupted/unreadable — try the next source.
+            }
         }
 
         return new LauncherConfig();
@@ -64,7 +77,16 @@ public class LauncherConfig
 
             var options = new JsonSerializerOptions { WriteIndented = true };
             var json = JsonSerializer.Serialize(this, options);
-            File.WriteAllText(ConfigPath, json);
+
+            // Atomic write: temp file + move, so a kill mid-save can never
+            // leave a truncated config.json behind.
+            var tempPath = ConfigPath + ".tmp";
+            File.WriteAllText(tempPath, json);
+            File.Move(tempPath, ConfigPath, overwrite: true);
+
+            // Keep one known-good backup for recovery on corrupt load.
+            try { File.Copy(ConfigPath, BackupPath, overwrite: true); }
+            catch { /* backup is best-effort */ }
         }
         catch
         {
