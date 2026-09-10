@@ -1,13 +1,18 @@
-name: Build AmongApi
+name: Build and Release
 
 on:
   push:
     branches: [master]
-    paths: ['Among API/**']
+    paths:
+      - 'Among API/**'
+      - 'Among Launcher/**'
+      - 'BepInEx/**'
+      - 'BepInEx-MS-Epic/**'
+      - '.github/workflows/build.yml'
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     permissions:
       contents: write
 
@@ -17,63 +22,69 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: 6.0.x
+          dotnet-version: |
+            6.0.x
+            10.0.x
 
-      - name: Bump AmongApi version
+      - name: Bump versions
         id: bump
+        shell: bash
         run: |
-          # Read current version
-          current=$(grep '<Version>' Among\ API/Among\ API.csproj | sed 's/.*<Version>\(.*\)<\/Version>.*/\1/')
+          # Single release version for the whole bundle, derived from AmongApi.
+          current=$(grep -m1 '<Version>' "Among API/Among API.csproj" | sed 's/.*<Version>\(.*\)<\/Version>.*/\1/')
           echo "Current version: $current"
-
-          # Increment last number
-          major=$(echo $current | cut -d. -f1)
-          minor=$(echo $current | cut -d. -f2)
-          patch=$(echo $current | cut -d. -f3)
-          new_patch=$((patch + 1))
-          new_version="$major.$minor.$new_patch"
+          major=$(echo "$current" | cut -d. -f1)
+          minor=$(echo "$current" | cut -d. -f2)
+          patch=$(echo "$current" | cut -d. -f3)
+          new_version="$major.$minor.$((patch + 1))"
           echo "New version: $new_version"
-
-          # Update csproj
-          sed -i "s|<Version>$current</Version>|<Version>$new_version</Version>|" Among\ API/Among\ API.csproj
-          sed -i "s|<FileVersion>$current</FileVersion>|<FileVersion>$new_version</FileVersion>|" Among\ API/Among\ API.csproj
-
+          for file in "Among API/Among API.csproj" "Among Launcher/Among Launcher.csproj"; do
+            old=$(grep -m1 '<Version>' "$file" | sed 's/.*<Version>\(.*\)<\/Version>.*/\1/')
+            sed -i "s|<Version>$old</Version>|<Version>$new_version</Version>|" "$file"
+            sed -i "s|<FileVersion>$old</FileVersion>|<FileVersion>$new_version</FileVersion>|" "$file"
+          done
           echo "version=$new_version" >> $GITHUB_OUTPUT
 
-      - name: Commit version bump
+      - name: Commit version bumps
         run: |
           git config user.name "github-actions"
           git config user.email "actions@github.com"
-          git add "Among API/Among API.csproj"
-          git diff --staged --quiet || git commit -m "chore: auto-bump AmongApi to ${{ steps.bump.outputs.version }}"
+          git add "Among API/Among API.csproj" "Among Launcher/Among Launcher.csproj"
+          git diff --staged --quiet || git commit -m "chore: auto-bump to ${{ steps.bump.outputs.version }}"
           git push
 
-      - name: Restore dependencies
-        run: dotnet restore "Among API/Among API.csproj"
-
-      - name: Build
-        run: dotnet build "Among API/Among API.csproj" --configuration Release --no-restore
+      - name: Restore + build AmongApi
+        run: |
+          dotnet restore "Among API/Among API.csproj"
+          dotnet build "Among API/Among API.csproj" --configuration Release --no-restore
 
       - name: Package BepInEx distributions
         run: |
-          cd BepInEx && zip -r ../BepInEx.zip . && cd ..
-          cd BepInEx-MS-Epic && zip -r ../bepinex-ms-epic.zip . && cd ..
+          Compress-Archive -Path "BepInEx\*" -DestinationPath "BepInEx.zip" -Force
+          Compress-Archive -Path "BepInEx-MS-Epic\*" -DestinationPath "bepinex-ms-epic.zip" -Force
 
-      - name: Delete old latest release
-        run: |
-          gh release delete latest --yes --cleanup-tag || true
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish launcher
+        run: dotnet publish "Among Launcher/Among Launcher.csproj" -c Release -r win-x64 --self-contained -o ./publish
 
-      - name: Create release with version tag
+      - name: Install vpk
+        run: dotnet tool install -g vpk
+
+      - name: Pack launcher installer
+        run: vpk pack --packId AmongLauncher --packTitle "Among Launcher" --packVersion ${{ steps.bump.outputs.version }} --packDir ./publish --mainExe AmongLauncher.exe
+
+      - name: Create release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.bump.outputs.version }}
-          name: AmongApi v${{ steps.bump.outputs.version }}
+          name: v${{ steps.bump.outputs.version }}
           files: |
             Among API/bin/Release/net6.0/AmongApi.dll
             BepInEx.zip
             bepinex-ms-epic.zip
+            Releases/AmongLauncher-win-Setup.exe
+            Releases/AmongLauncher-*-full.nupkg
+            Releases/RELEASES
+            Releases/releases.win.json
           make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
