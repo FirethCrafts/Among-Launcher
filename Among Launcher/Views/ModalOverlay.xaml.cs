@@ -13,8 +13,17 @@ public partial class ModalOverlay : UserControl
         InitializeComponent();
     }
 
-    public void Show(string title, UIElement content)
+    /// <summary>
+    /// When false, backdrop-click and the ✕ button are ignored, forcing the
+    /// user to pick an explicit action inside the modal content (e.g. mandatory
+    /// update Update/Close buttons). Defaults to true to preserve existing call sites.
+    /// </summary>
+    public bool AllowDismiss { get; private set; } = true;
+
+    public void Show(string title, UIElement content, bool allowDismiss = true)
     {
+        AllowDismiss = allowDismiss;
+        CloseButton.Visibility = allowDismiss ? Visibility.Visible : Visibility.Collapsed;
         ModalTitle.Text = title;
         ModalContent.Content = content;
         Visibility = Visibility.Visible;
@@ -52,10 +61,15 @@ public partial class ModalOverlay : UserControl
     {
         Visibility = Visibility.Collapsed;
         ModalContent.Content = null;
+        // Reset to the dismissible default so the next Show() starts safe
+        // even if a caller forgets to pass allowDismiss explicitly.
+        AllowDismiss = true;
+        CloseButton.Visibility = Visibility.Visible;
     }
 
     private void Backdrop_Click(object sender, MouseButtonEventArgs e)
     {
+        if (!AllowDismiss) return;
         Hide();
     }
 
@@ -67,6 +81,7 @@ public partial class ModalOverlay : UserControl
 
     private void CloseButton_Click(object sender, RoutedEventArgs e)
     {
+        if (!AllowDismiss) return;
         Hide();
     }
 }

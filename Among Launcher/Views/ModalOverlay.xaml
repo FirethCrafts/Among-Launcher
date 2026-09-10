@@ -40,7 +40,7 @@
                     </Grid.ColumnDefinitions>
                     <TextBlock x:Name="ModalTitle" Text="Modal" FontSize="18" FontWeight="Bold"
                                Foreground="{StaticResource TextTitle}" VerticalAlignment="Center"/>
-                    <Button Grid.Column="1" Content="✕" FontSize="16"
+                    <Button x:Name="CloseButton" Grid.Column="1" Content="✕" FontSize="16"
                             Background="Transparent" BorderThickness="0"
                             Foreground="{StaticResource TextTitle}" Cursor="Hand"
                             Width="32" Height="32"

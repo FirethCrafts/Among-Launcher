@@ -38,11 +38,9 @@ public partial class MainWindow
     private readonly Dictionary<string, int?> _lobbyPlayerLevels = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, int?> _lobbyPlayerPings = new(StringComparer.OrdinalIgnoreCase);
     private TaskCompletionSource<bool>? _gameReadyTcs;
-    private System.Windows.Forms.NotifyIcon? _trayIcon;
     private bool _joining;
     private bool _lobbyPostedToBackend;
     private string _postedLobbyCode = "";
-    private bool _isExiting;
 
     public ModalOverlay ModalOverlayControl => ModalOverlay;
 
@@ -372,12 +370,12 @@ public partial class MainWindow
                         errorModal.Configure("Failed to update Among Launcher. Please try again later.", "OK");
                         errorModal.Confirmed += (_, _) => ModalOverlay.Hide();
                         ModalOverlay.Show("Update Failed", errorModal);
-                        return;
+                        // Fall through: a failed launcher update must NOT skip the
+                        // AmongAPI check and remaining startup below.
                     }
                 }
                 else
                 {
-                    _isExiting = true;
                     Application.Current.Shutdown();
                     return;
                 }
@@ -443,7 +441,6 @@ public partial class MainWindow
                 }
             }
 
-            SetupTrayIcon();
         };
 
         Closing += (_, _) => SaveWindowState();
@@ -613,27 +610,6 @@ public partial class MainWindow
         _config.Save();
     }
 
-    private void SetupTrayIcon()
-    {
-        var icon = System.Drawing.Icon.ExtractAssociatedIcon(
-            System.Reflection.Assembly.GetExecutingAssembly().Location);
-
-        var menu = new System.Windows.Forms.ContextMenuStrip();
-        menu.Items.Add("Show", null, (_, _) => Dispatcher.Invoke(ShowFromTray));
-        menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
-        menu.Items.Add("Exit", null, (_, _) => ExitTray());
-
-        _trayIcon = new System.Windows.Forms.NotifyIcon
-        {
-            Text = "Among Launcher",
-            Icon = icon,
-            ContextMenuStrip = menu,
-            Visible = true
-        };
-
-        _trayIcon.DoubleClick += (_, _) => Dispatcher.Invoke(ShowFromTray);
-    }
-
     private async Task<bool?> ShowLauncherUpdatePopup()
     {
         var tcs = new TaskCompletionSource<bool?>();
@@ -652,11 +628,14 @@ public partial class MainWindow
             ModalOverlay.Hide();
         };
 
-        ModalOverlay.Show("Update Available", modal);
+        // Mandatory choice: backdrop/✕ dismissal is disabled on the overlay so the
+        // TCS can only resolve via Update (true) or Close (false). The timeout below
+        // stays as a safety net only.
+        ModalOverlay.Show("Update Available", modal, allowDismiss: false);
 
-        // Guard against a TCS hang: the overlay backdrop/✕ hides the modal without
-        // resolving the task. Treat a dismissed/ignored popup as declining instead
-        // of awaiting forever.
+        // Safety net only (backdrop/✕ dismissal is disabled above, so this should
+        // not trigger): treat a truly ignored popup as declining instead of
+        // awaiting forever.
         var timeout = Task.Delay(TimeSpan.FromSeconds(60));
         var completed = await Task.WhenAny(tcs.Task, timeout);
         if (completed != tcs.Task)
@@ -697,47 +676,13 @@ public partial class MainWindow
         return await tcs.Task;
     }
 
-    private void ShowFromTray()
-    {
-        Show();
-        ShowInTaskbar = true;
-        WindowState = WindowState.Normal;
-        Activate();
-    }
-
     protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
     {
-        if (_isExiting)
-        {
-            base.OnClosing(e);
-            return;
-        }
-
-        e.Cancel = true;
-        base.OnClosing(e);
-        ShowInTaskbar = false;
-        WindowState = WindowState.Minimized;
-        Hide();
-    }
-
-    private void ExitTray()
-    {
-        if (_trayIcon != null)
-        {
-            _trayIcon.Visible = false;
-            _trayIcon.Dispose();
-            _trayIcon = null;
-        }
-
         _pipeServer.Stop();
         StopHeartbeat();
         _ws.Disconnect();
 
-        _isExiting = true;
-        ShowInTaskbar = true;
-        Closing -= (_, _) => SaveWindowState();
-        Close();
-        Application.Current.Shutdown();
+        base.OnClosing(e);
     }
 
     private void RefreshConfig()
