@@ -557,9 +557,9 @@ public partial class MainWindow
 
     private void RestoreWindowState()
     {
-        if (_config.WindowWidth is { } w && w > 0)
+        if (_config.WindowWidth is { } w && w >= 800)
             Width = w;
-        if (_config.WindowHeight is { } h && h > 0)
+        if (_config.WindowHeight is { } h && h >= 500)
             Height = h;
 
         var screenW = SystemParameters.PrimaryScreenWidth;
@@ -595,16 +595,16 @@ public partial class MainWindow
             _config.IsMaximized = true;
             _config.WindowLeft = RestoreBounds.Left;
             _config.WindowTop = RestoreBounds.Top;
-            _config.WindowWidth = RestoreBounds.Width;
-            _config.WindowHeight = RestoreBounds.Height;
+            _config.WindowWidth = Math.Max(RestoreBounds.Width, 800);
+            _config.WindowHeight = Math.Max(RestoreBounds.Height, 500);
         }
         else
         {
             _config.IsMaximized = false;
             _config.WindowLeft = Left;
             _config.WindowTop = Top;
-            _config.WindowWidth = Width;
-            _config.WindowHeight = Height;
+            _config.WindowWidth = Math.Max(Width, 800);
+            _config.WindowHeight = Math.Max(Height, 500);
         }
 
         _config.Save();
