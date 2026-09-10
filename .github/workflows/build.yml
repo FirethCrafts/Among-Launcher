@@ -54,6 +54,11 @@ jobs:
       - name: Build
         run: dotnet build "Among API/Among API.csproj" --configuration Release --no-restore
 
+      - name: Package BepInEx distributions
+        run: |
+          cd BepInEx && zip -r ../BepInEx.zip . && cd ..
+          cd BepInEx-MS-Epic && zip -r ../bepinex-ms-epic.zip . && cd ..
+
       - name: Delete old latest release
         run: |
           gh release delete latest --yes --cleanup-tag || true
@@ -65,7 +70,10 @@ jobs:
         with:
           tag_name: v${{ steps.bump.outputs.version }}
           name: AmongApi v${{ steps.bump.outputs.version }}
-          files: Among API/bin/Release/net6.0/AmongApi.dll
+          files: |
+            Among API/bin/Release/net6.0/AmongApi.dll
+            BepInEx.zip
+            bepinex-ms-epic.zip
           make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
