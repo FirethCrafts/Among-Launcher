@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
 
+mod auth;
 mod config;
 mod error;
 mod installer;
@@ -1107,6 +1108,35 @@ async fn kick_player(
     Ok(())
 }
 
+#[tauri::command]
+async fn login_discord(state: State<'_, AppState>) -> Result<auth::UserInfo, LauncherError> {
+    let auth_inst = auth::DiscordAuth::new()?;
+    let url = auth_inst.authorize_url();
+
+    open::that(&url).map_err(|e| LauncherError::Auth(e.to_string()))?;
+
+    let code = auth_inst.wait_for_callback().await?;
+
+    let token_resp = auth::DiscordAuth::exchange_token(&code, auth_inst.port).await?;
+
+    let user = auth::DiscordAuth::fetch_user(&token_resp.access_token).await?;
+
+    {
+        let mut config = state.config.write().await;
+        config.discord_access_token = token_resp.access_token;
+        config.username = user.username.clone();
+        if let Some(ref avatar) = user.avatar {
+            config.avatar_url = format!(
+                "https://cdn.discordapp.com/avatars/{}/{}.png",
+                user.id, avatar
+            );
+        }
+        config.save().map_err(|e| LauncherError::Config(e))?;
+    }
+
+    Ok(user)
+}
+
 // ============================================================
 // Entry Point
 // ============================================================
@@ -1149,6 +1179,7 @@ pub fn run() {
             post_lobby,
             disband_lobby,
             kick_player,
+            login_discord,
         ])
         .setup(move |app| {
             let app_handle = app.handle().clone();
