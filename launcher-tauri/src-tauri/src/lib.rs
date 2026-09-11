@@ -8,6 +8,7 @@ use tauri::{AppHandle, Emitter, State};
 
 mod config;
 mod error;
+mod installer;
 
 use config::{LauncherConfig, SharedConfig};
 use error::LauncherError;
@@ -696,12 +697,33 @@ async fn detect_game(
 
 #[tauri::command]
 async fn install_game(
-    _state: State<'_, AppState>,
-    _storefront: String,
-) -> Result<String, LauncherError> {
-    Err(LauncherError::InstallFailed(
-        "Install not yet implemented".to_string(),
-    ))
+    app: AppHandle,
+    state: State<'_, AppState>,
+    game_path: String,
+    storefront: String,
+) -> Result<(), LauncherError> {
+    let config = state.config.read().await;
+
+    let _ = app.emit(
+        "install-progress",
+        serde_json::json!({ "stage": "copying", "progress": 0 }),
+    );
+    installer::copy_game(
+        &config.modded_install_path,
+        &game_path,
+    )
+    .await?;
+
+    installer::download_bepinex(&game_path, &storefront, &app).await?;
+
+    installer::download_among_api(&game_path, &app).await?;
+
+    if storefront == "steam" {
+        let _ = std::fs::write(std::path::Path::new(&game_path).join("steam_appid.txt"), "945360");
+    }
+
+    let _ = app.emit("install-progress", serde_json::json!({ "stage": "complete" }));
+    Ok(())
 }
 
 #[tauri::command]
