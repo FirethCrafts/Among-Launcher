@@ -1,0 +1,92 @@
+@import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,700;12..96,800&family=Inter:wght@400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --color-background: hsl(222 47% 11%);
+  --color-foreground: hsl(210 40% 98%);
+  --color-card: hsl(215 25% 15%);
+  --color-card-foreground: hsl(210 40% 98%);
+  --color-primary: hsl(235 86% 65%);
+  --color-primary-foreground: hsl(0 0% 100%);
+  --color-secondary: hsl(215 20% 18%);
+  --color-secondary-foreground: hsl(0 0% 98%);
+  --color-muted: hsl(215 20% 18%);
+  --color-muted-foreground: hsl(215 20% 65%);
+  --color-accent: hsl(235 86% 65%);
+  --color-accent-foreground: hsl(0 0% 100%);
+  --color-destructive: hsl(0 62.8% 30.6%);
+  --color-border: hsl(215 20% 25%);
+  --color-input: hsl(215 20% 20%);
+  --color-ring: hsl(235 86% 65%);
+
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Bricolage Grotesque", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Mono", Menlo, Consolas, monospace;
+}
+
+@layer base {
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+  }
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: hsl(240 3.7% 22%);
+    border: 3px solid transparent;
+    background-clip: content-box;
+    border-radius: 9999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(240 3.7% 32%);
+    background-clip: content-box;
+  }
+}
+
+.bg-grid {
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+.sticker {
+  display: inline-flex;
+  align-items: center;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  border: 2px solid;
+  border-radius: 9999px;
+  padding: 4px 12px;
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.glow-emerald {
+  box-shadow:
+    0 0 0 1px rgba(16, 185, 129, 0.25),
+    0 8px 32px -8px rgba(16, 185, 129, 0.25);
+}
+.glow-amber {
+  box-shadow:
+    0 0 0 1px rgba(245, 158, 11, 0.25),
+    0 8px 32px -8px rgba(245, 158, 11, 0.25);
+}
+.glow-sky {
+  box-shadow:
+    0 0 0 1px rgba(13, 162, 231, 0.25),
+    0 8px 32px -8px rgba(13, 162, 231, 0.25);
+}
+.glow-violet {
+  box-shadow:
+    0 0 0 1px rgba(139, 92, 246, 0.25),
+    0 8px 32px -8px rgba(139, 92, 246, 0.25);
+}
+.glow-primary {
+  box-shadow:
+    0 0 0 1px rgba(89, 102, 243, 0.35),
+    0 8px 32px -8px rgba(89, 102, 243, 0.35);
+}

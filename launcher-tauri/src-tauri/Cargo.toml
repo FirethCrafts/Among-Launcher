@@ -1,0 +1,24 @@
+[package]
+name = "among-launcher"
+version = "1.0.0"
+description = "Among Launcher"
+authors = ["AmongLauncher"]
+edition = "2021"
+
+[lib]
+name = "among_launcher_lib"
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-shell = "2"
+tauri-plugin-fs = "2"
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+windows = { version = "0.58", features = ["Win32_System_Registry", "Win32_Foundation", "Win32_Storage_FileSystem", "Win32_Security"] }
+dirs = "5"

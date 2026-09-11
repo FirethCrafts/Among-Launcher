@@ -5,3 +5,11 @@ riderModule.iml
 /_ReSharper.Caches/
 .idea/
 Among-Launcher/
+launcher-tauri/node_modules/
+launcher-tauri/dist/
+launcher-tauri/src-tauri/target/
+launcher-tauri/src-tauri/gen/
+launcher-tauri/src-tauri/WixToolset/
+launcher-tauri/src-tauri/Binaries/
+launcher-tauri/src-tauri/*.msi
+launcher-tauri/src-tauri/*.exe
