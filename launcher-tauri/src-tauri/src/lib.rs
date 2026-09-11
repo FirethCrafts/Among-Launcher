@@ -10,11 +10,13 @@ mod config;
 mod error;
 mod installer;
 mod ipc_handler;
+mod lobby;
 mod lobby_backend;
 mod lobby_ws;
 
 use config::{LauncherConfig, SharedConfig};
 use error::LauncherError;
+use lobby::SharedLobbyState;
 
 static ID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -683,6 +685,7 @@ mod ipc {
 
 pub struct AppState {
     pub config: SharedConfig,
+    pub lobby_state: SharedLobbyState,
     pipe_handle: Arc<tokio::sync::Mutex<Option<ipc::PipeServerHandle>>>,
 }
 
@@ -1018,6 +1021,90 @@ async fn set_storefront(
     Ok(())
 }
 
+#[tauri::command]
+async fn post_lobby(state: State<'_, AppState>) -> Result<(), LauncherError> {
+    let (code, region, max_players, token) = {
+        let config = state.config.read().await;
+        let lobby = state.lobby_state.read().await;
+        let code = lobby
+            .code
+            .clone()
+            .ok_or_else(|| LauncherError::Lobby("No lobby to post".into()))?;
+        let token = config
+            .discord_access_token
+            .clone();
+        if token.is_empty() {
+            return Err(LauncherError::Auth("Not logged in".into()));
+        }
+        (
+            code,
+            lobby.region.clone().unwrap_or_else(|| "NA".into()),
+            lobby.max_players.unwrap_or(10),
+            token,
+        )
+    };
+
+    let client = lobby_backend::LobbyBackendClient::new(token);
+    client.create_lobby(&code, &region, max_players).await?;
+
+    {
+        let mut lobby = state.lobby_state.write().await;
+        lobby.posted = true;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn disband_lobby(state: State<'_, AppState>) -> Result<(), LauncherError> {
+    let (code, token) = {
+        let config = state.config.read().await;
+        let lobby = state.lobby_state.read().await;
+        let code = lobby
+            .code
+            .clone()
+            .ok_or_else(|| LauncherError::Lobby("No lobby to disband".into()))?;
+        let token = config.discord_access_token.clone();
+        if token.is_empty() {
+            return Err(LauncherError::Auth("Not logged in".into()));
+        }
+        (code, token)
+    };
+
+    let client = lobby_backend::LobbyBackendClient::new(token);
+    client.disband(&code).await?;
+
+    let mut lobby = state.lobby_state.write().await;
+    lobby.stop_heartbeat().await;
+    lobby.code = None;
+    lobby.posted = false;
+    lobby.players.clear();
+    Ok(())
+}
+
+#[tauri::command]
+async fn kick_player(
+    state: State<'_, AppState>,
+    player_name: String,
+) -> Result<(), LauncherError> {
+    let (code, token) = {
+        let config = state.config.read().await;
+        let lobby = state.lobby_state.read().await;
+        let code = lobby
+            .code
+            .clone()
+            .ok_or_else(|| LauncherError::Lobby("No lobby".into()))?;
+        let token = config.discord_access_token.clone();
+        if token.is_empty() {
+            return Err(LauncherError::Auth("Not logged in".into()));
+        }
+        (code, token)
+    };
+
+    let client = lobby_backend::LobbyBackendClient::new(token);
+    client.kick(&code, &player_name).await?;
+    Ok(())
+}
+
 // ============================================================
 // Entry Point
 // ============================================================
@@ -1027,9 +1114,11 @@ pub fn run() {
     let shared_config = config::new_shared_config();
     let debouncer = config::ConfigDebouncer::new(shared_config.clone());
     let pipe_handle = ipc::PipeServerHandle::new();
+    let lobby_state = lobby::LobbyState::new();
 
     let state = AppState {
         config: shared_config,
+        lobby_state: lobby_state.clone(),
         pipe_handle: Arc::new(tokio::sync::Mutex::new(Some(pipe_handle.clone()))),
     };
 
@@ -1055,6 +1144,9 @@ pub fn run() {
             set_storefront,
             browse_files,
             get_mod_list,
+            post_lobby,
+            disband_lobby,
+            kick_player,
         ])
         .setup(move |app| {
             let app_handle = app.handle().clone();
