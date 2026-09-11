@@ -9,6 +9,7 @@ use tauri::{AppHandle, Emitter, State};
 mod config;
 mod error;
 mod installer;
+mod ipc_handler;
 
 use config::{LauncherConfig, SharedConfig};
 use error::LauncherError;
@@ -626,6 +627,8 @@ mod ipc {
                                     envelope.msg_type, envelope.id
                                 );
                                 let _ = app.emit("ipc:message", &envelope);
+                                let msg: ipc_handler::IpcMessage = envelope.into();
+                                ipc_handler::handle_ipc_message(app, msg);
                             }
                         }
                         Ok(None) => break,
