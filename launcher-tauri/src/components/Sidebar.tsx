@@ -1,5 +1,5 @@
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Home, Settings, Gamepad2 } from 'lucide-react';
+import { Home, Settings, Gamepad2, Users } from 'lucide-react';
 
 const navItems = [
   { path: '/', label: 'Home', icon: Home },
@@ -23,13 +23,22 @@ export function Sidebar({ gameConnected }: { gameConnected: boolean }) {
         </button>
       ))}
       {gameConnected && (
-        <button onClick={() => navigate('/ingame')}
-          className={`w-12 h-12 flex items-center justify-center rounded-lg transition-colors
-            ${location.pathname === '/ingame'
-              ? 'bg-primary/10 text-primary'
-              : 'text-emerald-400 hover:bg-muted hover:text-emerald-300'}`}>
-          <Gamepad2 className="w-5 h-5" />
-        </button>
+        <>
+          <button onClick={() => navigate('/ingame')}
+            className={`w-12 h-12 flex items-center justify-center rounded-lg transition-colors
+              ${location.pathname === '/ingame'
+                ? 'bg-primary/10 text-primary'
+                : 'text-emerald-400 hover:bg-muted hover:text-emerald-300'}`}>
+            <Gamepad2 className="w-5 h-5" />
+          </button>
+          <button onClick={() => navigate('/host')}
+            className={`w-12 h-12 flex items-center justify-center rounded-lg transition-colors
+              ${location.pathname === '/host'
+                ? 'bg-primary/10 text-primary'
+                : 'text-violet-400 hover:bg-muted hover:text-violet-300'}`}>
+            <Users className="w-5 h-5" />
+          </button>
+        </>
       )}
     </nav>
   );

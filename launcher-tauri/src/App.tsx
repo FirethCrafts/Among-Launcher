@@ -4,6 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import HomeView from "@/pages/HomeView";
 import SettingsView from "@/pages/SettingsView";
 import InGameView from "@/pages/InGameView";
+import HostControlPanelView from "@/pages/HostControlPanelView";
 import { Titlebar } from "./components/Titlebar";
 import { Sidebar } from "./components/Sidebar";
 
@@ -35,6 +36,7 @@ export default function App() {
             <Route path="/" element={<HomeView />} />
             <Route path="/settings" element={<SettingsView />} />
             {gameConnected && <Route path="/ingame" element={<InGameView />} />}
+            {gameConnected && <Route path="/host" element={<HostControlPanelView />} />}
           </Routes>
         </main>
       </div>
