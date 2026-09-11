@@ -5,7 +5,12 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
-use tokio::sync::Mutex;
+
+mod config;
+mod error;
+
+use config::{LauncherConfig, SharedConfig};
+use error::LauncherError;
 
 static ID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -23,128 +28,6 @@ fn now_millis() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as i64
-}
-
-// ============================================================
-// Config
-// ============================================================
-
-mod config {
-    use super::*;
-    use serde::{Deserialize, Serialize};
-
-    #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-    pub struct LauncherConfig {
-        #[serde(skip_serializing_if = "Option::is_none")]
-        pub storefront: Option<String>,
-        #[serde(default = "default_modded_path")]
-        pub modded_install_path: String,
-        #[serde(default)]
-        pub avatar_url: String,
-        #[serde(default)]
-        pub username: String,
-        #[serde(default)]
-        pub discord_access_token: String,
-        #[serde(default)]
-        pub profiles: Vec<ModProfile>,
-        #[serde(default)]
-        pub library: Vec<LibraryEntry>,
-        #[serde(default)]
-        pub debug_mode: bool,
-        #[serde(default)]
-        pub auto_post_lobby: bool,
-        #[serde(default)]
-        pub last_seen_version: String,
-    }
-
-    fn default_modded_path() -> String {
-        dirs::data_local_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("AmongLauncher")
-            .join("ModdedAmongUs")
-            .to_string_lossy()
-            .to_string()
-    }
-
-    #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-    pub struct ModProfile {
-        pub name: String,
-        #[serde(default)]
-        pub mods: Vec<ModEntry>,
-    }
-
-    #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-    pub struct ModEntry {
-        pub name: String,
-        #[serde(default)]
-        pub version: Option<String>,
-        #[serde(default)]
-        pub file_hash: Option<String>,
-        #[serde(default)]
-        pub download_url: Option<String>,
-    }
-
-    #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-    pub struct LibraryEntry {
-        pub path: String,
-        #[serde(default)]
-        pub storefront: Option<String>,
-    }
-
-    impl LauncherConfig {
-        fn config_dir() -> PathBuf {
-            dirs::data_local_dir()
-                .unwrap_or_else(|| PathBuf::from("."))
-                .join("AmongLauncher")
-        }
-
-        fn config_path() -> PathBuf {
-            Self::config_dir().join("config.json")
-        }
-
-        fn backup_path() -> PathBuf {
-            Self::config_dir().join("config.json.bak")
-        }
-
-        pub fn load() -> Self {
-            for path in [Self::config_path(), Self::backup_path()] {
-                if let Ok(content) = fs::read_to_string(&path) {
-                    if !content.trim().is_empty() {
-                        if let Ok(config) = serde_json::from_str::<LauncherConfig>(&content) {
-                            return config;
-                        }
-                    }
-                }
-            }
-            Self::default()
-        }
-
-        pub fn save(&self) {
-            let dir = Self::config_dir();
-            if let Err(e) = fs::create_dir_all(&dir) {
-                eprintln!("[Config] Failed to create dir: {}", e);
-                return;
-            }
-
-            let json = match serde_json::to_string_pretty(self) {
-                Ok(j) => j,
-                Err(e) => {
-                    eprintln!("[Config] Failed to serialize: {}", e);
-                    return;
-                }
-            };
-
-            let temp_path = Self::config_path().with_extension("json.tmp");
-            if fs::write(&temp_path, &json).is_ok() {
-                if let Err(e) = fs::rename(&temp_path, Self::config_path()) {
-                    eprintln!("[Config] rename failed: {}", e);
-                }
-                if let Err(e) = fs::copy(Self::config_path(), Self::backup_path()) {
-                    eprintln!("[Config] copy failed: {}", e);
-                }
-            }
-        }
-    }
 }
 
 // ============================================================
@@ -283,11 +166,6 @@ mod game_detection {
 
     #[cfg(target_os = "windows")]
     fn get_steam_path_from_registry() -> Option<String> {
-        // Use the `winreg` crate approach via windows-sys raw APIs
-        // The `windows` 0.58 crate's Registry API has breaking changes from 0.52;
-        // use a simpler approach with direct registry value reading.
-        
-        // Try common Steam install paths first (more reliable than registry)
         let fallback_paths = [
             r"C:\Program Files (x86)\Steam\steamapps\common\Among Us",
             r"C:\Program Files\Steam\steamapps\common\Among Us",
@@ -639,14 +517,14 @@ mod ipc {
 
     #[derive(Clone)]
     pub struct PipeServerHandle {
-        write_tx: Arc<Mutex<Option<mpsc::Sender<String>>>>,
+        write_tx: Arc<tokio::sync::Mutex<Option<mpsc::Sender<String>>>>,
         connected: Arc<AtomicBool>,
     }
 
     impl PipeServerHandle {
         pub fn new() -> Self {
             Self {
-                write_tx: Arc::new(Mutex::new(None)),
+                write_tx: Arc::new(tokio::sync::Mutex::new(None)),
                 connected: Arc::new(AtomicBool::new(false)),
             }
         }
@@ -797,16 +675,16 @@ mod ipc {
 // App State & Tauri Commands
 // ============================================================
 
-struct AppState {
-    config: Arc<Mutex<config::LauncherConfig>>,
-    pipe_handle: Arc<Mutex<Option<ipc::PipeServerHandle>>>,
+pub struct AppState {
+    pub config: SharedConfig,
+    pipe_handle: Arc<tokio::sync::Mutex<Option<ipc::PipeServerHandle>>>,
 }
 
 #[tauri::command]
 async fn detect_game(
     _state: State<'_, AppState>,
     storefront: Option<String>,
-) -> Result<game_detection::GameSearchResult, String> {
+) -> Result<game_detection::GameSearchResult, LauncherError> {
     let sf = storefront.as_deref().and_then(|s| match s {
         "steam" => Some(game_detection::Storefront::Steam),
         "epic" => Some(game_detection::Storefront::Epic),
@@ -820,34 +698,36 @@ async fn detect_game(
 async fn install_game(
     _state: State<'_, AppState>,
     _storefront: String,
-) -> Result<String, String> {
-    Err("Install not yet implemented".to_string())
+) -> Result<String, LauncherError> {
+    Err(LauncherError::InstallFailed(
+        "Install not yet implemented".to_string(),
+    ))
 }
 
 #[tauri::command]
 async fn launch_game(
     _state: State<'_, AppState>,
     game_path: String,
-) -> Result<String, String> {
+) -> Result<String, LauncherError> {
     let exe = Path::new(&game_path).join("Among Us.exe");
     let game_path = game_path.clone();
     tokio::task::spawn_blocking(move || {
         if !exe.exists() {
-            return Err(format!("Game not found at: {}", game_path));
+            return Err(LauncherError::GameNotFound);
         }
         std::process::Command::new(&exe)
             .current_dir(&game_path)
             .spawn()
-            .map_err(|e| format!("Failed to launch: {}", e))?;
+            .map_err(|e| LauncherError::InstallFailed(format!("Failed to launch: {}", e)))?;
         Ok("Game launched".to_string())
     })
     .await
-    .map_err(|e| format!("Task join error: {}", e))?
+    .map_err(|e| LauncherError::Ipc(format!("Task join error: {}", e)))?
 }
 
 #[tauri::command]
-async fn get_mods(state: State<'_, AppState>) -> Result<Vec<config::ModEntry>, String> {
-    let config = state.config.lock().await;
+async fn get_mods(state: State<'_, AppState>) -> Result<Vec<config::ModEntry>, LauncherError> {
+    let config = state.config.read().await;
     Ok(config
         .profiles
         .iter()
@@ -856,18 +736,21 @@ async fn get_mods(state: State<'_, AppState>) -> Result<Vec<config::ModEntry>, S
 }
 
 #[tauri::command]
-async fn read_config(state: State<'_, AppState>) -> Result<config::LauncherConfig, String> {
-    Ok(state.config.lock().await.clone())
+async fn read_config(state: State<'_, AppState>) -> Result<LauncherConfig, LauncherError> {
+    Ok(state.config.read().await.clone())
 }
 
 #[tauri::command]
 async fn write_config(
     state: State<'_, AppState>,
-    new_config: config::LauncherConfig,
-) -> Result<(), String> {
-    let mut config = state.config.lock().await;
-    *config = new_config;
-    config.save();
+    new_config: LauncherConfig,
+    config_debouncer: State<'_, config::ConfigDebouncer>,
+) -> Result<(), LauncherError> {
+    {
+        let mut config = state.config.write().await;
+        *config = new_config;
+    }
+    config_debouncer.request_save().await;
     Ok(())
 }
 
@@ -876,28 +759,33 @@ async fn send_ipc_message(
     state: State<'_, AppState>,
     msg_type: String,
     payload: Option<serde_json::Value>,
-) -> Result<(), String> {
+) -> Result<(), LauncherError> {
     let handle = state.pipe_handle.lock().await;
     if let Some(ref h) = *handle {
-        h.send_envelope(&msg_type, payload).await
+        h.send_envelope(&msg_type, payload)
+            .await
+            .map_err(|e| LauncherError::Ipc(e))
     } else {
-        Err("Pipe server not initialized".to_string())
+        Err(LauncherError::Ipc("Pipe server not initialized".to_string()))
     }
 }
 
 #[tauri::command]
-async fn get_storefront(state: State<'_, AppState>) -> Result<Option<String>, String> {
-    Ok(state.config.lock().await.storefront.clone())
+async fn get_storefront(state: State<'_, AppState>) -> Result<Option<String>, LauncherError> {
+    Ok(state.config.read().await.storefront.clone())
 }
 
 #[tauri::command]
 async fn set_storefront(
     state: State<'_, AppState>,
     storefront: String,
-) -> Result<(), String> {
-    let mut config = state.config.lock().await;
-    config.storefront = Some(storefront);
-    config.save();
+    config_debouncer: State<'_, config::ConfigDebouncer>,
+) -> Result<(), LauncherError> {
+    {
+        let mut config = state.config.write().await;
+        config.storefront = Some(storefront);
+    }
+    config_debouncer.request_save().await;
     Ok(())
 }
 
@@ -907,12 +795,13 @@ async fn set_storefront(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let cfg = config::LauncherConfig::load();
+    let shared_config = config::new_shared_config();
+    let debouncer = config::ConfigDebouncer::new(shared_config.clone());
     let pipe_handle = ipc::PipeServerHandle::new();
 
     let state = AppState {
-        config: Arc::new(Mutex::new(cfg)),
-        pipe_handle: Arc::new(Mutex::new(Some(pipe_handle.clone()))),
+        config: shared_config,
+        pipe_handle: Arc::new(tokio::sync::Mutex::new(Some(pipe_handle.clone()))),
     };
 
     tauri::Builder::default()
@@ -920,6 +809,7 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(state)
+        .manage(debouncer)
         .invoke_handler(tauri::generate_handler![
             detect_game,
             install_game,
