@@ -1,47 +1,105 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import { open } from "@tauri-apps/plugin-dialog";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { CardContainer, CardBody, CardItem } from "@/components/ui/3d-card";
-import { Play, Square, RefreshCw, Gamepad2, CheckCircle2, XCircle } from "lucide-react";
+import { Play, Square, Gamepad2, CheckCircle2, XCircle, FolderOpen, Package } from "lucide-react";
 
-interface GameStatus {
-  installed: boolean;
-  storefront: string | null;
-  path: string | null;
+interface GameSearchResult {
+  path?: string | null;
+  storefront?: string | null;
+  detected_but_unavailable?: boolean;
 }
 
-interface Mod {
+interface InstallStatus {
+  bepinex_installed: boolean;
+  among_api_installed: boolean;
+}
+
+interface LauncherConfig {
+  storefront?: string | null;
+  modded_install_path: string;
+  debug_mode: boolean;
+  auto_post_lobby: boolean;
+}
+
+interface ModEntry {
   name: string;
-  version: string;
-  enabled: boolean;
+  version?: string;
 }
 
 export default function HomeView() {
-  const [gameStatus, setGameStatus] = useState<GameStatus | null>(null);
-  const [mods, setMods] = useState<Mod[]>([]);
+  const [gamePath, setGamePath] = useState<string | null>(null);
+  const [storefront, setStorefront] = useState<string | null>(null);
   const [isRunning, setIsRunning] = useState(false);
   const [autoPost, setAutoPost] = useState(false);
   const [debugMode, setDebugMode] = useState(false);
+  const [bepinexInstalled, setBepinexInstalled] = useState(false);
+  const [amongApiInstalled, setAmongApiInstalled] = useState(false);
+  const [mods, setMods] = useState<ModEntry[]>([]);
+  const [config, setConfig] = useState<LauncherConfig | null>(null);
 
   useEffect(() => {
-    loadGameStatus();
-    loadMods();
+    detectGame();
+    loadConfig();
+
+    const unlisten = listen("game-stopped", () => {
+      setIsRunning(false);
+    });
+
+    return () => {
+      unlisten.then((fn) => fn());
+    };
   }, []);
 
-  async function loadGameStatus() {
+  useEffect(() => {
+    if (gamePath) {
+      checkInstallStatus();
+      loadMods();
+    }
+  }, [gamePath]);
+
+  async function detectGame() {
     try {
-      const status = await invoke<GameStatus>("get_game_status");
-      setGameStatus(status);
+      const result = await invoke<GameSearchResult>("detect_game", {});
+      if (result.path) {
+        setGamePath(result.path);
+        setStorefront(result.storefront || null);
+      }
     } catch (e) {
-      console.error("Failed to get game status:", e);
+      console.error("Failed to detect game:", e);
+    }
+  }
+
+  async function loadConfig() {
+    try {
+      const cfg = await invoke<LauncherConfig>("read_config");
+      setConfig(cfg);
+      setAutoPost(cfg.auto_post_lobby);
+      setDebugMode(cfg.debug_mode);
+    } catch (e) {
+      console.error("Failed to load config:", e);
+    }
+  }
+
+  async function checkInstallStatus() {
+    if (!gamePath) return;
+    try {
+      const status = await invoke<InstallStatus>("get_install_status", { gamePath });
+      setBepinexInstalled(status.bepinex_installed);
+      setAmongApiInstalled(status.among_api_installed);
+    } catch (e) {
+      console.error("Failed to get install status:", e);
     }
   }
 
   async function loadMods() {
+    if (!gamePath) return;
     try {
-      const installedMods = await invoke<Mod[]>("get_mods");
+      const installedMods = await invoke<ModEntry[]>("get_mods");
       setMods(installedMods);
     } catch (e) {
       console.error("Failed to get mods:", e);
@@ -49,8 +107,9 @@ export default function HomeView() {
   }
 
   async function launchGame() {
+    if (!gamePath) return;
     try {
-      await invoke("launch_game");
+      await invoke("launch_game", { gamePath });
       setIsRunning(true);
     } catch (e) {
       console.error("Failed to launch game:", e);
@@ -63,6 +122,50 @@ export default function HomeView() {
       setIsRunning(false);
     } catch (e) {
       console.error("Failed to stop game:", e);
+    }
+  }
+
+  async function handleAutoPostToggle() {
+    const newValue = !autoPost;
+    setAutoPost(newValue);
+    if (config) {
+      const newConfig = { ...config, auto_post_lobby: newValue };
+      try {
+        await invoke("write_config", { newConfig });
+        setConfig(newConfig);
+      } catch (e) {
+        console.error("Failed to write config:", e);
+        setAutoPost(!newValue);
+      }
+    }
+  }
+
+  async function handleDebugModeToggle() {
+    const newValue = !debugMode;
+    setDebugMode(newValue);
+    if (config) {
+      const newConfig = { ...config, debug_mode: newValue };
+      try {
+        await invoke("write_config", { newConfig });
+        setConfig(newConfig);
+      } catch (e) {
+        console.error("Failed to write config:", e);
+        setDebugMode(!newValue);
+      }
+    }
+  }
+
+  async function handleImportMod() {
+    try {
+      const selected = await open({
+        multiple: true,
+        filters: [{ name: "DLL Files", extensions: ["dll"] }],
+      });
+      if (selected) {
+        console.log("Selected files:", selected);
+      }
+    } catch (e) {
+      console.error("Failed to open dialog:", e);
     }
   }
 
@@ -84,8 +187,8 @@ export default function HomeView() {
                 <CardContent className="space-y-4">
                   <div className="flex items-center justify-between">
                     <span className="text-sm text-muted-foreground">Status</span>
-                    <Badge variant={gameStatus?.installed ? "default" : "outline"}>
-                      {gameStatus?.installed ? (
+                    <Badge variant={gamePath ? "default" : "outline"}>
+                      {gamePath ? (
                         <span className="flex items-center gap-1">
                           <CheckCircle2 className="h-3 w-3" /> Installed
                         </span>
@@ -96,24 +199,40 @@ export default function HomeView() {
                       )}
                     </Badge>
                   </div>
-                  {gameStatus?.storefront && (
+                  {storefront && (
                     <div className="flex items-center justify-between">
                       <span className="text-sm text-muted-foreground">Storefront</span>
-                      <span className="text-sm font-medium">{gameStatus.storefront}</span>
+                      <span className="text-sm font-medium capitalize">{storefront.replace("_", " ")}</span>
                     </div>
                   )}
-                  {gameStatus?.path && (
+                  {gamePath && (
                     <div className="flex items-center justify-between">
                       <span className="text-sm text-muted-foreground">Path</span>
                       <span className="text-xs font-mono text-muted-foreground truncate max-w-[200px]">
-                        {gameStatus.path}
+                        {gamePath}
                       </span>
+                    </div>
+                  )}
+                  {gamePath && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-muted-foreground">BepInEx</span>
+                      <Badge variant={bepinexInstalled ? "default" : "outline"}>
+                        {bepinexInstalled ? "Installed" : "Not Installed"}
+                      </Badge>
+                    </div>
+                  )}
+                  {gamePath && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-muted-foreground">AmongApi</span>
+                      <Badge variant={amongApiInstalled ? "default" : "outline"}>
+                        {amongApiInstalled ? "Installed" : "Not Installed"}
+                      </Badge>
                     </div>
                   )}
                   <div className="flex gap-2 pt-2">
                     <Button
                       onClick={launchGame}
-                      disabled={!gameStatus?.installed || isRunning}
+                      disabled={!gamePath || isRunning}
                       className="flex-1"
                     >
                       <Play className="h-4 w-4" />
@@ -141,7 +260,7 @@ export default function HomeView() {
               <Card className="w-full glow-sky">
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
-                    <RefreshCw className="h-5 w-5" />
+                    <Package className="h-5 w-5" />
                     Installed Mods
                   </CardTitle>
                 </CardHeader>
@@ -157,15 +276,18 @@ export default function HomeView() {
                         >
                           <div>
                             <span className="text-sm font-medium">{mod.name}</span>
-                            <span className="ml-2 text-xs text-muted-foreground">v{mod.version}</span>
+                            {mod.version && (
+                              <span className="ml-2 text-xs text-muted-foreground">v{mod.version}</span>
+                            )}
                           </div>
-                          <Badge variant={mod.enabled ? "default" : "muted"}>
-                            {mod.enabled ? "Enabled" : "Disabled"}
-                          </Badge>
                         </li>
                       ))}
                     </ul>
                   )}
+                  <Button onClick={handleImportMod} variant="outline" className="w-full mt-4">
+                    <FolderOpen className="h-4 w-4 mr-2" />
+                    Import Mod
+                  </Button>
                 </CardContent>
               </Card>
             </CardItem>
@@ -182,7 +304,7 @@ export default function HomeView() {
             <label className="flex items-center justify-between cursor-pointer">
               <span className="text-sm font-medium">Auto-post game data</span>
               <button
-                onClick={() => setAutoPost(!autoPost)}
+                onClick={handleAutoPostToggle}
                 className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
                   autoPost ? "bg-primary" : "bg-muted"
                 }`}
@@ -197,7 +319,7 @@ export default function HomeView() {
             <label className="flex items-center justify-between cursor-pointer">
               <span className="text-sm font-medium">Debug mode</span>
               <button
-                onClick={() => setDebugMode(!debugMode)}
+                onClick={handleDebugModeToggle}
                 className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
                   debugMode ? "bg-primary" : "bg-muted"
                 }`}

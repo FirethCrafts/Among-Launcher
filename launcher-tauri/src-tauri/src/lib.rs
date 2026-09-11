@@ -771,6 +771,54 @@ async fn send_ipc_message(
 }
 
 #[tauri::command]
+async fn stop_game(app: AppHandle) -> Result<(), LauncherError> {
+    #[cfg(target_os = "windows")]
+    {
+        use std::process::Command;
+        let output = Command::new("tasklist")
+            .args(["/FI", "IMAGENAME eq Among Us.exe", "/FO", "CSV", "/NH"])
+            .output()
+            .map_err(|e| LauncherError::InstallFailed(format!("Failed to run tasklist: {}", e)))?;
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        for line in stdout.lines() {
+            if line.contains("Among Us.exe") {
+                let pid = line
+                    .split(',')
+                    .nth(1)
+                    .and_then(|s| s.trim_matches('"').parse::<u32>().ok());
+                if let Some(pid) = pid {
+                    Command::new("taskkill")
+                        .args(["/PID", &pid.to_string(), "/F"])
+                        .output()
+                        .map_err(|e| LauncherError::InstallFailed(format!("Failed to kill process: {}", e)))?;
+                }
+            }
+        }
+    }
+
+    let _ = app.emit("game-stopped", ());
+    Ok(())
+}
+
+#[tauri::command]
+async fn get_install_status(game_path: String) -> Result<InstallStatus, LauncherError> {
+    let game_dir = std::path::Path::new(&game_path);
+    let bepinex_installed = game_dir.join("BepInEx").exists();
+    let among_api_installed = game_dir.join("BepInEx/Plugins/AmongApi.dll").exists();
+    Ok(InstallStatus {
+        bepinex_installed,
+        among_api_installed,
+    })
+}
+
+#[derive(serde::Serialize)]
+struct InstallStatus {
+    bepinex_installed: bool,
+    among_api_installed: bool,
+}
+
+#[tauri::command]
 async fn get_storefront(state: State<'_, AppState>) -> Result<Option<String>, LauncherError> {
     Ok(state.config.read().await.storefront.clone())
 }
@@ -814,9 +862,11 @@ pub fn run() {
             detect_game,
             install_game,
             launch_game,
+            stop_game,
             get_mods,
             read_config,
             write_config,
+            get_install_status,
             send_ipc_message,
             get_storefront,
             set_storefront,
