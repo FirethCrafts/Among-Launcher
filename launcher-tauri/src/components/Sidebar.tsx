@@ -6,7 +6,13 @@ const navItems = [
   { path: '/settings', label: 'Settings', icon: Settings },
 ];
 
-export function Sidebar({ gameConnected }: { gameConnected: boolean }) {
+interface SidebarProps {
+  gameConnected: boolean;
+  username: string;
+  avatarUrl: string;
+}
+
+export function Sidebar({ gameConnected, username, avatarUrl }: SidebarProps) {
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -40,6 +46,20 @@ export function Sidebar({ gameConnected }: { gameConnected: boolean }) {
           </button>
         </>
       )}
+      <div className="mt-auto flex flex-col items-center gap-2">
+        {avatarUrl && (
+          <img
+            src={avatarUrl}
+            alt={username}
+            className="w-8 h-8 rounded-full"
+          />
+        )}
+        {username && (
+          <span className="text-xs text-muted-foreground truncate max-w-[56px]">
+            {username}
+          </span>
+        )}
+      </div>
     </nav>
   );
 }
