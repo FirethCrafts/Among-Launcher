@@ -13,6 +13,7 @@ mod ipc_handler;
 mod lobby;
 mod lobby_backend;
 mod lobby_ws;
+mod mod_sync;
 
 use config::{LauncherConfig, SharedConfig};
 use error::LauncherError;
