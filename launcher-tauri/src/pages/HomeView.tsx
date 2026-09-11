@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { CardContainer, CardBody, CardItem } from "@/components/ui/3d-card";
-import { Play, Square, Gamepad2, CheckCircle2, XCircle, FolderOpen, Package } from "lucide-react";
+import { Play, Square, Gamepad2, CheckCircle2, XCircle, FolderOpen, Package, Folder } from "lucide-react";
 
 interface GameSearchResult {
   path?: string | null;
@@ -28,7 +28,23 @@ interface LauncherConfig {
 
 interface ModEntry {
   name: string;
-  version?: string;
+  filename: string;
+  size: number;
+  path: string;
+}
+
+interface InstallProgress {
+  stage: string;
+  progress: number;
+  total: number;
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return "0 B";
+  const k = 1024;
+  const sizes = ["B", "KB", "MB", "GB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
 }
 
 export default function HomeView() {
@@ -41,17 +57,26 @@ export default function HomeView() {
   const [amongApiInstalled, setAmongApiInstalled] = useState(false);
   const [mods, setMods] = useState<ModEntry[]>([]);
   const [config, setConfig] = useState<LauncherConfig | null>(null);
+  const [installProgress, setInstallProgress] = useState<InstallProgress | null>(null);
 
   useEffect(() => {
     detectGame();
     loadConfig();
 
-    const unlisten = listen("game-stopped", () => {
+    const unlistenGameStopped = listen("game-stopped", () => {
       setIsRunning(false);
     });
 
+    const unlistenInstallProgress = listen<InstallProgress>("install-progress", (event) => {
+      setInstallProgress(event.payload);
+      if (event.payload.stage === "complete") {
+        setTimeout(() => setInstallProgress(null), 2000);
+      }
+    });
+
     return () => {
-      unlisten.then((fn) => fn());
+      unlistenGameStopped.then((fn) => fn());
+      unlistenInstallProgress.then((fn) => fn());
     };
   }, []);
 
@@ -99,10 +124,18 @@ export default function HomeView() {
   async function loadMods() {
     if (!gamePath) return;
     try {
-      const installedMods = await invoke<ModEntry[]>("get_filesystem_mods", { gamePath });
+      const installedMods = await invoke<ModEntry[]>("get_mod_list", { gamePath });
       setMods(installedMods);
     } catch (e) {
       console.error("Failed to get mods:", e);
+    }
+  }
+
+  async function browseFiles(path: string) {
+    try {
+      await invoke("browse_files", { path });
+    } catch (e) {
+      console.error("Failed to browse files:", e);
     }
   }
 
@@ -163,6 +196,36 @@ export default function HomeView() {
   return (
     <div className="min-h-full bg-grid p-6 space-y-6">
       <h1 className="font-display text-3xl font-bold text-primary">Home</h1>
+
+      {installProgress && (
+        <Card className="glow-primary">
+          <CardContent className="pt-6">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-sm">
+                <span className="font-medium capitalize">
+                  {installProgress.stage === "complete" ? "Install Complete" : installProgress.stage}
+                </span>
+                <span className="text-muted-foreground">
+                  {installProgress.total > 0
+                    ? `${Math.round((installProgress.progress / installProgress.total) * 100)}%`
+                    : "Preparing..."}
+                </span>
+              </div>
+              <div className="h-2 w-full overflow-hidden rounded-full bg-secondary">
+                <div
+                  className="h-full bg-primary transition-all duration-300"
+                  style={{
+                    width:
+                      installProgress.total > 0
+                        ? `${(installProgress.progress / installProgress.total) * 100}%`
+                        : "100%",
+                  }}
+                />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid gap-6 md:grid-cols-2">
         <CardContainer className="w-full">
@@ -262,15 +325,22 @@ export default function HomeView() {
                     <ul className="space-y-2">
                       {mods.map((mod) => (
                         <li
-                          key={mod.name}
+                          key={mod.filename}
                           className="flex items-center justify-between rounded-lg bg-secondary/50 px-3 py-2"
                         >
-                          <div>
+                          <div className="min-w-0">
                             <span className="text-sm font-medium">{mod.name}</span>
-                            {mod.version && (
-                              <span className="ml-2 text-xs text-muted-foreground">v{mod.version}</span>
-                            )}
+                            <span className="ml-2 text-xs text-muted-foreground">
+                              {formatBytes(mod.size)}
+                            </span>
                           </div>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => browseFiles(mod.path)}
+                          >
+                            <Folder className="h-3 w-3" />
+                          </Button>
                         </li>
                       ))}
                     </ul>
