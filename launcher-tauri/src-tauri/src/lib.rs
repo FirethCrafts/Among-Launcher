@@ -11,6 +11,7 @@ mod error;
 mod installer;
 mod ipc_handler;
 mod lobby_backend;
+mod lobby_ws;
 
 use config::{LauncherConfig, SharedConfig};
 use error::LauncherError;

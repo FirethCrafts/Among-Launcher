@@ -28,3 +28,7 @@ zip = "2"
 futures-util = "0.3"
 reqwest = { version = "0.12", features = ["json", "stream"] }
 open = "5"
+tokio-tungstenite = "0.24"
+rand = "0.8"
+tokio-util = "0.7"
+goblin = "0.10"
