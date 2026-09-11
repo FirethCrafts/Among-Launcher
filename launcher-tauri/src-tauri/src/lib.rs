@@ -939,7 +939,11 @@ struct InstallStatus {
 
 #[tauri::command]
 async fn browse_files(path: String) -> Result<(), LauncherError> {
-    open::that(&path).map_err(|e| LauncherError::Filesystem(e.to_string()))?;
+    let target = std::path::Path::new(&path)
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| std::path::PathBuf::from(&path));
+    open::that(&target).map_err(|e| LauncherError::Filesystem(e.to_string()))?;
     Ok(())
 }
 
@@ -953,37 +957,41 @@ struct ModEntry {
 
 #[tauri::command]
 async fn get_mod_list(game_path: String) -> Result<Vec<ModEntry>, LauncherError> {
-    let plugins_dir = std::path::Path::new(&game_path).join("BepInEx").join("Plugins");
-    if !plugins_dir.exists() {
-        return Ok(vec![]);
-    }
-    let mut mods = Vec::new();
-    for entry in std::fs::read_dir(&plugins_dir)
-        .map_err(|e| LauncherError::Filesystem(e.to_string()))?
-    {
-        let entry = entry.map_err(|e| LauncherError::Filesystem(e.to_string()))?;
-        let path = entry.path();
-        if path.extension() == Some(std::ffi::OsStr::new("dll")) {
-            let metadata = entry
-                .metadata()
-                .map_err(|e| LauncherError::Filesystem(e.to_string()))?;
-            mods.push(ModEntry {
-                name: path
-                    .file_stem()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .to_string(),
-                filename: path
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .to_string(),
-                size: metadata.len(),
-                path: path.to_string_lossy().to_string(),
-            });
+    tokio::task::spawn_blocking(move || {
+        let plugins_dir = std::path::Path::new(&game_path).join("BepInEx").join("Plugins");
+        if !plugins_dir.exists() {
+            return Ok(vec![]);
         }
-    }
-    Ok(mods)
+        let mut mods = Vec::new();
+        for entry in std::fs::read_dir(&plugins_dir)
+            .map_err(|e| LauncherError::Filesystem(e.to_string()))?
+        {
+            let entry = entry.map_err(|e| LauncherError::Filesystem(e.to_string()))?;
+            let path = entry.path();
+            if path.extension() == Some(std::ffi::OsStr::new("dll")) {
+                let metadata = entry
+                    .metadata()
+                    .map_err(|e| LauncherError::Filesystem(e.to_string()))?;
+                mods.push(ModEntry {
+                    name: path
+                        .file_stem()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .to_string(),
+                    filename: path
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .to_string(),
+                    size: metadata.len(),
+                    path: path.to_string_lossy().to_string(),
+                });
+            }
+        }
+        Ok(mods)
+    })
+    .await
+    .map_err(|e| LauncherError::InstallFailed(format!("Task join error: {}", e)))?
 }
 
 #[tauri::command]
