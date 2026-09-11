@@ -6,17 +6,39 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { CardContainer, CardBody, CardItem } from "@/components/ui/3d-card";
-import { User, FolderOpen, RotateCcw, Info, LogOut } from "lucide-react";
+import { User, FolderOpen, RotateCcw, Info, LogOut, Store } from "lucide-react";
+import pkg from "../../package.json";
+
+interface LauncherConfig {
+  storefront: string | null;
+  modded_install_path: string;
+  avatar_url: string;
+  username: string;
+  discord_access_token: string;
+  profiles: Array<{ name: string; mods: Array<{ name: string }> }>;
+  library: Array<{ path: string; storefront: string | null }>;
+  debug_mode: boolean;
+  auto_post_lobby: boolean;
+  last_seen_version: string;
+}
 
 interface AccountInfo {
   username: string;
   avatarUrl: string | null;
 }
 
+const STOREFRONT_OPTIONS = [
+  { value: "steam", label: "Steam" },
+  { value: "epic", label: "Epic Games" },
+  { value: "microsoft_store", label: "Microsoft Store" },
+] as const;
+
 export default function SettingsView() {
   const [account, setAccount] = useState<AccountInfo | null>(null);
   const [gamePath, setGamePath] = useState("");
   const [version, setVersion] = useState("");
+  const [storefront, setStorefront] = useState<string>("");
+  const [fullConfig, setFullConfig] = useState<LauncherConfig | null>(null);
 
   useEffect(() => {
     loadSettings();
@@ -24,12 +46,21 @@ export default function SettingsView() {
 
   async function loadSettings() {
     try {
-      const acc = await invoke<AccountInfo | null>("get_account");
-      setAccount(acc);
-      const path = await invoke<string>("get_game_path");
-      setGamePath(path);
-      const ver = await invoke<string>("get_version");
-      setVersion(ver);
+      const config = await invoke<LauncherConfig>("read_config");
+      setFullConfig(config);
+
+      if (config.username) {
+        setAccount({
+          username: config.username,
+          avatarUrl: config.avatar_url || null,
+        });
+      } else {
+        setAccount(null);
+      }
+
+      setGamePath(config.modded_install_path || "");
+      setStorefront(config.storefront || "");
+      setVersion(pkg.version || "Unknown");
     } catch (e) {
       console.error("Failed to load settings:", e);
     }
@@ -42,8 +73,13 @@ export default function SettingsView() {
         filters: [{ name: "Executables", extensions: ["exe"] }],
       });
       if (selected) {
-        setGamePath(selected as string);
-        await invoke("set_game_path", { path: selected });
+        const newPath = selected as string;
+        setGamePath(newPath);
+        if (fullConfig) {
+          const updatedConfig = { ...fullConfig, modded_install_path: newPath };
+          await invoke("write_config", { newConfig: updatedConfig });
+          setFullConfig(updatedConfig);
+        }
       }
     } catch (e) {
       console.error("Failed to browse:", e);
@@ -52,8 +88,13 @@ export default function SettingsView() {
 
   async function resetGamePath() {
     try {
-      await invoke("reset_game_path");
-      setGamePath("");
+      if (fullConfig) {
+        const defaultPath = "";
+        setGamePath(defaultPath);
+        const updatedConfig = { ...fullConfig, modded_install_path: defaultPath };
+        await invoke("write_config", { newConfig: updatedConfig });
+        setFullConfig(updatedConfig);
+      }
     } catch (e) {
       console.error("Failed to reset path:", e);
     }
@@ -61,10 +102,32 @@ export default function SettingsView() {
 
   async function logout() {
     try {
-      await invoke("logout");
-      setAccount(null);
+      if (fullConfig) {
+        const updatedConfig = {
+          ...fullConfig,
+          discord_access_token: "",
+          username: "",
+          avatar_url: "",
+        };
+        await invoke("write_config", { newConfig: updatedConfig });
+        setFullConfig(updatedConfig);
+        setAccount(null);
+      }
     } catch (e) {
       console.error("Failed to logout:", e);
+    }
+  }
+
+  async function setStorefrontValue(value: string) {
+    try {
+      setStorefront(value);
+      if (fullConfig) {
+        const updatedConfig = { ...fullConfig, storefront: value };
+        await invoke("write_config", { newConfig: updatedConfig });
+        setFullConfig(updatedConfig);
+      }
+    } catch (e) {
+      console.error("Failed to set storefront:", e);
     }
   }
 
@@ -152,26 +215,60 @@ export default function SettingsView() {
         </CardContainer>
       </div>
 
-      <CardContainer className="w-full">
-        <CardBody>
-          <CardItem translateZ={20}>
-            <Card className="w-full glow-sky">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Info className="h-5 w-5" />
-                  About
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-muted-foreground">Version</span>
-                  <Badge variant="outline">{version || "Unknown"}</Badge>
-                </div>
-              </CardContent>
-            </Card>
-          </CardItem>
-        </CardBody>
-      </CardContainer>
+      <div className="grid gap-6 md:grid-cols-2">
+        <CardContainer className="w-full">
+          <CardBody>
+            <CardItem translateZ={20}>
+              <Card className="w-full glow-purple">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Store className="h-5 w-5" />
+                    Storefront
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Platform</label>
+                    <div className="flex flex-col gap-2">
+                      {STOREFRONT_OPTIONS.map((option) => (
+                        <Button
+                          key={option.value}
+                          variant={storefront === option.value ? "default" : "outline"}
+                          className="w-full justify-start"
+                          onClick={() => setStorefrontValue(option.value)}
+                        >
+                          {option.label}
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </CardItem>
+          </CardBody>
+        </CardContainer>
+
+        <CardContainer className="w-full">
+          <CardBody>
+            <CardItem translateZ={20}>
+              <Card className="w-full glow-sky">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Info className="h-5 w-5" />
+                    About
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-muted-foreground">Version</span>
+                    <Badge variant="outline">{version || "Unknown"}</Badge>
+                  </div>
+                </CardContent>
+              </Card>
+            </CardItem>
+          </CardBody>
+        </CardContainer>
+      </div>
     </div>
   );
 }
