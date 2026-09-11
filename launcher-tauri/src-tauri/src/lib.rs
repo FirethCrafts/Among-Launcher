@@ -1,3 +1,4 @@
+use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io;
@@ -1005,6 +1006,375 @@ async fn get_mod_list(game_path: String) -> Result<Vec<ModEntry>, LauncherError>
 }
 
 #[tauri::command]
+async fn remove_mod(game_path: String, filename: String) -> Result<(), LauncherError> {
+    let plugins_dir = std::path::Path::new(&game_path).join("BepInEx").join("Plugins");
+    let target = plugins_dir.join(&filename);
+
+    if !target.exists() {
+        return Err(LauncherError::Filesystem(format!(
+            "Mod file not found: {}",
+            filename
+        )));
+    }
+
+    tokio::task::spawn_blocking(move || {
+        std::fs::remove_file(&target).map_err(|e| LauncherError::Filesystem(e.to_string()))
+    })
+    .await
+    .map_err(|e| LauncherError::InstallFailed(format!("Task join error: {}", e)))?
+}
+
+// ============================================================
+// Profile Management
+// ============================================================
+
+#[tauri::command]
+async fn save_profile(
+    state: State<'_, AppState>,
+    config_debouncer: State<'_, config::ConfigDebouncer>,
+    name: String,
+) -> Result<(), LauncherError> {
+    let current_mods: Vec<config::ModEntry> = {
+        let config = state.config.read().await;
+        config
+            .profiles
+            .iter()
+            .flat_map(|p| p.mods.clone())
+            .collect()
+    };
+
+    {
+        let mut config = state.config.write().await;
+        if let Some(existing) = config.profiles.iter_mut().find(|p| p.name == name) {
+            existing.mods = current_mods;
+        } else {
+            config.profiles.push(config::ModProfile {
+                name,
+                mods: current_mods,
+            });
+        }
+    }
+    config_debouncer.request_save().await;
+    Ok(())
+}
+
+#[tauri::command]
+async fn apply_profile(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    game_path: String,
+    config_debouncer: State<'_, config::ConfigDebouncer>,
+    name: String,
+) -> Result<(), LauncherError> {
+    let required_mods = {
+        let config = state.config.read().await;
+        config
+            .profiles
+            .iter()
+            .find(|p| p.name == name)
+            .ok_or_else(|| LauncherError::Config(format!("Profile '{}' not found", name)))?
+            .mods
+            .clone()
+    };
+
+    {
+        let mut config = state.config.write().await;
+        config.profiles.clear();
+        config.profiles.push(config::ModProfile {
+            name,
+            mods: required_mods.clone(),
+        });
+    }
+    config_debouncer.request_save().await;
+
+    mod_sync::sync_mods(
+        std::path::Path::new(&game_path),
+        &required_mods,
+        &app,
+    )
+    .await?;
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn delete_profile(
+    state: State<'_, AppState>,
+    config_debouncer: State<'_, config::ConfigDebouncer>,
+    name: String,
+) -> Result<(), LauncherError> {
+    let mut config = state.config.write().await;
+    let before = config.profiles.len();
+    config.profiles.retain(|p| p.name != name);
+    if config.profiles.len() == before {
+        return Err(LauncherError::Config(format!(
+            "Profile '{}' not found",
+            name
+        )));
+    }
+    drop(config);
+    config_debouncer.request_save().await;
+    Ok(())
+}
+
+#[tauri::command]
+async fn list_profiles(state: State<'_, AppState>) -> Result<Vec<config::ModProfile>, LauncherError> {
+    let config = state.config.read().await;
+    Ok(config.profiles.clone())
+}
+
+// ============================================================
+// Library Management
+// ============================================================
+
+#[tauri::command]
+async fn list_library(state: State<'_, AppState>) -> Result<Vec<config::LibraryEntry>, LauncherError> {
+    let config = state.config.read().await;
+    Ok(config.library.clone())
+}
+
+#[tauri::command]
+async fn add_to_library(
+    state: State<'_, AppState>,
+    config_debouncer: State<'_, config::ConfigDebouncer>,
+    source_path: String,
+) -> Result<(), LauncherError> {
+    let source = std::path::Path::new(&source_path);
+    if !source.exists() {
+        return Err(LauncherError::Filesystem(format!(
+            "Source file not found: {}",
+            source_path
+        )));
+    }
+
+    let filename = source
+        .file_name()
+        .ok_or_else(|| LauncherError::Filesystem("Invalid source path".into()))?
+        .to_string_lossy()
+        .to_string();
+
+    let lib_dir = dirs::data_local_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("AmongLauncher")
+        .join("Library");
+
+    let lib_dir_clone = lib_dir.clone();
+    let filename_clone = filename.clone();
+    let source_clone = source_path.clone();
+
+    tokio::task::spawn_blocking(move || {
+        std::fs::create_dir_all(&lib_dir_clone)
+            .map_err(|e| LauncherError::Filesystem(e.to_string()))?;
+        let dest = lib_dir_clone.join(&filename_clone);
+        std::fs::copy(&source_clone, &dest)
+            .map_err(|e| LauncherError::Filesystem(e.to_string()))?;
+        Ok::<(), LauncherError>(())
+    })
+    .await
+    .map_err(|e| LauncherError::InstallFailed(format!("Task join error: {}", e)))??;
+
+    {
+        let mut config = state.config.write().await;
+        let dest_path = lib_dir.join(&filename).to_string_lossy().to_string();
+        if !config.library.iter().any(|e| e.path == dest_path) {
+            config.library.push(config::LibraryEntry {
+                path: dest_path,
+                storefront: None,
+            });
+        }
+    }
+    config_debouncer.request_save().await;
+    Ok(())
+}
+
+#[tauri::command]
+async fn remove_from_library(
+    state: State<'_, AppState>,
+    config_debouncer: State<'_, config::ConfigDebouncer>,
+    filename: String,
+) -> Result<(), LauncherError> {
+    let lib_dir = dirs::data_local_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("AmongLauncher")
+        .join("Library");
+
+    let file_path = lib_dir.join(&filename);
+    if file_path.exists() {
+        let fp = file_path.clone();
+        tokio::task::spawn_blocking(move || {
+            std::fs::remove_file(&fp).map_err(|e| LauncherError::Filesystem(e.to_string()))
+        })
+        .await
+        .map_err(|e| LauncherError::InstallFailed(format!("Task join error: {}", e)))??;
+    }
+
+    {
+        let mut config = state.config.write().await;
+        let path_str = file_path.to_string_lossy().to_string();
+        config.library.retain(|e| e.path != path_str);
+    }
+    config_debouncer.request_save().await;
+    Ok(())
+}
+
+#[tauri::command]
+async fn install_from_library(
+    state: State<'_, AppState>,
+    config_debouncer: State<'_, config::ConfigDebouncer>,
+    game_path: String,
+    filename: String,
+) -> Result<(), LauncherError> {
+    let lib_dir = dirs::data_local_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("AmongLauncher")
+        .join("Library");
+
+    let source = lib_dir.join(&filename);
+    if !source.exists() {
+        return Err(LauncherError::Filesystem(format!(
+            "Library mod not found: {}",
+            filename
+        )));
+    }
+
+    let plugins_dir = std::path::Path::new(&game_path).join("BepInEx").join("Plugins");
+    let source_clone = source.clone();
+    let plugins_clone = plugins_dir.clone();
+    let filename_clone = filename.clone();
+
+    tokio::task::spawn_blocking(move || {
+        std::fs::create_dir_all(&plugins_clone)
+            .map_err(|e| LauncherError::Filesystem(e.to_string()))?;
+        let dest = plugins_clone.join(&filename_clone);
+        std::fs::copy(&source_clone, &dest)
+            .map_err(|e| LauncherError::Filesystem(e.to_string()))?;
+        Ok::<(), LauncherError>(())
+    })
+    .await
+    .map_err(|e| LauncherError::InstallFailed(format!("Task join error: {}", e)))??;
+
+    let name = std::path::Path::new(&filename)
+        .file_stem()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+
+    {
+        let mut config = state.config.write().await;
+        if !config.profiles.iter().any(|p| p.mods.iter().any(|m| m.name == name)) {
+            if let Some(first_profile) = config.profiles.first_mut() {
+                first_profile.mods.push(config::ModEntry {
+                    name,
+                    version: None,
+                    file_hash: None,
+                    download_url: None,
+                });
+            }
+        }
+    }
+    config_debouncer.request_save().await;
+    Ok(())
+}
+
+// ============================================================
+// Preset Mods
+// ============================================================
+
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
+struct PresetMod {
+    name: String,
+    repo_url: String,
+    description: Option<String>,
+    filename: String,
+}
+
+#[tauri::command]
+async fn get_preset_mods() -> Result<Vec<PresetMod>, LauncherError> {
+    let presets = vec![
+        PresetMod {
+            name: "AmongApi".to_string(),
+            repo_url: "https://github.com/FirethCrafts/Among-Launcher/releases/latest/download/AmongApi.dll".to_string(),
+            description: Some("Core API for Among Us modding".to_string()),
+            filename: "AmongApi.dll".to_string(),
+        },
+    ];
+    Ok(presets)
+}
+
+#[tauri::command]
+async fn install_preset_mod(
+    state: State<'_, AppState>,
+    config_debouncer: State<'_, config::ConfigDebouncer>,
+    game_path: String,
+    repo_url: String,
+) -> Result<(), LauncherError> {
+    let plugins_dir = std::path::Path::new(&game_path).join("BepInEx").join("Plugins");
+    let plugins_dir_clone = plugins_dir.clone();
+    tokio::task::spawn_blocking(move || {
+        std::fs::create_dir_all(&plugins_dir_clone)
+            .map_err(|e| LauncherError::Filesystem(e.to_string()))?;
+        Ok::<(), LauncherError>(())
+    })
+    .await
+    .map_err(|e| LauncherError::InstallFailed(format!("Task join error: {}", e)))??;
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(&repo_url)
+        .send()
+        .await
+        .map_err(|e| LauncherError::Network(e.to_string()))?;
+
+    let mut bytes = Vec::new();
+    let mut stream = resp.bytes_stream();
+
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| LauncherError::Network(e.to_string()))?;
+        bytes.extend_from_slice(&chunk);
+    }
+
+    let filename = repo_url
+        .split('/')
+        .last()
+        .unwrap_or("mod.dll")
+        .to_string();
+    let name = std::path::Path::new(&filename)
+        .file_stem()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+
+    let dest = plugins_dir.join(&filename);
+
+    tokio::task::spawn_blocking(move || {
+        std::fs::write(&dest, &bytes)
+            .map_err(|e| LauncherError::Filesystem(e.to_string()))
+    })
+    .await
+    .map_err(|e| LauncherError::InstallFailed(format!("Task join error: {}", e)))??;
+
+    {
+        let mut config = state.config.write().await;
+        let already_has = config
+            .profiles
+            .iter()
+            .any(|p| p.mods.iter().any(|m| m.name == name));
+        if !already_has {
+            if let Some(first_profile) = config.profiles.first_mut() {
+                first_profile.mods.push(config::ModEntry {
+                    name,
+                    version: None,
+                    file_hash: None,
+                    download_url: Some(repo_url),
+                });
+            }
+        }
+    }
+    config_debouncer.request_save().await;
+    Ok(())
+}
+
+#[tauri::command]
 async fn get_storefront(state: State<'_, AppState>) -> Result<Option<String>, LauncherError> {
     Ok(state.config.read().await.storefront.clone())
 }
@@ -1180,6 +1550,17 @@ pub fn run() {
             disband_lobby,
             kick_player,
             login_discord,
+            remove_mod,
+            save_profile,
+            apply_profile,
+            delete_profile,
+            list_profiles,
+            list_library,
+            add_to_library,
+            remove_from_library,
+            install_from_library,
+            get_preset_mods,
+            install_preset_mod,
         ])
         .setup(move |app| {
             let app_handle = app.handle().clone();
