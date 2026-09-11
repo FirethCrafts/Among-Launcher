@@ -36,6 +36,7 @@ dependencies = [
 name = "among-launcher"
 version = "1.0.0"
 dependencies = [
+ "anyhow",
  "dirs 5.0.1",
  "serde",
  "serde_json",

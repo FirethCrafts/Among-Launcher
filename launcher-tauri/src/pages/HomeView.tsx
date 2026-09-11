@@ -99,7 +99,7 @@ export default function HomeView() {
   async function loadMods() {
     if (!gamePath) return;
     try {
-      const installedMods = await invoke<ModEntry[]>("get_mods");
+      const installedMods = await invoke<ModEntry[]>("get_filesystem_mods", { gamePath });
       setMods(installedMods);
     } catch (e) {
       console.error("Failed to get mods:", e);
@@ -125,47 +125,38 @@ export default function HomeView() {
     }
   }
 
-  async function handleAutoPostToggle() {
-    const newValue = !autoPost;
-    setAutoPost(newValue);
-    if (config) {
-      const newConfig = { ...config, auto_post_lobby: newValue };
-      try {
-        await invoke("write_config", { newConfig });
-        setConfig(newConfig);
-      } catch (e) {
-        console.error("Failed to write config:", e);
-        setAutoPost(!newValue);
-      }
-    }
-  }
+  async function handleToggle(field: keyof LauncherConfig, currentValue: boolean) {
+    const newValue = !currentValue;
+    if (field === "auto_post_lobby") setAutoPost(newValue);
+    if (field === "debug_mode") setDebugMode(newValue);
 
-  async function handleDebugModeToggle() {
-    const newValue = !debugMode;
-    setDebugMode(newValue);
     if (config) {
-      const newConfig = { ...config, debug_mode: newValue };
+      const newConfig = { ...config, [field]: newValue };
       try {
         await invoke("write_config", { newConfig });
         setConfig(newConfig);
       } catch (e) {
         console.error("Failed to write config:", e);
-        setDebugMode(!newValue);
+        if (field === "auto_post_lobby") setAutoPost(!newValue);
+        if (field === "debug_mode") setDebugMode(!newValue);
       }
     }
   }
 
   async function handleImportMod() {
+    if (!gamePath) return;
     try {
       const selected = await open({
         multiple: true,
         filters: [{ name: "DLL Files", extensions: ["dll"] }],
       });
       if (selected) {
-        console.log("Selected files:", selected);
+        const paths = Array.isArray(selected) ? selected : [selected];
+        await invoke("import_mod", { gamePath, modPaths: paths });
+        await loadMods();
       }
     } catch (e) {
-      console.error("Failed to open dialog:", e);
+      console.error("Failed to import mod:", e);
     }
   }
 
@@ -304,7 +295,7 @@ export default function HomeView() {
             <label className="flex items-center justify-between cursor-pointer">
               <span className="text-sm font-medium">Auto-post game data</span>
               <button
-                onClick={handleAutoPostToggle}
+                onClick={() => handleToggle("auto_post_lobby", autoPost)}
                 className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
                   autoPost ? "bg-primary" : "bg-muted"
                 }`}
@@ -319,7 +310,7 @@ export default function HomeView() {
             <label className="flex items-center justify-between cursor-pointer">
               <span className="text-sm font-medium">Debug mode</span>
               <button
-                onClick={handleDebugModeToggle}
+                onClick={() => handleToggle("debug_mode", debugMode)}
                 className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
                   debugMode ? "bg-primary" : "bg-muted"
                 }`}

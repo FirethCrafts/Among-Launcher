@@ -770,6 +770,69 @@ async fn send_ipc_message(
     }
 }
 
+#[derive(serde::Serialize)]
+struct FilesystemMod {
+    name: String,
+    version: Option<String>,
+}
+
+#[tauri::command]
+async fn get_filesystem_mods(game_path: String) -> Result<Vec<FilesystemMod>, LauncherError> {
+    let plugins_dir = Path::new(&game_path).join("BepInEx").join("Plugins");
+    let mut mods = Vec::new();
+
+    if !plugins_dir.exists() {
+        return Ok(mods);
+    }
+
+    let entries = fs::read_dir(&plugins_dir)
+        .map_err(|e| LauncherError::InstallFailed(format!("Failed to read Plugins dir: {}", e)))?;
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().map(|e| e == "dll").unwrap_or(false) {
+            let name = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("Unknown")
+                .to_string();
+            mods.push(FilesystemMod {
+                name,
+                version: None,
+            });
+        }
+    }
+
+    Ok(mods)
+}
+
+#[tauri::command]
+async fn import_mod(game_path: String, mod_paths: Vec<String>) -> Result<(), LauncherError> {
+    let plugins_dir = Path::new(&game_path).join("BepInEx").join("Plugins");
+
+    if !plugins_dir.exists() {
+        fs::create_dir_all(&plugins_dir)
+            .map_err(|e| LauncherError::InstallFailed(format!("Failed to create Plugins dir: {}", e)))?;
+    }
+
+    for mod_path_str in &mod_paths {
+        let src = Path::new(mod_path_str);
+        let file_name = src
+            .file_name()
+            .ok_or_else(|| LauncherError::InstallFailed(format!("Invalid path: {}", mod_path_str)))?;
+        let dest = plugins_dir.join(file_name);
+        fs::copy(src, &dest).map_err(|e| {
+            LauncherError::InstallFailed(format!(
+                "Failed to copy {} to Plugins: {}",
+                file_name.to_string_lossy(),
+                e
+            ))
+        })?;
+    }
+
+    Ok(())
+}
+
 #[tauri::command]
 async fn stop_game(app: AppHandle) -> Result<(), LauncherError> {
     #[cfg(target_os = "windows")]
@@ -780,7 +843,17 @@ async fn stop_game(app: AppHandle) -> Result<(), LauncherError> {
             .output()
             .map_err(|e| LauncherError::InstallFailed(format!("Failed to run tasklist: {}", e)))?;
 
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            eprintln!("[stop_game] tasklist failed: {}", stderr);
+            return Err(LauncherError::InstallFailed(format!(
+                "tasklist exited with code {:?}",
+                output.status.code()
+            )));
+        }
+
         let stdout = String::from_utf8_lossy(&output.stdout);
+        let mut killed = false;
         for line in stdout.lines() {
             if line.contains("Among Us.exe") {
                 let pid = line
@@ -788,12 +861,28 @@ async fn stop_game(app: AppHandle) -> Result<(), LauncherError> {
                     .nth(1)
                     .and_then(|s| s.trim_matches('"').parse::<u32>().ok());
                 if let Some(pid) = pid {
-                    Command::new("taskkill")
+                    let kill_output = Command::new("taskkill")
                         .args(["/PID", &pid.to_string(), "/F"])
                         .output()
                         .map_err(|e| LauncherError::InstallFailed(format!("Failed to kill process: {}", e)))?;
+
+                    if !kill_output.status.success() {
+                        let stderr = String::from_utf8_lossy(&kill_output.stderr);
+                        eprintln!(
+                            "[stop_game] taskkill /PID {} failed: {}",
+                            pid, stderr
+                        );
+                        return Err(LauncherError::InstallFailed(format!(
+                            "taskkill failed for PID {}: {}",
+                            pid, stderr
+                        )));
+                    }
+                    killed = true;
                 }
             }
+        }
+        if !killed {
+            eprintln!("[stop_game] Among Us.exe not found in process list");
         }
     }
 
@@ -864,6 +953,8 @@ pub fn run() {
             launch_game,
             stop_game,
             get_mods,
+            get_filesystem_mods,
+            import_mod,
             read_config,
             write_config,
             get_install_status,
