@@ -9,6 +9,8 @@ import HostControlPanelView from "@/pages/HostControlPanelView";
 import WelcomeView from "@/pages/WelcomeView";
 import { Titlebar } from "./components/Titlebar";
 import { Sidebar } from "./components/Sidebar";
+import { ErrorBoundary } from "./components/ErrorBoundary";
+import { UpdateModal } from "./components/UpdateModal";
 
 interface LauncherConfig {
   storefront?: string | null;
@@ -18,6 +20,7 @@ interface LauncherConfig {
   discord_access_token: string;
   username: string;
   avatar_url: string;
+  last_seen_version: string;
 }
 
 interface UserInfo {
@@ -27,11 +30,20 @@ interface UserInfo {
   avatar: string | null;
 }
 
+interface UpdateInfo {
+  current: string;
+  latest: string;
+  changelog: string;
+  download_url: string;
+}
+
 export default function App() {
   const [gameConnected, setGameConnected] = useState(false);
   const [loggedIn, setLoggedIn] = useState<boolean | null>(null);
   const [username, setUsername] = useState("");
   const [avatarUrl, setAvatarUrl] = useState("");
+  const [showUpdateModal, setShowUpdateModal] = useState(false);
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
 
   useEffect(() => {
     checkAuth();
@@ -61,8 +73,24 @@ export default function App() {
         setUsername(config.username);
         setAvatarUrl(config.avatar_url);
       }
+
+      if (hasToken) {
+        checkForUpdate(config);
+      }
     } catch {
       setLoggedIn(false);
+    }
+  }
+
+  async function checkForUpdate(_config: LauncherConfig) {
+    try {
+      const info = await invoke<UpdateInfo | null>("check_for_among_api_update");
+      if (info) {
+        setUpdateInfo(info);
+        setShowUpdateModal(true);
+      }
+    } catch {
+      // Version check is non-critical
     }
   }
 
@@ -99,14 +127,24 @@ export default function App() {
       <div className="flex-1 flex overflow-hidden">
         <Sidebar gameConnected={gameConnected} username={username} avatarUrl={avatarUrl} />
         <main className="flex-1 overflow-y-auto p-6">
-          <Routes>
-            <Route path="/" element={<HomeView />} />
-            <Route path="/settings" element={<SettingsView />} />
-            {gameConnected && <Route path="/ingame" element={<InGameView />} />}
-            {gameConnected && <Route path="/host" element={<HostControlPanelView />} />}
-          </Routes>
+          <ErrorBoundary>
+            <Routes>
+              <Route path="/" element={<HomeView />} />
+              <Route path="/settings" element={<SettingsView />} />
+              {gameConnected && <Route path="/ingame" element={<InGameView />} />}
+              {gameConnected && <Route path="/host" element={<HostControlPanelView />} />}
+            </Routes>
+          </ErrorBoundary>
         </main>
       </div>
+
+      {updateInfo && (
+        <UpdateModal
+          isOpen={showUpdateModal}
+          onClose={() => setShowUpdateModal(false)}
+          updateInfo={updateInfo}
+        />
+      )}
     </div>
   );
 }

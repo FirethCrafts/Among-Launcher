@@ -5,6 +5,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
 import { CardContainer, CardBody, CardItem } from "@/components/ui/3d-card";
 import { Play, Square, Gamepad2, CheckCircle2, XCircle, FolderOpen, Package, Folder } from "lucide-react";
 
@@ -58,10 +59,10 @@ export default function HomeView() {
   const [mods, setMods] = useState<ModEntry[]>([]);
   const [config, setConfig] = useState<LauncherConfig | null>(null);
   const [installProgress, setInstallProgress] = useState<InstallProgress | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    detectGame();
-    loadConfig();
+    Promise.all([detectGame(), loadConfig()]).finally(() => setLoading(false));
 
     const unlistenGameStopped = listen("game-stopped", () => {
       setIsRunning(false);
@@ -197,8 +198,34 @@ export default function HomeView() {
     <div className="min-h-full bg-grid p-6 space-y-6">
       <h1 className="font-display text-3xl font-bold text-primary">Home</h1>
 
-      {installProgress && (
-        <Card className="glow-primary">
+      {loading ? (
+        <div className="grid gap-6 md:grid-cols-2">
+          <Card>
+            <CardHeader>
+              <Skeleton className="h-5 w-32" />
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <Skeleton className="h-4 w-full" />
+              <Skeleton className="h-4 w-3/4" />
+              <Skeleton className="h-4 w-1/2" />
+              <Skeleton className="h-9 w-full mt-4" />
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader>
+              <Skeleton className="h-5 w-32" />
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <Skeleton className="h-12 w-full" />
+              <Skeleton className="h-12 w-full" />
+              <Skeleton className="h-9 w-full mt-4" />
+            </CardContent>
+          </Card>
+        </div>
+      ) : (
+        <>
+          {installProgress && (
+            <Card className="glow-primary">
           <CardContent className="pt-6">
             <div className="space-y-2">
               <div className="flex items-center justify-between text-sm">
@@ -395,6 +422,8 @@ export default function HomeView() {
           </div>
         </CardContent>
       </Card>
+        </>
+      )}
     </div>
   );
 }

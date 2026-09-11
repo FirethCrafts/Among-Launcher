@@ -27,6 +27,16 @@ pub struct LauncherConfig {
     pub auto_post_lobby: bool,
     #[serde(default)]
     pub last_seen_version: String,
+    #[serde(default)]
+    pub window_x: Option<f64>,
+    #[serde(default)]
+    pub window_y: Option<f64>,
+    #[serde(default)]
+    pub window_width: Option<f64>,
+    #[serde(default)]
+    pub window_height: Option<f64>,
+    #[serde(default)]
+    pub window_maximized: bool,
 }
 
 fn default_modded_path() -> String {

@@ -5,7 +5,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 mod auth;
 mod config;
@@ -16,6 +16,7 @@ mod lobby;
 mod lobby_backend;
 mod lobby_ws;
 mod mod_sync;
+mod version_checker;
 
 use config::{LauncherConfig, SharedConfig};
 use error::LauncherError;
@@ -1561,9 +1562,63 @@ pub fn run() {
             install_from_library,
             get_preset_mods,
             install_preset_mod,
+            version_checker::check_for_among_api_update,
         ])
         .setup(move |app| {
             let app_handle = app.handle().clone();
+
+            // Restore window state
+            {
+                let config_state = app.state::<AppState>();
+                let cfg = config_state.config.blocking_read();
+                if let Some(window) = app.get_webview_window("main") {
+                    if let (Some(x), Some(y)) = (cfg.window_x, cfg.window_y) {
+                        let _ = window.set_position(tauri::Position::Physical(
+                            tauri::PhysicalPosition {
+                                x: x as i32,
+                                y: y as i32,
+                            },
+                        ));
+                    }
+                    if let (Some(w), Some(h)) = (cfg.window_width, cfg.window_height) {
+                        let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize {
+                            width: w as u32,
+                            height: h as u32,
+                        }));
+                    }
+                    if cfg.window_maximized {
+                        let _ = window.maximize();
+                    }
+                }
+            }
+
+            // Save window state on close
+            {
+                let config_state = app.state::<AppState>().clone();
+                if let Some(window) = app.get_webview_window("main") {
+                    let window_clone = window.clone();
+                    let config_clone = config_state.config.clone();
+                    window.on_window_event(move |event| {
+                        if let tauri::WindowEvent::CloseRequested { .. } = event {
+                            let pos = window_clone.inner_position().ok();
+                            let size = window_clone.inner_size().ok();
+                            let maximized = window_clone.is_maximized().unwrap_or(false);
+                            let mut cfg = config_clone.blocking_write();
+                            if let Some(pos) = pos {
+                                cfg.window_x = Some(pos.x as f64);
+                                cfg.window_y = Some(pos.y as f64);
+                            }
+                            if let Some(size) = size {
+                                cfg.window_width = Some(size.width as f64);
+                                cfg.window_height = Some(size.height as f64);
+                            }
+                            cfg.window_maximized = maximized;
+                            let _ = cfg.save();
+                        }
+                    });
+                }
+            }
+
             let rt = tokio::runtime::Handle::current();
             rt.spawn(async move {
                 ipc::start_pipe_server(app_handle, pipe_handle).await;
