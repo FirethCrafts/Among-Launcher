@@ -1044,12 +1044,13 @@ async fn post_lobby(state: State<'_, AppState>) -> Result<(), LauncherError> {
         )
     };
 
-    let client = lobby_backend::LobbyBackendClient::new(token);
+    let client = lobby_backend::LobbyBackendClient::new(token.clone());
     client.create_lobby(&code, &region, max_players).await?;
 
     {
         let mut lobby = state.lobby_state.write().await;
         lobby.posted = true;
+        lobby.start_heartbeat(code, token).await;
     }
     Ok(())
 }
