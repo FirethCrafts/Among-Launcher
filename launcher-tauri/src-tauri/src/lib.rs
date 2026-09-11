@@ -702,27 +702,35 @@ async fn install_game(
     game_path: String,
     storefront: String,
 ) -> Result<(), LauncherError> {
-    let config = state.config.read().await;
+    let source = {
+        let config = state.config.read().await;
+        config.modded_install_path.clone()
+    };
 
     let _ = app.emit(
         "install-progress",
-        serde_json::json!({ "stage": "copying", "progress": 0 }),
+        serde_json::json!({ "stage": "copying", "progress": 0, "total": 0 }),
     );
-    installer::copy_game(
-        &config.modded_install_path,
-        &game_path,
-    )
-    .await?;
+    installer::copy_game(&source, &game_path, app.clone()).await?;
 
     installer::download_bepinex(&game_path, &storefront, &app).await?;
 
     installer::download_among_api(&game_path, &app).await?;
 
     if storefront == "steam" {
-        let _ = std::fs::write(std::path::Path::new(&game_path).join("steam_appid.txt"), "945360");
+        let _ = tokio::task::spawn_blocking(move || {
+            std::fs::write(
+                std::path::Path::new(&game_path).join("steam_appid.txt"),
+                "945360",
+            )
+        })
+        .await;
     }
 
-    let _ = app.emit("install-progress", serde_json::json!({ "stage": "complete" }));
+    let _ = app.emit(
+        "install-progress",
+        serde_json::json!({ "stage": "complete", "progress": 1, "total": 1 }),
+    );
     Ok(())
 }
 
