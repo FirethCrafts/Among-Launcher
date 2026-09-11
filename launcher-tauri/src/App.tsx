@@ -5,6 +5,7 @@ import HomeView from "@/pages/HomeView";
 import SettingsView from "@/pages/SettingsView";
 import InGameView from "@/pages/InGameView";
 import { Titlebar } from "./components/Titlebar";
+import { Sidebar } from "./components/Sidebar";
 
 export default function App() {
   const [gameConnected, setGameConnected] = useState(false);
@@ -28,14 +29,14 @@ export default function App() {
     <div className="h-screen flex flex-col bg-background text-foreground">
       <Titlebar />
       <div className="flex-1 flex overflow-hidden">
-        {gameConnected ? (
-          <InGameView />
-        ) : (
+        <Sidebar gameConnected={gameConnected} />
+        <main className="flex-1 overflow-y-auto p-6">
           <Routes>
             <Route path="/" element={<HomeView />} />
             <Route path="/settings" element={<SettingsView />} />
+            {gameConnected && <Route path="/ingame" element={<InGameView />} />}
           </Routes>
-        )}
+        </main>
       </div>
     </div>
   );
