@@ -74,6 +74,15 @@ pub struct LibraryEntry {
 }
 
 impl LauncherConfig {
+    pub fn effective_modded_path(&self) -> String {
+        let trimmed = self.modded_install_path.trim();
+        if trimmed.is_empty() {
+            default_modded_path()
+        } else {
+            trimmed.to_string()
+        }
+    }
+
     fn config_dir() -> PathBuf {
         dirs::data_local_dir()
             .unwrap_or_else(|| PathBuf::from("."))

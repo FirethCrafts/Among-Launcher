@@ -712,13 +712,23 @@ async fn detect_game(
 async fn install_game(
     app: AppHandle,
     state: State<'_, AppState>,
+    config_debouncer: State<'_, config::ConfigDebouncer>,
     game_path: String,
     storefront: String,
 ) -> Result<(), LauncherError> {
-    let dest = {
+    let (dest, needs_save) = {
         let config = state.config.read().await;
-        config.modded_install_path.clone()
+        let needs_save = config.modded_install_path.trim().is_empty();
+        (config.effective_modded_path(), needs_save)
     };
+
+    if needs_save {
+        {
+            let mut config = state.config.write().await;
+            config.modded_install_path = dest.clone();
+        }
+        config_debouncer.request_save().await;
+    }
 
     let _ = app.emit(
         "install-progress",

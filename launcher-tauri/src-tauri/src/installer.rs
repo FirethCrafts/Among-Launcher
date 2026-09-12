@@ -12,13 +12,13 @@ pub async fn copy_game(source: &str, dest: &str, app: AppHandle) -> Result<(), L
         let dest_path = Path::new(&dest);
 
         let source_canonical = std::fs::canonicalize(source_path)
-            .map_err(|e| LauncherError::Filesystem(e.to_string()))?;
+            .map_err(|e| LauncherError::Filesystem(format!("Failed to resolve source '{}': {}", source, e)))?;
         let dest_canonical = std::fs::canonicalize(dest_path)
             .or_else(|_| {
                 std::fs::create_dir_all(dest_path)
                     .and_then(|_| std::fs::canonicalize(dest_path))
             })
-            .map_err(|e| LauncherError::Filesystem(e.to_string()))?;
+            .map_err(|e| LauncherError::Filesystem(format!("Failed to resolve dest '{}': {}", dest, e)))?;
 
         if dest_canonical.starts_with(&source_canonical) {
             return Err(LauncherError::Filesystem(
