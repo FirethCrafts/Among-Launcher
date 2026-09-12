@@ -2,7 +2,7 @@ import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Gamepad2, Loader2 } from "lucide-react";
+import { Check, Gamepad2, Loader2 } from "lucide-react";
 
 interface UserInfo {
   id: string;
@@ -35,16 +35,33 @@ export default function WelcomeView({ onLogin }: WelcomeViewProps) {
   return (
     <div className="h-full flex items-center justify-center bg-background">
       <Card className="w-full max-w-md">
-        <CardContent className="flex flex-col items-center gap-4 p-8 text-center">
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary">
-            <Gamepad2 className="h-6 w-6 text-primary-foreground" />
+        <CardContent className="flex flex-col items-center gap-6 p-8 text-center">
+          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary glow">
+            <Gamepad2 className="h-8 w-8 text-primary-foreground" />
           </div>
-          <h1 className="text-3xl font-bold">
-            Among Launcher
-          </h1>
-          <p className="text-muted-foreground text-sm">
-            Sign in with Discord to get started
-          </p>
+          <div className="space-y-2">
+            <h1 className="text-4xl font-bold tracking-tight">
+              Among Launcher
+            </h1>
+            <p className="text-muted-foreground text-sm">
+              Play modded Among Us with friends.
+            </p>
+          </div>
+          <div className="flex w-full flex-col items-center gap-2">
+            {[
+              "One-click setup",
+              "Auto mod sync",
+              "Host & join lobbies",
+            ].map((feature) => (
+              <div
+                key={feature}
+                className="flex w-full max-w-xs items-center gap-2 text-sm text-muted-foreground"
+              >
+                <Check className="h-4 w-4 shrink-0 text-primary" />
+                {feature}
+              </div>
+            ))}
+          </div>
           <Button
             onClick={handleLogin}
             disabled={loading}

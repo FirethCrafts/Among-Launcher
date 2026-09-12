@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { User, FolderOpen, RotateCcw, Info, LogOut, Store } from "lucide-react";
+import { showToast } from "@/components/Toast";
 import pkg from "../../package.json";
 
 interface LauncherConfig {
@@ -62,7 +63,7 @@ export default function SettingsView() {
       setStorefront(config.storefront || "");
       setVersion(pkg.version || "Unknown");
     } catch (e) {
-      console.error("Failed to load settings:", e);
+      showToast("Failed to load settings", "error");
     }
   }
 
@@ -82,7 +83,7 @@ export default function SettingsView() {
         }
       }
     } catch (e) {
-      console.error("Failed to browse:", e);
+      showToast("Failed to browse", "error");
     }
   }
 
@@ -97,7 +98,7 @@ export default function SettingsView() {
         setFullConfig(updatedConfig);
       }
     } catch (e) {
-      console.error("Failed to reset path:", e);
+      showToast("Failed to reset path", "error");
     }
   }
 
@@ -113,9 +114,10 @@ export default function SettingsView() {
         await invoke("write_config", { newConfig: updatedConfig });
         setFullConfig(updatedConfig);
         setAccount(null);
+        showToast("Logged out", "success");
       }
     } catch (e) {
-      console.error("Failed to logout:", e);
+      showToast("Failed to logout", "error");
     }
   }
 
@@ -128,7 +130,7 @@ export default function SettingsView() {
         setFullConfig(updatedConfig);
       }
     } catch (e) {
-      console.error("Failed to set storefront:", e);
+      showToast("Failed to set storefront", "error");
     }
   }
 
