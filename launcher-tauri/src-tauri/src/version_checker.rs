@@ -58,7 +58,7 @@ pub async fn check_for_among_api_update(
     }
 }
 
-fn extract_file_version(dll_path: &std::path::Path) -> Option<String> {
+pub(crate) fn extract_file_version(dll_path: &std::path::Path) -> Option<String> {
     let data = std::fs::read(dll_path).ok()?;
 
     // VS_FIXEDFILEINFO signature: 0xFEEF04BD

@@ -978,6 +978,7 @@ struct ModEntry {
     filename: String,
     size: u64,
     path: String,
+    version: Option<String>,
 }
 
 #[tauri::command]
@@ -1010,6 +1011,7 @@ async fn get_mod_list(game_path: String) -> Result<Vec<ModEntry>, LauncherError>
                         .to_string(),
                     size: metadata.len(),
                     path: path.to_string_lossy().to_string(),
+                    version: crate::version_checker::extract_file_version(&path),
                 });
             }
         }
