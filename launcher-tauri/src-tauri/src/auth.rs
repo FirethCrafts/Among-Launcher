@@ -2,7 +2,7 @@ use crate::error::LauncherError;
 use tiny_http::Server;
 
 const CLIENT_ID: &str = "1533706803748147240";
-const CLIENT_SECRET: &str = "Um7wPIDVkCS9ro-0ZltYrs1NUI2q2LLh";
+const CLIENT_SECRET: &str = "D_pwSkYUjRKkGw7YEdFsHAZZj4EUxPA4";
 const REDIRECT_URI: &str = "http://127.0.0.1:5000/callback/";
 const PORT: u16 = 5000;
 
