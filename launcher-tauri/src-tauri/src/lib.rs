@@ -691,7 +691,7 @@ pub struct AppState {
     pub config: SharedConfig,
     pub lobby_state: SharedLobbyState,
     pipe_handle: Arc<tokio::sync::Mutex<Option<ipc::PipeServerHandle>>>,
-    pub oauth_code: Arc<tokio::sync::Mutex<Option<String>>>,
+    pub oauth_code: std::sync::Mutex<Option<String>>,
 }
 
 #[tauri::command]
@@ -1496,12 +1496,8 @@ async fn login_discord(state: State<'_, AppState>) -> Result<auth::UserInfo, Lau
                 return Err(LauncherError::Auth("Timeout waiting for Discord callback".into()));
             }
             {
-                let oauth = state.oauth_code.lock().await;
-                if let Some(code) = oauth.as_ref() {
-                    let code = code.clone();
-                    drop(oauth);
-                    let mut oauth = state.oauth_code.lock().await;
-                    *oauth = None;
+                let mut oauth = state.oauth_code.lock().map_err(|e| LauncherError::Auth(e.to_string()))?;
+                if let Some(code) = oauth.take() {
                     break code;
                 }
             }
@@ -1531,7 +1527,7 @@ async fn login_discord(state: State<'_, AppState>) -> Result<auth::UserInfo, Lau
 #[tauri::command]
 async fn handle_deep_link(state: State<'_, AppState>, url: String) -> Result<(), LauncherError> {
     if let Some(code) = auth::DiscordAuth::extract_code_from_url(&url) {
-        let mut oauth = state.oauth_code.lock().await;
+        let mut oauth = state.oauth_code.lock().map_err(|e| LauncherError::Auth(e.to_string()))?;
         *oauth = Some(code);
     }
     Ok(())
@@ -1552,7 +1548,7 @@ pub fn run() {
         config: shared_config,
         lobby_state: lobby_state.clone(),
         pipe_handle: Arc::new(tokio::sync::Mutex::new(Some(pipe_handle.clone()))),
-        oauth_code: Arc::new(tokio::sync::Mutex::new(None)),
+        oauth_code: std::sync::Mutex::new(None),
     };
 
     tauri::Builder::default()
@@ -1631,7 +1627,7 @@ pub fn run() {
                 for arg in &args {
                     if let Some(code) = auth::DiscordAuth::extract_code_from_url(arg) {
                         let state = app.state::<AppState>();
-                        let mut oauth = state.oauth_code.lock().blocking_write();
+                        let mut oauth = state.oauth_code.lock().unwrap();
                         *oauth = Some(code);
                         break;
                     }
