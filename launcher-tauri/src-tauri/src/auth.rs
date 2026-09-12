@@ -2,7 +2,7 @@ use crate::error::LauncherError;
 
 const CLIENT_ID: &str = "1533706803748147240";
 const CLIENT_SECRET: &str = "D_pwSkYUjRKkGw7YEdFsHAZZj4EUxPA4";
-const BACKEND_URL: &str = "https://among-us.mel-homes.com";
+const REDIRECT_URI: &str = "https://among-us.mel-homes.com/appLogin";
 
 pub struct DiscordAuth;
 
@@ -13,8 +13,9 @@ impl DiscordAuth {
 
     pub fn authorize_url() -> String {
         format!(
-            "{}/appLogin?client_id={}",
-            BACKEND_URL, CLIENT_ID,
+            "https://discord.com/api/oauth2/authorize?client_id={}&redirect_uri={}&response_type=code&scope=identify",
+            CLIENT_ID,
+            urlencoding::encode(REDIRECT_URI),
         )
     }
 
@@ -27,7 +28,7 @@ impl DiscordAuth {
                 ("client_secret", CLIENT_SECRET),
                 ("grant_type", "authorization_code"),
                 ("code", code),
-                ("redirect_uri", &format!("{}/appLogin", BACKEND_URL)),
+                ("redirect_uri", REDIRECT_URI),
             ])
             .send()
             .await
