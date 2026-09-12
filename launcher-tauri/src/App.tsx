@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Routes, Route } from "react-router-dom";
+import { Routes, Route, useNavigate } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import HomeView from "@/pages/HomeView";
@@ -7,6 +7,7 @@ import SettingsView from "@/pages/SettingsView";
 import InGameView from "@/pages/InGameView";
 import HostControlPanelView from "@/pages/HostControlPanelView";
 import WelcomeView from "@/pages/WelcomeView";
+import SetupView from "@/pages/SetupView";
 import { Titlebar } from "./components/Titlebar";
 import { Sidebar } from "./components/Sidebar";
 import { ErrorBoundary } from "./components/ErrorBoundary";
@@ -38,9 +39,26 @@ interface UpdateInfo {
   download_url: string;
 }
 
+interface GameSearchResult {
+  path?: string | null;
+  storefront?: string | null;
+  detected_but_unavailable?: boolean;
+}
+
+interface InstallStatus {
+  bepinex_installed: boolean;
+  among_api_installed: boolean;
+}
+
+function SetupPage() {
+  const navigate = useNavigate();
+  return <SetupView onComplete={() => navigate("/")} />;
+}
+
 export default function App() {
   const [gameConnected, setGameConnected] = useState(false);
   const [loggedIn, setLoggedIn] = useState<boolean | null>(null);
+  const [needsSetup, setNeedsSetup] = useState<boolean | null>(null);
   const [username, setUsername] = useState("");
   const [avatarUrl, setAvatarUrl] = useState("");
   const [showUpdateModal, setShowUpdateModal] = useState(false);
@@ -49,6 +67,12 @@ export default function App() {
   useEffect(() => {
     checkAuth();
   }, []);
+
+  useEffect(() => {
+    if (loggedIn) {
+      checkSetup();
+    }
+  }, [loggedIn]);
 
   useEffect(() => {
     const unlistenConnected = listen("ipc:client-connected", () => {
@@ -90,6 +114,25 @@ export default function App() {
       }
     } catch {
       setLoggedIn(false);
+    }
+  }
+
+  async function checkSetup() {
+    try {
+      const setupRequired = await Promise.race([
+        (async () => {
+          const detected = await invoke<GameSearchResult>("detect_game", {});
+          if (!detected.path) return true;
+          const status = await invoke<InstallStatus>("get_install_status", {
+            gamePath: detected.path,
+          });
+          return !(status.bepinex_installed && status.among_api_installed);
+        })(),
+        new Promise<boolean>((resolve) => setTimeout(() => resolve(true), 3000)),
+      ]);
+      setNeedsSetup(setupRequired);
+    } catch {
+      setNeedsSetup(true);
     }
   }
 
@@ -140,6 +183,29 @@ export default function App() {
     );
   }
 
+  if (needsSetup === null) {
+    return (
+      <div className="h-screen flex flex-col bg-background">
+        <Titlebar />
+        <div className="flex-1 min-h-0 overflow-hidden flex items-center justify-center">
+          <div className="text-muted-foreground text-sm">Loading...</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (needsSetup) {
+    return (
+      <div className="h-screen flex flex-col bg-background text-foreground">
+        <Titlebar />
+        <div className="flex-1 min-h-0 overflow-hidden">
+          <SetupView onComplete={() => setNeedsSetup(false)} />
+        </div>
+        <ToastHost />
+      </div>
+    );
+  }
+
   return (
     <div className="h-screen flex flex-col bg-background text-foreground">
       <Titlebar />
@@ -150,6 +216,7 @@ export default function App() {
             <Routes>
               <Route path="/" element={<HomeView />} />
               <Route path="/settings" element={<SettingsView />} />
+              {!gameConnected && <Route path="/setup" element={<SetupPage />} />}
               {gameConnected && <Route path="/ingame" element={<InGameView />} />}
               {gameConnected && <Route path="/host" element={<HostControlPanelView />} />}
             </Routes>
