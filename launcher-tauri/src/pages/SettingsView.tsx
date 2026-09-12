@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
+import { join, localDataDir } from "@tauri-apps/api/path";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -68,11 +69,11 @@ export default function SettingsView() {
   async function browseGamePath() {
     try {
       const selected = await open({
-        directory: false,
-        filters: [{ name: "Executables", extensions: ["exe"] }],
+        directory: true,
+        multiple: false,
       });
       if (selected) {
-        const newPath = selected as string;
+        const newPath = Array.isArray(selected) ? selected[0] : selected;
         setGamePath(newPath);
         if (fullConfig) {
           const updatedConfig = { ...fullConfig, modded_install_path: newPath };
@@ -87,9 +88,10 @@ export default function SettingsView() {
 
   async function resetGamePath() {
     try {
+      const localData = await localDataDir();
+      const defaultPath = await join(localData, "AmongLauncher", "ModdedAmongUs");
+      setGamePath(defaultPath);
       if (fullConfig) {
-        const defaultPath = "";
-        setGamePath(defaultPath);
         const updatedConfig = { ...fullConfig, modded_install_path: defaultPath };
         await invoke("write_config", { newConfig: updatedConfig });
         setFullConfig(updatedConfig);
@@ -182,7 +184,7 @@ export default function SettingsView() {
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
-              <label className="text-sm font-medium">Game Path</label>
+              <label className="text-sm font-medium">Modded Game Path</label>
               <div className="flex gap-2">
                 <Input
                   value={gamePath}

@@ -42,8 +42,6 @@ interface SetupViewProps {
   onComplete: () => void;
 }
 
-const MANAGED_DEFAULT_RE = /(?:\\|\/)AmongLauncher(?:\\|\/)ModdedAmongUs(?:\/|\\|$)/i;
-
 function dirOfExe(path: string): string {
   const index = path.search(/[\\/][^\\/]*\.exe$/i);
   return index > 0 ? path.slice(0, index) : path;
@@ -74,15 +72,15 @@ export default function SetupView({ onComplete }: SetupViewProps) {
         if (cancelled) return;
         setConfig(cfg);
         setStorefront(result.storefront || cfg.storefront || "");
-        const configPath =
-          cfg.modded_install_path && !MANAGED_DEFAULT_RE.test(cfg.modded_install_path)
-            ? cfg.modded_install_path
-            : null;
-        const path = result.path || configPath || null;
-        if (path) {
-          setGamePath(path);
+        const sourcePath = result.path || null;
+        if (sourcePath) {
+          setGamePath(sourcePath);
           setDetected(true);
-          const status = await invoke<InstallStatus>("get_install_status", { gamePath: path });
+        }
+        if (cfg.modded_install_path) {
+          const status = await invoke<InstallStatus>("get_install_status", {
+            gamePath: cfg.modded_install_path,
+          });
           if (cancelled) return;
           setBepinexInstalled(status.bepinex_installed);
           setAmongApiInstalled(status.among_api_installed);
@@ -112,10 +110,15 @@ export default function SetupView({ onComplete }: SetupViewProps) {
     };
   }, []);
 
+  function moddedPath(): string | null {
+    return config?.modded_install_path || null;
+  }
+
   async function confirmInstalled() {
-    if (!gamePath) return;
+    const target = moddedPath();
+    if (!target) return;
     try {
-      const status = await invoke<InstallStatus>("get_install_status", { gamePath });
+      const status = await invoke<InstallStatus>("get_install_status", { gamePath: target });
       setBepinexInstalled(status.bepinex_installed);
       setAmongApiInstalled(status.among_api_installed);
       if (status.bepinex_installed && status.among_api_installed) {
@@ -154,20 +157,11 @@ export default function SetupView({ onComplete }: SetupViewProps) {
           cfg = await invoke<LauncherConfig>("read_config");
           setConfig(cfg);
         } catch {
-          // config unavailable; skip persisting the path
+          // config unavailable; fall back to the browsed path
         }
       }
-      if (cfg) {
-        const newConfig = { ...cfg, modded_install_path: dir };
-        try {
-          await invoke("write_config", { newConfig });
-          setConfig(newConfig);
-        } catch {
-          showToast("Failed to save game path", "error");
-        }
-      }
-
-      const status = await invoke<InstallStatus>("get_install_status", { gamePath: dir });
+      const target = cfg?.modded_install_path || dir;
+      const status = await invoke<InstallStatus>("get_install_status", { gamePath: target });
       setBepinexInstalled(status.bepinex_installed);
       setAmongApiInstalled(status.among_api_installed);
       if (status.bepinex_installed && status.among_api_installed) {
@@ -201,7 +195,8 @@ export default function SetupView({ onComplete }: SetupViewProps) {
           </div>
           <h1 className="text-3xl font-bold">Set up your game</h1>
           <p className="text-muted-foreground text-sm">
-            The launcher will copy Among Us and install BepInEx so you can play modded.
+            The launcher copies your Among Us installation into a modded folder and installs
+            BepInEx so you can play modded.
           </p>
 
           {loading ? (
@@ -222,7 +217,7 @@ export default function SetupView({ onComplete }: SetupViewProps) {
                   <Input
                     value={gamePath || ""}
                     readOnly
-                    placeholder="Path to Among Us"
+                    placeholder="Path to your Among Us installation"
                     className="flex-1"
                   />
                   <Button variant="outline" onClick={handleBrowse} disabled={installing}>

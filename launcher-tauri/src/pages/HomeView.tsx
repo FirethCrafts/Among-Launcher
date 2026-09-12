@@ -63,7 +63,7 @@ export default function HomeView() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    Promise.all([detectGame(), loadConfig()]).finally(() => setLoading(false));
+    load().finally(() => setLoading(false));
 
     const unlistenGameStopped = listen("game-stopped", () => {
       setIsRunning(false);
@@ -89,26 +89,33 @@ export default function HomeView() {
     }
   }, [gamePath]);
 
-  async function detectGame() {
+  async function load() {
+    let detected: GameSearchResult | null = null;
+    let cfg: LauncherConfig | null = null;
     try {
-      const result = await invoke<GameSearchResult>("detect_game", {});
-      if (result.path) {
-        setGamePath(result.path);
-        setStorefront(result.storefront || null);
-      }
+      detected = await invoke<GameSearchResult>("detect_game", {});
     } catch {
       showToast("Failed to detect game", "error");
     }
-  }
-
-  async function loadConfig() {
     try {
-      const cfg = await invoke<LauncherConfig>("read_config");
+      cfg = await invoke<LauncherConfig>("read_config");
+    } catch {
+      showToast("Failed to load config", "error");
+    }
+
+    if (cfg) {
       setConfig(cfg);
       setAutoPost(cfg.auto_post_lobby);
       setDebugMode(cfg.debug_mode);
-    } catch {
-      showToast("Failed to load config", "error");
+      setStorefront(cfg.storefront || detected?.storefront || null);
+      const moddedPath =
+        cfg.modded_install_path && cfg.modded_install_path.trim()
+          ? cfg.modded_install_path
+          : null;
+      setGamePath(moddedPath || detected?.path || null);
+    } else if (detected?.path) {
+      setGamePath(detected.path);
+      setStorefront(detected.storefront || null);
     }
   }
 
