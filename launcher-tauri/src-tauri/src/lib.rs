@@ -1552,6 +1552,26 @@ pub fn run() {
     };
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            // Focus the existing main window; do NOT spawn a second window.
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+            // If the second instance was launched via deep link, forward the
+            // OAuth code to the already-running login_discord polling loop.
+            for arg in &argv {
+                if let Some(code) = auth::DiscordAuth::extract_code_from_url(arg) {
+                    if let Some(state) = app.try_state::<AppState>() {
+                        if let Ok(mut oauth) = state.oauth_code.lock() {
+                            *oauth = Some(code);
+                        }
+                    }
+                    break;
+                }
+            }
+        }))
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())

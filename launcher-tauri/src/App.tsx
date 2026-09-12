@@ -66,7 +66,13 @@ export default function App() {
 
   async function checkAuth() {
     try {
-      const config = await invoke<LauncherConfig>("read_config");
+      // Don't let a slow config read hang first paint.
+      const config = await Promise.race([
+        invoke<LauncherConfig>("read_config"),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("config timeout")), 3000)
+        ),
+      ]);
       const hasToken = config.discord_access_token.length > 0;
       setLoggedIn(hasToken);
       if (hasToken) {
@@ -75,16 +81,23 @@ export default function App() {
       }
 
       if (hasToken) {
-        checkForUpdate(config);
+        // Run update check in the background AFTER first paint so a slow
+        // network (GitHub) can't block login/render.
+        setTimeout(() => {
+          checkForUpdate();
+        }, 0);
       }
     } catch {
       setLoggedIn(false);
     }
   }
 
-  async function checkForUpdate(_config: LauncherConfig) {
+  async function checkForUpdate() {
     try {
-      const info = await invoke<UpdateInfo | null>("check_for_among_api_update");
+      const info = await Promise.race([
+        invoke<UpdateInfo | null>("check_for_among_api_update"),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 8000)),
+      ]);
       if (info) {
         setUpdateInfo(info);
         setShowUpdateModal(true);
@@ -106,8 +119,11 @@ export default function App() {
 
   if (loggedIn === null) {
     return (
-      <div className="h-screen flex items-center justify-center bg-background">
-        <div className="text-muted-foreground text-sm">Loading...</div>
+      <div className="h-screen flex flex-col bg-background">
+        <Titlebar />
+        <div className="flex-1 min-h-0 overflow-hidden flex items-center justify-center">
+          <div className="text-muted-foreground text-sm">Loading...</div>
+        </div>
       </div>
     );
   }
@@ -116,7 +132,9 @@ export default function App() {
     return (
       <div className="h-screen flex flex-col">
         <Titlebar />
-        <WelcomeView onLogin={handleLogin} />
+        <div className="flex-1 min-h-0 overflow-hidden">
+          <WelcomeView onLogin={handleLogin} />
+        </div>
       </div>
     );
   }
@@ -124,7 +142,7 @@ export default function App() {
   return (
     <div className="h-screen flex flex-col bg-background text-foreground">
       <Titlebar />
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 min-h-0 flex overflow-hidden">
         <Sidebar gameConnected={gameConnected} username={username} avatarUrl={avatarUrl} />
         <main className="flex-1 overflow-y-auto p-6">
           <ErrorBoundary>

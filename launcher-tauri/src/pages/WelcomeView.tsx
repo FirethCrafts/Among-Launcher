@@ -32,7 +32,7 @@ export default function WelcomeView({ onLogin }: WelcomeViewProps) {
   }
 
   return (
-    <div className="h-screen flex items-center justify-center bg-grid">
+    <div className="h-full flex items-center justify-center bg-grid">
       <div className="flex flex-col items-center gap-6 p-8">
         <h1 className="font-display text-4xl font-bold text-primary">
           Among Launcher
