@@ -691,6 +691,7 @@ pub struct AppState {
     pub config: SharedConfig,
     pub lobby_state: SharedLobbyState,
     pipe_handle: Arc<tokio::sync::Mutex<Option<ipc::PipeServerHandle>>>,
+    pub oauth_code: Arc<tokio::sync::Mutex<Option<String>>>,
 }
 
 #[tauri::command]
@@ -1480,16 +1481,50 @@ async fn kick_player(
 }
 
 #[tauri::command]
-async fn login_discord(state: State<'_, AppState>) -> Result<auth::UserInfo, LauncherError> {
-    let auth_inst = auth::DiscordAuth::new()?;
-    let url = auth_inst.authorize_url();
+async fn set_oauth_code(state: State<'_, AppState>, code: String) -> Result<(), LauncherError> {
+    let mut oauth = state.oauth_code.lock().await;
+    *oauth = Some(code);
+    Ok(())
+}
 
+#[tauri::command]
+async fn login_discord(state: State<'_, AppState>) -> Result<auth::UserInfo, LauncherError> {
+    auth::DiscordAuth::new()?;
+    let url = auth::DiscordAuth::authorize_url();
+
+    // Clear any previous code
+    {
+        let mut oauth = state.oauth_code.lock().await;
+        *oauth = None;
+    }
+
+    // Open browser for Discord OAuth
     open::that(&url).map_err(|e| LauncherError::Auth(e.to_string()))?;
 
-    let code = auth_inst.wait_for_callback().await?;
+    // Wait for deep link callback to set the code
+    let code = {
+        let start = std::time::Instant::now();
+        let timeout = std::time::Duration::from_secs(120);
+        loop {
+            if start.elapsed() > timeout {
+                return Err(LauncherError::Auth("Timeout waiting for Discord callback".into()));
+            }
+            {
+                let oauth = state.oauth_code.lock().await;
+                if let Some(code) = oauth.as_ref() {
+                    let code = code.clone();
+                    drop(oauth);
+                    // Clear it
+                    let mut oauth = state.oauth_code.lock().await;
+                    *oauth = None;
+                    break code;
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        }
+    };
 
-    let token_resp = auth::DiscordAuth::exchange_token(&code, auth_inst.port).await?;
-
+    let token_resp = auth::DiscordAuth::exchange_token(&code).await?;
     let user = auth::DiscordAuth::fetch_user(&token_resp.access_token).await?;
 
     {
@@ -1523,12 +1558,14 @@ pub fn run() {
         config: shared_config,
         lobby_state: lobby_state.clone(),
         pipe_handle: Arc::new(tokio::sync::Mutex::new(Some(pipe_handle.clone()))),
+        oauth_code: Arc::new(tokio::sync::Mutex::new(None)),
     };
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_deep_link::init())
         .manage(state)
         .manage(debouncer)
         .invoke_handler(tauri::generate_handler![
@@ -1551,6 +1588,7 @@ pub fn run() {
             disband_lobby,
             kick_player,
             login_discord,
+            set_oauth_code,
             remove_mod,
             save_profile,
             apply_profile,
@@ -1622,6 +1660,29 @@ pub fn run() {
             tauri::async_runtime::spawn(async move {
                 ipc::start_pipe_server(app_handle, pipe_handle).await;
             });
+
+            // Handle deep links (amonglauncher://callback?code=...)
+            let app_handle_clone = app.handle().clone();
+            app.listen_global("deep-link://new-url", move |event| {
+                if let Some(urls) = event.payload().as_array() {
+                    for url in urls {
+                        if let Some(url_str) = url.as_str() {
+                            if url_str.starts_with("amonglauncher://callback") {
+                                if let Some(code) = url_str.split("code=").nth(1) {
+                                    let code = code.split('&').next().unwrap_or(code).to_string();
+                                    let app = app_handle_clone.clone();
+                                    tokio::spawn(async move {
+                                        let state = app.state::<AppState>();
+                                        let mut oauth = state.oauth_code.lock().await;
+                                        *oauth = Some(code);
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+
             Ok(())
         })
         .run(tauri::generate_context!())
