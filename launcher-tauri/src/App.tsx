@@ -114,10 +114,10 @@ export default function App() {
 
   if (!loggedIn) {
     return (
-      <>
+      <div className="h-screen flex flex-col">
         <Titlebar />
         <WelcomeView onLogin={handleLogin} />
-      </>
+      </div>
     );
   }
 

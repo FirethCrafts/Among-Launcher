@@ -53,8 +53,10 @@ if ($gitStatus) {
 }
 
 # --- Bump version in tauri.conf.json ---
-$config.version = $newVersion
-$config | ConvertTo-Json -Depth 10 | Set-Content $tauriConf -Encoding UTF8
+$content = Get-Content $tauriConf -Raw
+$content = $content -replace '"version":\s*"[^"]*"', "`"version`": `"$newVersion`""
+$utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+[System.IO.File]::WriteAllText((Resolve-Path $tauriConf).Path, $content, $utf8NoBom)
 Write-Host "Bumped tauri.conf.json to $newVersion" -ForegroundColor Green
 
 # --- Install dependencies ---

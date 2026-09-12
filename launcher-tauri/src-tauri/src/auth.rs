@@ -2,38 +2,30 @@ use crate::error::LauncherError;
 use tiny_http::Server;
 
 const CLIENT_ID: &str = "1533706803748147240";
-const REDIRECT_PATH: &str = "/callback";
+const CLIENT_SECRET: &str = "Um7wPIDVkCS9ro-0ZltYrs1NUI2q2LLh";
+const REDIRECT_URI: &str = "http://127.0.0.1:5000/callback/";
+const PORT: u16 = 5000;
 
-pub struct DiscordAuth {
-    pub port: u16,
-}
+pub struct DiscordAuth;
 
 impl DiscordAuth {
     pub fn new() -> Result<Self, LauncherError> {
-        for port in 5000..=5005 {
-            let addr = format!("127.0.0.1:{}", port);
-            if let Ok(_server) = Server::http(&addr) {
-                return Ok(Self { port });
-            }
-        }
-        let server = Server::http("127.0.0.1:0")
-            .map_err(|e| LauncherError::Auth(format!("Cannot bind HTTP server: {}", e)))?;
-        Ok(Self {
-            port: server.server_addr().to_ip().unwrap().port(),
-        })
+        let addr = format!("127.0.0.1:{}", PORT);
+        let _server = Server::http(&addr)
+            .map_err(|e| LauncherError::Auth(format!("Port {} is already in use: {}", PORT, e)))?;
+        Ok(Self)
     }
 
-    pub fn authorize_url(&self) -> String {
-        let redirect_uri = format!("http://127.0.0.1:{}{}", self.port, REDIRECT_PATH);
+    pub fn authorize_url() -> String {
         format!(
             "https://discord.com/api/oauth2/authorize?client_id={}&redirect_uri={}&response_type=code&scope=identify",
             CLIENT_ID,
-            urlencoding::encode(&redirect_uri),
+            urlencoding::encode(REDIRECT_URI),
         )
     }
 
-    pub async fn wait_for_callback(&self) -> Result<String, LauncherError> {
-        let addr = format!("127.0.0.1:{}", self.port);
+    pub fn wait_for_callback() -> Result<String, LauncherError> {
+        let addr = format!("127.0.0.1:{}", PORT);
         let server =
             Server::http(&addr).map_err(|e| LauncherError::Auth(e.to_string()))?;
 
@@ -53,7 +45,7 @@ impl DiscordAuth {
             match server.recv_timeout(std::time::Duration::from_secs(60)) {
                 Ok(Some(request)) => {
                     let url = request.url();
-                    if url.starts_with(REDIRECT_PATH) {
+                    if url.starts_with("/callback") {
                         let code = url
                             .split("code=")
                             .nth(1)
@@ -86,20 +78,16 @@ impl DiscordAuth {
         }
     }
 
-    pub async fn exchange_token(
-        code: &str,
-        redirect_port: u16,
-    ) -> Result<TokenResponse, LauncherError> {
-        let redirect_uri = format!("http://127.0.0.1:{}{}", redirect_port, REDIRECT_PATH);
+    pub async fn exchange_token(code: &str) -> Result<TokenResponse, LauncherError> {
         let client = reqwest::Client::new();
         let resp = client
             .post("https://discord.com/api/oauth2/token")
             .form(&[
                 ("client_id", CLIENT_ID),
-                ("client_secret", ""),
+                ("client_secret", CLIENT_SECRET),
                 ("grant_type", "authorization_code"),
                 ("code", code),
-                ("redirect_uri", &redirect_uri),
+                ("redirect_uri", REDIRECT_URI),
             ])
             .send()
             .await
