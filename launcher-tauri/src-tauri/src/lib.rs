@@ -1565,7 +1565,6 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_deep_link::init())
         .manage(state)
         .manage(debouncer)
         .invoke_handler(tauri::generate_handler![
@@ -1604,6 +1603,33 @@ pub fn run() {
         ])
         .setup(move |app| {
             let app_handle = app.handle().clone();
+
+            // Register amonglauncher:// protocol
+            #[cfg(target_os = "windows")]
+            {
+                use std::process::Command;
+                let exe_path = std::env::current_exe().unwrap_or_default();
+                let _ = Command::new("reg")
+                    .args([
+                        "add",
+                        "HKCU\\Software\\Classes\\amonglauncher",
+                        "/ve",
+                        "/d",
+                        "URL:Among Launcher Protocol",
+                        "/f",
+                    ])
+                    .output();
+                let _ = Command::new("reg")
+                    .args([
+                        "add",
+                        "HKCU\\Software\\Classes\\amonglauncher\\shell\\open\\command",
+                        "/ve",
+                        "/d",
+                        &format!("\"{}\" \"%1\"", exe_path.display()),
+                        "/f",
+                    ])
+                    .output();
+            }
 
             // Restore window state
             {
@@ -1662,26 +1688,25 @@ pub fn run() {
             });
 
             // Handle deep links (amonglauncher://callback?code=...)
-            let app_handle_clone = app.handle().clone();
-            app.listen_global("deep-link://new-url", move |event| {
-                if let Some(urls) = event.payload().as_array() {
-                    for url in urls {
-                        if let Some(url_str) = url.as_str() {
-                            if url_str.starts_with("amonglauncher://callback") {
-                                if let Some(code) = url_str.split("code=").nth(1) {
-                                    let code = code.split('&').next().unwrap_or(code).to_string();
-                                    let app = app_handle_clone.clone();
-                                    tokio::spawn(async move {
-                                        let state = app.state::<AppState>();
-                                        let mut oauth = state.oauth_code.lock().await;
-                                        *oauth = Some(code);
-                                    });
-                                }
+            {
+                let app_handle_clone = app.handle().clone();
+                app.on_open_url(move |event| {
+                    for url in event.urls() {
+                        let url_str = url.to_string();
+                        if url_str.starts_with("amonglauncher://callback") {
+                            if let Some(code) = url_str.split("code=").nth(1) {
+                                let code = code.split('&').next().unwrap_or(code).to_string();
+                                let app = app_handle_clone.clone();
+                                tokio::spawn(async move {
+                                    let state = app.state::<AppState>();
+                                    let mut oauth = state.oauth_code.lock().await;
+                                    *oauth = Some(code);
+                                });
                             }
                         }
                     }
-                }
-            });
+                });
+            }
 
             Ok(())
         })

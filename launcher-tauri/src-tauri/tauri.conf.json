@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/nicholasgasior/tauri-config-schema/tauri-v2/schema.json",
   "productName": "Among Launcher",
-  "version": "1.1.6",
+  "version": "1.1.7",
   "identifier": "com.amonglauncher.app",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -35,11 +35,5 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
-  },
-  "plugins": {
-    "deep-link": {
-      "mobile": [],
-      "desktop": ["amonglauncher"]
-    }
   }
 }
