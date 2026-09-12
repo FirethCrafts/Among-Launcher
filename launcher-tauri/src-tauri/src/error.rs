@@ -1,6 +1,7 @@
 use serde::Serialize;
 
 #[derive(Debug, Serialize)]
+#[allow(dead_code)]
 pub enum LauncherError {
     #[serde(rename = "config")]
     Config(String),

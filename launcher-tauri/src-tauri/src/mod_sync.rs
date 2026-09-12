@@ -4,6 +4,7 @@ use sha2::{Digest, Sha256};
 use std::path::Path;
 use tauri::{AppHandle, Emitter};
 
+#[allow(dead_code)]
 pub async fn compute_hash(path: &Path) -> Result<String, LauncherError> {
     let bytes = std::fs::read(path).map_err(|e| LauncherError::Filesystem(e.to_string()))?;
     let mut hasher = Sha256::new();

@@ -3,6 +3,7 @@ use tauri::{AppHandle, Emitter};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 use tokio_util::sync::CancellationToken;
 
+#[allow(dead_code)]
 pub async fn connect_ws(app: AppHandle, code: String, token: String, cancel: CancellationToken) {
     let url = format!("wss://among-us.mel-homes.com/ws?code={}", code);
 

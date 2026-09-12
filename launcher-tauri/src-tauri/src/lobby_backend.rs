@@ -7,6 +7,7 @@ pub struct LobbyBackendClient {
     token: String,
 }
 
+#[allow(dead_code)]
 impl LobbyBackendClient {
     pub fn new(token: String) -> Self {
         Self { client: reqwest::Client::new(), token }
