@@ -2,6 +2,7 @@ import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { formatError } from "@/components/Toast";
 import { Check, Gamepad2, Loader2 } from "lucide-react";
 
 interface UserInfo {
@@ -26,7 +27,7 @@ export default function WelcomeView({ onLogin }: WelcomeViewProps) {
       const user = await invoke<UserInfo>("login_discord");
       onLogin(user);
     } catch (e) {
-      setError(String(e));
+      setError(formatError(e));
     } finally {
       setLoading(false);
     }
