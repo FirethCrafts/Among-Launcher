@@ -1619,8 +1619,7 @@ pub fn run() {
                 }
             }
 
-            let rt = tokio::runtime::Handle::current();
-            rt.spawn(async move {
+            tauri::async_runtime::spawn(async move {
                 ipc::start_pipe_server(app_handle, pipe_handle).await;
             });
             Ok(())

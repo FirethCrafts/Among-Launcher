@@ -133,7 +133,7 @@ pub struct ConfigDebouncer {
 impl ConfigDebouncer {
     pub fn new(config: SharedConfig) -> Self {
         let (tx, mut rx) = mpsc::channel::<()>(1);
-        tokio::spawn(async move {
+        tauri::async_runtime::spawn(async move {
             let mut pending = false;
             loop {
                 tokio::select! {
