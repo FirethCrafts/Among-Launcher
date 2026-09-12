@@ -117,7 +117,7 @@ jobs:
         run: npm ci
       - name: Build Tauri app
         working-directory: launcher-tauri
-        run: npx tauri build --target x86_64-pc-windows-msvc
+        run: npx tauri build --target x86_64-pc-windows-msvc --bundles nsis
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
@@ -127,7 +127,6 @@ jobs:
           prerelease: false
           files: |
             launcher-tauri/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
-            launcher-tauri/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi
       - name: Commit version bump
         run: |
           git config user.name "github-actions[bot]"
