@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { showToast } from "@/components/Toast";
+import { showToast, formatError } from "@/components/Toast";
 import { Users, Gamepad2, Hash } from "lucide-react";
 
 interface Player {
@@ -120,7 +120,7 @@ export default function InGameView() {
         payload: { code: lobbyCode.trim().toUpperCase() },
       });
     } catch (e) {
-      showToast(`Failed to join lobby: ${String(e)}`, "error");
+      showToast(`Failed to join lobby: ${formatError(e)}`, "error");
     } finally {
       setJoining(false);
     }

@@ -4,7 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { showToast } from "@/components/Toast";
+import { showToast, formatError } from "@/components/Toast";
 import { Users, Hash, Copy, Check, Trash2, UserMinus, Globe, Gamepad2 } from "lucide-react";
 
 interface Player {
@@ -79,7 +79,7 @@ export default function HostControlPanelView() {
       await invoke("post_lobby");
       setPosted(true);
     } catch (e) {
-      showToast(`Failed to post lobby: ${String(e)}`, "error");
+      showToast(`Failed to post lobby: ${formatError(e)}`, "error");
     } finally {
       setLoading(false);
     }
@@ -93,7 +93,7 @@ export default function HostControlPanelView() {
       setPlayers([]);
       setPosted(false);
     } catch (e) {
-      showToast(`Failed to disband lobby: ${String(e)}`, "error");
+      showToast(`Failed to disband lobby: ${formatError(e)}`, "error");
     } finally {
       setLoading(false);
     }
@@ -104,7 +104,7 @@ export default function HostControlPanelView() {
       await invoke("kick_player", { playerName });
       setPlayers((prev) => prev.filter((p) => p.name !== playerName));
     } catch (e) {
-      showToast(`Failed to kick player: ${String(e)}`, "error");
+      showToast(`Failed to kick player: ${formatError(e)}`, "error");
     }
   }
 

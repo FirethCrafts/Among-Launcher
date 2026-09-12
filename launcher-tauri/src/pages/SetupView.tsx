@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { showToast } from "@/components/Toast";
+import { showToast, formatError } from "@/components/Toast";
 import { Gamepad2, FolderOpen, Play, Check, Loader2 } from "lucide-react";
 
 interface GameSearchResult {
@@ -181,7 +181,7 @@ export default function SetupView({ onComplete }: SetupViewProps) {
       await invoke("install_game", { gamePath, storefront });
       await confirmInstalled();
     } catch (e) {
-      showToast(String(e), "error");
+      showToast(formatError(e), "error");
       setInstalling(false);
     }
   }
@@ -217,6 +217,7 @@ export default function SetupView({ onComplete }: SetupViewProps) {
                   <Input
                     value={gamePath || ""}
                     readOnly
+                    title={gamePath || ""}
                     placeholder="Path to your Among Us installation"
                     className="flex-1"
                   />

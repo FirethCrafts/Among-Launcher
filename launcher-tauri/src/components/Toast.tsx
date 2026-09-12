@@ -1,5 +1,25 @@
 import * as React from "react"
 
+export function formatError(e: unknown): string {
+  if (typeof e === "string") return e;
+  if (e instanceof Error) return e.message;
+  if (e !== null && typeof e === "object") {
+    const keys = Object.keys(e as Record<string, unknown>);
+    if (keys.length === 1) {
+      const key = keys[0];
+      const value = (e as Record<string, unknown>)[key];
+      if (typeof value === "string") return `${key}: ${value}`;
+    }
+    try {
+      const json = JSON.stringify(e);
+      return json.length > 300 ? json.slice(0, 300) : json;
+    } catch {
+      return String(e);
+    }
+  }
+  return String(e);
+}
+
 export function showToast(message: string, tone: 'neutral' | 'success' | 'error' = 'neutral') {
   window.dispatchEvent(new CustomEvent('app-toast', { detail: { message, tone } }));
 }
@@ -9,7 +29,8 @@ export function ToastHost() {
     const handler = (e: Event) => {
       const { message, tone } = (e as CustomEvent).detail;
       const id = Date.now() + Math.random();
-      setItems((prev) => [...prev, { id, message, tone }]);
+      const safeMessage = typeof message === "string" ? message : formatError(message);
+      setItems((prev) => [...prev, { id, message: safeMessage, tone }]);
       setTimeout(() => setItems((prev) => prev.filter((t) => t.id !== id)), 3000);
     };
     window.addEventListener('app-toast', handler);
