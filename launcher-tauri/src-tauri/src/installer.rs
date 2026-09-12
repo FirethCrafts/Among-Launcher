@@ -83,10 +83,7 @@ pub async fn download_bepinex(
         "steam" => "BepInEx.zip",
         _ => "bepinex-ms-epic.zip",
     };
-    let url = format!(
-        "https://github.com/FirethCrafts/Among-Launcher/releases/latest/download/{}",
-        zip_name
-    );
+    let url = crate::github::latest_mod_asset_url(zip_name).await?;
     let zip_path = std::path::Path::new(dest).join(zip_name);
 
     let client = reqwest::Client::new();
@@ -94,6 +91,8 @@ pub async fn download_bepinex(
         .get(&url)
         .send()
         .await
+        .map_err(|e| LauncherError::Network(e.to_string()))?
+        .error_for_status()
         .map_err(|e| LauncherError::Network(e.to_string()))?;
     let total = resp.content_length().unwrap_or(0);
     let mut bytes = Vec::new();
@@ -136,13 +135,14 @@ pub async fn download_bepinex(
 }
 
 pub async fn download_among_api(dest: &str, app: &AppHandle) -> Result<(), LauncherError> {
-    let url =
-        "https://github.com/FirethCrafts/Among-Launcher/releases/latest/download/AmongApi.dll";
+    let url = crate::github::latest_mod_asset_url("AmongApi.dll").await?;
     let client = reqwest::Client::new();
     let resp = client
-        .get(url)
+        .get(&url)
         .send()
         .await
+        .map_err(|e| LauncherError::Network(e.to_string()))?
+        .error_for_status()
         .map_err(|e| LauncherError::Network(e.to_string()))?;
     let bytes = resp
         .bytes()

@@ -10,6 +10,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 mod auth;
 mod config;
 mod error;
+mod github;
 mod installer;
 mod ipc_handler;
 mod lobby;
@@ -1332,10 +1333,21 @@ async fn install_preset_mod(
     .map_err(|e| LauncherError::InstallFailed(format!("Task join error: {}", e)))??;
 
     let client = reqwest::Client::new();
+    // The AmongApi preset entry historically pointed at /releases/latest, which is
+    // now a launcher release without mod assets. Resolve it lazily from the
+    // newest `mod/` release instead.
+    let filename_hint = repo_url.split('/').last().unwrap_or("mod.dll");
+    let resolved_url = if filename_hint.eq_ignore_ascii_case("AmongApi.dll") {
+        crate::github::latest_mod_asset_url("AmongApi.dll").await?
+    } else {
+        repo_url.clone()
+    };
     let resp = client
-        .get(&repo_url)
+        .get(&resolved_url)
         .send()
         .await
+        .map_err(|e| LauncherError::Network(e.to_string()))?
+        .error_for_status()
         .map_err(|e| LauncherError::Network(e.to_string()))?;
 
     let mut bytes = Vec::new();
@@ -1346,7 +1358,7 @@ async fn install_preset_mod(
         bytes.extend_from_slice(&chunk);
     }
 
-    let filename = repo_url
+    let filename = resolved_url
         .split('/')
         .last()
         .unwrap_or("mod.dll")
@@ -1378,7 +1390,7 @@ async fn install_preset_mod(
                     name,
                     version: None,
                     file_hash: None,
-                    download_url: Some(repo_url),
+                    download_url: Some(resolved_url),
                 });
             }
         }

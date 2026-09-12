@@ -28,23 +28,13 @@ pub async fn check_for_among_api_update(
         return Ok(None);
     };
 
-    let client = reqwest::Client::builder()
-        .user_agent("AmongLauncher")
-        .build()
-        .map_err(|e| LauncherError::Network(e.to_string()))?;
-
-    let release: serde_json::Value = client
-        .get("https://api.github.com/repos/FirethCrafts/Among-Launcher/releases/latest")
-        .header("Accept", "application/vnd.github.v3+json")
-        .send()
-        .await
-        .map_err(|e| LauncherError::Network(e.to_string()))?
-        .json()
-        .await
-        .map_err(|e| LauncherError::Network(e.to_string()))?;
+    let release: serde_json::Value = crate::github::latest_mod_release().await?;
 
     let tag = release["tag_name"].as_str().unwrap_or("v0.0.0");
-    let latest_version = tag.trim_start_matches('v');
+    let latest_version = tag
+        .strip_prefix("mod/")
+        .unwrap_or(tag)
+        .trim_start_matches('v');
     let changelog = release["body"].as_str().unwrap_or("");
 
     if installed_version != latest_version {
@@ -54,7 +44,11 @@ pub async fn check_for_among_api_update(
             changelog: changelog.to_string(),
             download_url: release["assets"]
                 .as_array()
-                .and_then(|a| a.first())
+                .and_then(|a| {
+                    a.iter()
+                        .find(|x| x["name"] == "AmongApi.dll")
+                        .or_else(|| a.first())
+                })
                 .and_then(|a| a["browser_download_url"].as_str())
                 .unwrap_or("")
                 .to_string(),
