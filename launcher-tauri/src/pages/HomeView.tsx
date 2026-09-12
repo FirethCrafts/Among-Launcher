@@ -9,7 +9,8 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { showToast } from "@/components/Toast";
-import { Play, Square, Gamepad2, FolderOpen, Package, Folder, Copy, Trash2 } from "lucide-react";
+import { LibraryPickerModal } from "@/components/LibraryPickerModal";
+import { Play, Square, Gamepad2, FolderOpen, Package, Folder, Copy, Trash2, Archive, Library } from "lucide-react";
 
 interface GameSearchResult {
   path?: string | null;
@@ -34,6 +35,7 @@ interface ModEntry {
   filename: string;
   size: number;
   path: string;
+  version?: string | null;
 }
 
 interface InstallProgress {
@@ -63,6 +65,7 @@ export default function HomeView() {
   const [config, setConfig] = useState<LauncherConfig | null>(null);
   const [installProgress, setInstallProgress] = useState<InstallProgress | null>(null);
   const [loading, setLoading] = useState(true);
+  const [libraryPickerOpen, setLibraryPickerOpen] = useState(false);
 
   useEffect(() => {
     load().finally(() => setLoading(false));
@@ -225,6 +228,15 @@ export default function HomeView() {
     }
   }
 
+  async function copyModToLibrary(mod: ModEntry) {
+    try {
+      await invoke("add_to_library", { sourcePath: mod.path });
+      showToast(`Saved ${mod.filename} to library`, "success");
+    } catch {
+      showToast("Failed to save mod to library", "error");
+    }
+  }
+
   const isReady = !!gamePath && bepinexInstalled && amongApiInstalled;
 
   return (
@@ -375,19 +387,33 @@ export default function HomeView() {
             {mods.length === 0 ? (
               <p className="text-sm text-muted-foreground">No mods installed.</p>
             ) : (
-              <ul className="space-y-2">
+              <ul className="space-y-1">
                 {mods.map((mod) => (
                   <li
                     key={mod.filename}
-                    className="flex items-center justify-between rounded-lg border px-3 py-2"
+                    className="flex items-center justify-between rounded-xl px-3 py-2 transition-colors hover:bg-white/5"
                   >
                     <div className="min-w-0">
                       <span className="text-sm font-medium">{mod.name}</span>
+                      {mod.version && (
+                        <span className="ml-2 text-xs text-muted-foreground">
+                          v{mod.version}
+                        </span>
+                      )}
                       <span className="ml-2 text-xs text-muted-foreground">
                         {formatBytes(mod.size)}
                       </span>
                     </div>
                     <div className="flex items-center gap-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => copyModToLibrary(mod)}
+                        aria-label={`Save ${mod.name} to library`}
+                        title="Save to library"
+                      >
+                        <Archive className="h-3 w-3" />
+                      </Button>
                       <Button
                         variant="ghost"
                         size="sm"
@@ -408,10 +434,22 @@ export default function HomeView() {
                 ))}
               </ul>
             )}
-            <Button onClick={handleImportMod} variant="outline" className="w-full mt-4">
-              <FolderOpen className="h-4 w-4 mr-2" />
-              Import Mod
-            </Button>
+            <div className="flex gap-2 mt-4">
+              <Button onClick={handleImportMod} variant="outline" className="flex-1">
+                <FolderOpen className="h-4 w-4 mr-2" />
+                Import Mod
+              </Button>
+              <Button onClick={() => setLibraryPickerOpen(true)} variant="outline" className="flex-1">
+                <Library className="h-4 w-4 mr-2" />
+                From Library
+              </Button>
+            </div>
+            <LibraryPickerModal
+              isOpen={libraryPickerOpen}
+              onClose={() => setLibraryPickerOpen(false)}
+              gamePath={gamePath}
+              onInstalled={loadMods}
+            />
           </CardContent>
         </Card>
 
