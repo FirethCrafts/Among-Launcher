@@ -13,3 +13,6 @@ launcher-tauri/src-tauri/WixToolset/
 launcher-tauri/src-tauri/Binaries/
 launcher-tauri/src-tauri/*.msi
 launcher-tauri/src-tauri/*.exe
+AmongLauncher-*.zip
+Releases/
+publish/

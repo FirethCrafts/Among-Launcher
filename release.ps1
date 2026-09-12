@@ -45,10 +45,10 @@ if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
     exit 1
 }
 
-# --- Check for uncommitted changes ---
-$gitStatus = git status --porcelain
+# --- Check for uncommitted changes (only tracked files) ---
+$gitStatus = git status --porcelain | Where-Object { $_ -match '^(M|A|D|R)' }
 if ($gitStatus) {
-    Write-Host "Error: Uncommitted changes. Commit or stash first." -ForegroundColor Red
+    Write-Host "Error: Uncommitted changes in tracked files. Commit or stash first." -ForegroundColor Red
     exit 1
 }
 
