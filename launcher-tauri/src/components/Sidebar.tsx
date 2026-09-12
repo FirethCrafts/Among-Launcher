@@ -6,6 +6,11 @@ const navItems = [
   { path: '/settings', label: 'Settings', icon: Settings },
 ];
 
+const gameItems = [
+  { path: '/ingame', label: 'In Game', icon: Gamepad2 },
+  { path: '/host', label: 'Host Panel', icon: Users },
+];
+
 interface SidebarProps {
   gameConnected: boolean;
   username: string;
@@ -17,33 +22,36 @@ export function Sidebar({ gameConnected, username, avatarUrl }: SidebarProps) {
   const location = useLocation();
 
   return (
-    <nav className="w-16 flex flex-col items-center py-4 gap-2 bg-card border-r border-border">
+    <nav className="w-16 flex flex-col items-center py-4 gap-2 bg-card border-r border-border" aria-label="Main navigation">
       {navItems.map(item => (
         <button key={item.path}
           onClick={() => navigate(item.path)}
+          title={item.label}
+          aria-label={item.label}
           className={`w-12 h-12 flex items-center justify-center rounded-lg transition-colors
             ${location.pathname === item.path
-              ? 'bg-primary/10 text-primary'
+              ? 'bg-primary/15 text-primary'
               : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}>
           <item.icon className="w-5 h-5" />
         </button>
       ))}
       {gameConnected && (
         <>
-          <button onClick={() => navigate('/ingame')}
-            className={`w-12 h-12 flex items-center justify-center rounded-lg transition-colors
-              ${location.pathname === '/ingame'
-                ? 'bg-primary/10 text-primary'
-                : 'text-emerald-400 hover:bg-muted hover:text-emerald-300'}`}>
-            <Gamepad2 className="w-5 h-5" />
-          </button>
-          <button onClick={() => navigate('/host')}
-            className={`w-12 h-12 flex items-center justify-center rounded-lg transition-colors
-              ${location.pathname === '/host'
-                ? 'bg-primary/10 text-primary'
-                : 'text-violet-400 hover:bg-muted hover:text-violet-300'}`}>
-            <Users className="w-5 h-5" />
-          </button>
+          <span className="mt-2 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+            Game
+          </span>
+          {gameItems.map(item => (
+            <button key={item.path}
+              onClick={() => navigate(item.path)}
+              title={item.label}
+              aria-label={item.label}
+              className={`w-12 h-12 flex items-center justify-center rounded-lg transition-colors
+                ${location.pathname === item.path
+                  ? 'bg-primary/15 text-primary'
+                  : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}>
+              <item.icon className="w-5 h-5" />
+            </button>
+          ))}
         </>
       )}
       <div className="mt-auto flex flex-col items-center gap-2">

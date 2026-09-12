@@ -4,6 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { showToast } from "@/components/Toast";
 import { Users, Hash, Copy, Check, Trash2, UserMinus, Globe, Gamepad2 } from "lucide-react";
 
 interface Player {
@@ -78,7 +79,7 @@ export default function HostControlPanelView() {
       await invoke("post_lobby");
       setPosted(true);
     } catch (e) {
-      console.error("Failed to post lobby:", e);
+      showToast(`Failed to post lobby: ${String(e)}`, "error");
     } finally {
       setLoading(false);
     }
@@ -92,7 +93,7 @@ export default function HostControlPanelView() {
       setPlayers([]);
       setPosted(false);
     } catch (e) {
-      console.error("Failed to disband lobby:", e);
+      showToast(`Failed to disband lobby: ${String(e)}`, "error");
     } finally {
       setLoading(false);
     }
@@ -103,15 +104,15 @@ export default function HostControlPanelView() {
       await invoke("kick_player", { playerName });
       setPlayers((prev) => prev.filter((p) => p.name !== playerName));
     } catch (e) {
-      console.error("Failed to kick player:", e);
+      showToast(`Failed to kick player: ${String(e)}`, "error");
     }
   }
 
   if (!lobbyInfo) {
     return (
-      <div className="min-h-full bg-grid p-6 space-y-6">
-        <h1 className="font-display text-3xl font-bold text-primary">Host Control Panel</h1>
-        <Card className="glow-primary">
+      <div className="min-h-full p-6 space-y-6">
+        <h1 className="text-3xl font-bold">Host Control Panel</h1>
+        <Card>
           <CardContent className="pt-6">
             <p className="text-sm text-muted-foreground text-center">
               No active lobby. Create a lobby in-game to manage it here.
@@ -123,16 +124,16 @@ export default function HostControlPanelView() {
   }
 
   return (
-    <div className="min-h-full bg-grid p-6 space-y-6">
+    <div className="min-h-full p-6 space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="font-display text-3xl font-bold text-primary">Host Control Panel</h1>
-        <Badge variant={posted ? "neutral" : "muted"}>
+        <h1 className="text-3xl font-bold">Host Control Panel</h1>
+        <Badge variant={posted ? "neutral" : "muted"} showDot dotColor={posted ? "emerald" : "red"}>
           {posted ? "Posted to Server" : "Local Only"}
         </Badge>
       </div>
 
       <div className="grid gap-6 md:grid-cols-2">
-        <Card className="glow-primary">
+        <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Hash className="h-5 w-5" />
@@ -206,7 +207,7 @@ export default function HostControlPanelView() {
           </CardContent>
         </Card>
 
-        <Card className="glow-emerald">
+        <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Users className="h-5 w-5" />
@@ -224,6 +225,7 @@ export default function HostControlPanelView() {
                     className="flex items-center justify-between rounded-lg bg-secondary/50 px-3 py-2"
                   >
                     <div className="flex items-center gap-2">
+                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
                       <span className="text-sm font-medium">{player.name}</span>
                       {player.is_host && (
                         <Badge variant="neutral" className="text-xs">
