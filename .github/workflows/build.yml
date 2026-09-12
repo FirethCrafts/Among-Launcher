@@ -51,6 +51,7 @@ jobs:
           name: "Mod v${{ env.VERSION }}"
           draft: false
           prerelease: false
+          make_latest: false
           files: |
             Among API/bin/Release/net6.0/AmongApi.dll
             BepInEx.zip
