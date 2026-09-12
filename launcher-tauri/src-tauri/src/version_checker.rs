@@ -66,9 +66,11 @@ fn extract_file_version(dll_path: &std::path::Path) -> Option<String> {
     let mut offset = 0;
     while offset + 52 <= data.len() {
         if data[offset..offset + 4] == sig_bytes {
-            let major = u32::from_le_bytes(data[offset + 8..offset + 12].try_into().ok()?);
-            let minor = u32::from_le_bytes(data[offset + 12..offset + 16].try_into().ok()?);
-            let build = u32::from_le_bytes(data[offset + 16..offset + 20].try_into().ok()?);
+            let ms = u32::from_le_bytes(data[offset + 8..offset + 12].try_into().ok()?);
+            let ls = u32::from_le_bytes(data[offset + 16..offset + 20].try_into().ok()?);
+            let major = ms >> 16;
+            let minor = ms & 0xFFFF;
+            let build = ls >> 16;
             return Some(format!("{}.{}.{}", major, minor, build));
         }
         offset += 4;

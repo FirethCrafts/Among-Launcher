@@ -1,7 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { Modal } from "@/components/Modal";
 import { Button } from "@/components/ui/button";
 import { Download } from "lucide-react";
+import { formatError } from "@/components/Toast";
 
 interface UpdateInfo {
   current: string;
@@ -16,15 +19,64 @@ interface UpdateModalProps {
   updateInfo: UpdateInfo;
 }
 
+interface UpdateProgress {
+  stage: "downloading" | "installing" | "complete";
+  progress: number;
+  total: number;
+}
+
+type Status = "idle" | "updating" | "done" | "error";
+
 export function UpdateModal({ isOpen, onClose, updateInfo }: UpdateModalProps) {
-  const [updating, setUpdating] = useState(false);
+  const [status, setStatus] = useState<Status>("idle");
+  const [progressText, setProgressText] = useState("");
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!isOpen) {
+      setStatus("idle");
+      setProgressText("");
+      setError("");
+      return;
+    }
+    const unlisten = listen<UpdateProgress>("update-progress", (event) => {
+      const { stage, progress, total } = event.payload;
+      if (stage === "downloading") {
+        if (total > 0) {
+          const pct = Math.round((progress / total) * 100);
+          setProgressText(`Downloading... ${pct}%`);
+        } else {
+          setProgressText("Downloading...");
+        }
+      } else if (stage === "installing") {
+        setProgressText("Installing...");
+      } else if (stage === "complete") {
+        setProgressText("Complete");
+      }
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, [isOpen]);
 
   async function handleUpdate() {
-    if (updateInfo.download_url) {
-      window.open(updateInfo.download_url, "_blank");
+    if (!updateInfo.download_url || status === "updating") return;
+    setStatus("updating");
+    setError("");
+    setProgressText("Downloading...");
+    try {
+      await invoke("update_among_api", {
+        downloadUrl: updateInfo.download_url,
+      });
+      setStatus("done");
+      setProgressText("");
+    } catch (e) {
+      setStatus("error");
+      setError(formatError(e));
     }
-    setUpdating(true);
   }
+
+  const updating = status === "updating";
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Update Available">
@@ -65,24 +117,46 @@ export function UpdateModal({ isOpen, onClose, updateInfo }: UpdateModalProps) {
           </div>
         )}
 
+        {status === "updating" && (
+          <p className="text-xs text-muted-foreground">{progressText}</p>
+        )}
+
+        {status === "done" && (
+          <p className="text-xs text-muted-foreground">
+            Updated — restart your game if it&apos;s running
+          </p>
+        )}
+
+        {status === "error" && error && (
+          <p className="text-xs text-destructive">{error}</p>
+        )}
+
         <div className="flex gap-3 pt-2">
-          <Button onClick={onClose} variant="outline" className="flex-1">
-            Later
-          </Button>
-          <Button
-            onClick={handleUpdate}
-            disabled={updating}
-            className="flex-1"
-          >
-            {updating ? (
-              "Opening..."
-            ) : (
-              <>
-                <Download className="h-4 w-4" />
-                Update
-              </>
-            )}
-          </Button>
+          {status === "done" ? (
+            <Button onClick={onClose} className="flex-1">
+              Close
+            </Button>
+          ) : (
+            <>
+              <Button onClick={onClose} variant="outline" className="flex-1">
+                Later
+              </Button>
+              <Button
+                onClick={handleUpdate}
+                disabled={updating || !updateInfo.download_url}
+                className="flex-1"
+              >
+                {updating ? (
+                  progressText || "Downloading..."
+                ) : (
+                  <>
+                    <Download className="h-4 w-4" />
+                    Update
+                  </>
+                )}
+              </Button>
+            </>
+          )}
         </div>
       </div>
     </Modal>

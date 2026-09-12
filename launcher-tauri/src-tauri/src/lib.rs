@@ -1400,6 +1400,80 @@ async fn install_preset_mod(
 }
 
 #[tauri::command]
+async fn update_among_api(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    download_url: String,
+) -> Result<String, LauncherError> {
+    let dest_dir = {
+        let config = state.config.read().await;
+        config.effective_modded_path()
+    };
+    let plugins_dir = Path::new(&dest_dir).join("BepInEx").join("Plugins");
+    let dest = plugins_dir.join("AmongApi.dll");
+
+    let _ = app.emit(
+        "update-progress",
+        serde_json::json!({ "stage": "downloading", "progress": 0, "total": 0 }),
+    );
+
+    let client = reqwest::Client::builder()
+        .user_agent("among-launcher")
+        .build()
+        .map_err(|e| LauncherError::Network(e.to_string()))?;
+    let resp = client
+        .get(&download_url)
+        .send()
+        .await
+        .map_err(|e| LauncherError::Network(e.to_string()))?
+        .error_for_status()
+        .map_err(|e| LauncherError::Network(e.to_string()))?;
+
+    let total = resp.content_length().unwrap_or(0);
+    let mut downloaded: u64 = 0;
+    let mut bytes = Vec::new();
+    let mut stream = resp.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| LauncherError::Network(e.to_string()))?;
+        downloaded += chunk.len() as u64;
+        bytes.extend_from_slice(&chunk);
+        let _ = app.emit(
+            "update-progress",
+            serde_json::json!({ "stage": "downloading", "progress": downloaded, "total": total }),
+        );
+    }
+
+    let _ = app.emit(
+        "update-progress",
+        serde_json::json!({ "stage": "installing", "progress": downloaded, "total": total }),
+    );
+
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| LauncherError::Filesystem(e.to_string()))?;
+    }
+
+    let tmp_path = dest.with_extension("tmp");
+    if let Err(e) = std::fs::write(&tmp_path, &bytes) {
+        return Err(LauncherError::Filesystem(format!(
+            "Close the game and try again: {}",
+            e
+        )));
+    }
+    if let Err(e) = std::fs::rename(&tmp_path, &dest) {
+        return Err(LauncherError::Filesystem(format!(
+            "Close the game and try again: {}",
+            e
+        )));
+    }
+
+    let _ = app.emit(
+        "update-progress",
+        serde_json::json!({ "stage": "complete", "progress": downloaded, "total": total }),
+    );
+    Ok("Updated".to_string())
+}
+
+#[tauri::command]
 async fn get_storefront(state: State<'_, AppState>) -> Result<Option<String>, LauncherError> {
     Ok(state.config.read().await.storefront.clone())
 }
@@ -1632,6 +1706,7 @@ pub fn run() {
             install_from_library,
             get_preset_mods,
             install_preset_mod,
+            update_among_api,
             version_checker::check_for_among_api_update,
         ])
         .setup(move |app| {
