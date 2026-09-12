@@ -15,9 +15,22 @@ param(
 $ErrorActionPreference = "Stop"
 $tauriConf = "launcher-tauri\src-tauri\tauri.conf.json"
 
-# --- Read current version ---
-$config = Get-Content $tauriConf -Raw | ConvertFrom-Json
-$currentVersion = $config.version
+# --- Check gh CLI ---
+if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
+    Write-Host "Error: GitHub CLI (gh) not found. Install: https://cli.github.com/" -ForegroundColor Red
+    exit 1
+}
+
+# --- Get latest version from GitHub releases (not from local file) ---
+Write-Host "Fetching latest release version from GitHub..." -ForegroundColor Yellow
+$latestTag = gh release list --repo "FirethCrafts/Among-Launcher" --limit 1 --json tagName --jq '.[0].tagName' 2>$null
+if ($latestTag -and $latestTag -match 'launcher/v(.+)') {
+    $currentVersion = $matches[1]
+    Write-Host "Latest release: $latestTag ($currentVersion)" -ForegroundColor Cyan
+} else {
+    $currentVersion = "1.0.0"
+    Write-Host "No launcher releases found, starting at $currentVersion" -ForegroundColor Yellow
+}
 $parts = $currentVersion.Split('.')
 
 # --- Calculate new version ---
@@ -39,12 +52,6 @@ if ($Version) {
 
 Write-Host "Version: $currentVersion -> $newVersion" -ForegroundColor Cyan
 
-# --- Check gh CLI ---
-if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
-    Write-Host "Error: GitHub CLI (gh) not found. Install: https://cli.github.com/" -ForegroundColor Red
-    exit 1
-}
-
 # --- Check for uncommitted changes (only tracked files) ---
 $gitStatus = git status --porcelain | Where-Object { $_ -match '^(M|A|D|R)' }
 if ($gitStatus) {
@@ -52,12 +59,27 @@ if ($gitStatus) {
     exit 1
 }
 
-# --- Bump version in tauri.conf.json ---
+# --- Bump version in tauri.conf.json (before build!) ---
 $content = Get-Content $tauriConf -Raw
 $content = $content -replace '"version":\s*"[^"]*"', "`"version`": `"$newVersion`""
 $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 [System.IO.File]::WriteAllText((Resolve-Path $tauriConf).Path, $content, $utf8NoBom)
 Write-Host "Bumped tauri.conf.json to $newVersion" -ForegroundColor Green
+
+# --- Verify the file was written correctly ---
+$verifyConfig = Get-Content $tauriConf -Raw | ConvertFrom-Json
+if ($verifyConfig.version -ne $newVersion) {
+    Write-Host "Error: tauri.conf.json version mismatch! Expected $newVersion, got $($verifyConfig.version)" -ForegroundColor Red
+    exit 1
+}
+
+# --- Clean old build artifacts ---
+Write-Host "Cleaning old build artifacts..." -ForegroundColor Yellow
+Push-Location "launcher-tauri"
+if (Test-Path "src-tauri\target\x86_64-pc-windows-msvc\release\bundle\nsis") {
+    Remove-Item -Recurse -Force "src-tauri\target\x86_64-pc-windows-msvc\release\bundle\nsis" -ErrorAction SilentlyContinue
+}
+Pop-Location
 
 # --- Install dependencies ---
 Write-Host "Installing dependencies..." -ForegroundColor Yellow
@@ -81,6 +103,11 @@ if (-not $installer) {
     exit 1
 }
 Write-Host "Found installer: $($installer.Name)" -ForegroundColor Green
+
+# --- Verify installer version matches ---
+if ($installer.Name -notmatch $newVersion.Replace('.', '\.')) {
+    Write-Host "Warning: Installer filename $($installer.Name) doesn't contain expected version $newVersion" -ForegroundColor Yellow
+}
 
 # --- Create GitHub Release ---
 $tag = "launcher/v$newVersion"
