@@ -1,8 +1,9 @@
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Home, Settings, Gamepad2, Users } from 'lucide-react';
+import { Home, Archive, Settings, Gamepad2, Users } from 'lucide-react';
 
 const navItems = [
   { path: '/', label: 'Home', icon: Home },
+  { path: '/library', label: 'Library', icon: Archive },
   { path: '/settings', label: 'Settings', icon: Settings },
 ];
 

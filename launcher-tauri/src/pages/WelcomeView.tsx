@@ -34,7 +34,7 @@ export default function WelcomeView({ onLogin }: WelcomeViewProps) {
   }
 
   return (
-    <div className="h-full flex items-center justify-center bg-background">
+    <div className="h-full flex items-center justify-center bg-gradient-to-b from-primary/10 via-background to-background">
       <Card className="w-full max-w-md">
         <CardContent className="flex flex-col items-center gap-6 p-8 text-center">
           <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary glow">

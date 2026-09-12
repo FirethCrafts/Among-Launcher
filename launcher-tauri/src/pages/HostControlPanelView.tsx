@@ -141,7 +141,7 @@ export default function HostControlPanelView() {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="flex items-center justify-between rounded-lg bg-secondary/50 px-4 py-3">
+            <div className="flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 transition-colors hover:bg-white/[0.07]">
               <span className="font-mono text-2xl font-bold tracking-widest text-primary">
                 {lobbyInfo.code}
               </span>
@@ -222,7 +222,7 @@ export default function HostControlPanelView() {
                 {players.map((player) => (
                   <li
                     key={player.name}
-                    className="flex items-center justify-between rounded-lg bg-secondary/50 px-3 py-2"
+                    className="flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 transition-colors hover:bg-white/[0.07]"
                   >
                     <div className="flex items-center gap-2">
                       <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />

@@ -3,6 +3,7 @@ import { Routes, Route, useNavigate } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import HomeView from "@/pages/HomeView";
+import LibraryView from "@/pages/LibraryView";
 import SettingsView from "@/pages/SettingsView";
 import InGameView from "@/pages/InGameView";
 import HostControlPanelView from "@/pages/HostControlPanelView";
@@ -210,6 +211,7 @@ export default function App() {
           <ErrorBoundary>
             <Routes>
               <Route path="/" element={<HomeView />} />
+              <Route path="/library" element={<LibraryView />} />
               <Route path="/settings" element={<SettingsView />} />
               {!gameConnected && <Route path="/setup" element={<SetupPage />} />}
               {gameConnected && <Route path="/ingame" element={<InGameView />} />}

@@ -159,7 +159,7 @@ export default function InGameView() {
           <CardContent className="space-y-4">
             {activeLobbyCode ? (
               <div className="space-y-3">
-                <div className="flex items-center justify-between rounded-lg bg-secondary/50 px-3 py-2">
+                <div className="flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 transition-colors hover:bg-white/[0.07]">
                   <span className="text-sm text-muted-foreground">Current Code</span>
                   <span className="font-mono text-lg font-bold tracking-widest text-primary">
                     {activeLobbyCode}
@@ -204,7 +204,7 @@ export default function InGameView() {
                 {players.map((player) => (
                   <li
                     key={player.name}
-                    className="flex items-center justify-between rounded-lg bg-secondary/50 px-3 py-2"
+                    className="flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 transition-colors hover:bg-white/[0.07]"
                   >
                     <span className="flex items-center gap-2 text-sm font-medium">
                       <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
@@ -237,7 +237,7 @@ export default function InGameView() {
               {mods.map((mod) => (
                 <li
                   key={mod.name}
-                  className="flex items-center justify-between rounded-lg bg-secondary/50 px-3 py-2"
+                  className="flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 transition-colors hover:bg-white/[0.07]"
                 >
                   <div>
                     <span className="text-sm font-medium">{mod.name}</span>

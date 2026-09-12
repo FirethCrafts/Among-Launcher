@@ -209,7 +209,7 @@ export default function SettingsView() {
                       className="h-12 w-12 rounded-full border-2 border-primary"
                     />
                   ) : (
-                    <div className="h-12 w-12 rounded-full bg-secondary flex items-center justify-center">
+                    <div className="h-12 w-12 rounded-full border border-white/10 bg-white/[0.06] flex items-center justify-center">
                       <User className="h-6 w-6 text-muted-foreground" />
                     </div>
                   )}
