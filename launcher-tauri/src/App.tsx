@@ -39,12 +39,6 @@ interface UpdateInfo {
   download_url: string;
 }
 
-interface GameSearchResult {
-  path?: string | null;
-  storefront?: string | null;
-  detected_but_unavailable?: boolean;
-}
-
 interface InstallStatus {
   bepinex_installed: boolean;
   among_api_installed: boolean;
@@ -121,10 +115,11 @@ export default function App() {
     try {
       const setupRequired = await Promise.race([
         (async () => {
-          const detected = await invoke<GameSearchResult>("detect_game", {});
-          if (!detected.path) return true;
+          const cfg = await invoke<LauncherConfig>("read_config");
+          const moddedPath = cfg.modded_install_path?.trim();
+          if (!moddedPath) return true;
           const status = await invoke<InstallStatus>("get_install_status", {
-            gamePath: detected.path,
+            gamePath: moddedPath,
           });
           return !(status.bepinex_installed && status.among_api_installed);
         })(),
