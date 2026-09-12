@@ -1,35 +1,14 @@
-name: Build and Release
+name: Build and Release (AmongApi)
 
 on:
   push:
     branches: [master]
     paths:
       - 'Among API/**'
-      - 'launcher-tauri/**'
       - '.github/workflows/build.yml'
 
 jobs:
-  # Detect what changed
-  changes:
-    runs-on: ubuntu-latest
-    outputs:
-      among-api: ${{ steps.filter.outputs.among-api }}
-      launcher: ${{ steps.filter.outputs.launcher }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dorny/paths-filter@v3
-        id: filter
-        with:
-          filters: |
-            among-api:
-              - 'Among API/**'
-            launcher:
-              - 'launcher-tauri/**'
-
-  # AmongApi release
   among-api:
-    needs: changes
-    if: needs.changes.outputs.among-api == 'true'
     runs-on: windows-latest
     permissions:
       contents: write
@@ -38,6 +17,7 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '6.0.x'
+
       - name: Bump AmongApi version
         shell: pwsh
         run: |
@@ -54,13 +34,16 @@ jobs:
           (Get-Content "Among API/Among API.csproj") -replace '<Version>.*?</Version>', "<Version>$newVersion</Version>" | Set-Content "Among API/Among API.csproj"
           (Get-Content "Among API/Among API.csproj") -replace '<FileVersion>.*?</FileVersion>', "<FileVersion>$newVersion</FileVersion>" | Set-Content "Among API/Among API.csproj"
           echo "VERSION=$newVersion" >> $env:GITHUB_ENV
+
       - name: Build AmongApi
         run: dotnet build "Among API/Among API.csproj" -c Release
+
       - name: Package BepInEx
         shell: pwsh
         run: |
           Compress-Archive -Path "BepInEx\*" -DestinationPath "BepInEx.zip" -Force
           Compress-Archive -Path "BepInEx-MS-Epic\*" -DestinationPath "bepinex-ms-epic.zip" -Force
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
@@ -72,65 +55,11 @@ jobs:
             Among API/bin/Release/net6.0/AmongApi.dll
             BepInEx.zip
             bepinex-ms-epic.zip
+
       - name: Commit version bump
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add "Among API/Among API.csproj" "launcher-tauri/versions.json"
           git commit -m "chore: bump AmongApi to ${{ env.VERSION }}" || echo "No changes to commit"
-          git push
-
-  # Launcher release
-  launcher:
-    needs: changes
-    if: needs.changes.outputs.launcher == 'true'
-    runs-on: windows-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: 'npm'
-          cache-dependency-path: launcher-tauri/package-lock.json
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-pc-windows-msvc
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: launcher-tauri/src-tauri
-      - name: Bump launcher version
-        shell: pwsh
-        run: |
-          $config = Get-Content "launcher-tauri/src-tauri/tauri.conf.json" | ConvertFrom-Json
-          $version = $config.version
-          $parts = $version.Split('.')
-          $parts[1] = [int]$parts[1] + 1
-          $parts[2] = 0
-          $newVersion = $parts -join '.'
-          $config.version = $newVersion
-          $config | ConvertTo-Json -Depth 10 | Set-Content "launcher-tauri/src-tauri/tauri.conf.json"
-          echo "VERSION=$newVersion" >> $env:GITHUB_ENV
-      - name: Install dependencies
-        working-directory: launcher-tauri
-        run: npm ci
-      - name: Build Tauri app
-        working-directory: launcher-tauri
-        run: npx tauri build --target x86_64-pc-windows-msvc --bundles nsis
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: launcher/v${{ env.VERSION }}
-          name: "Launcher v${{ env.VERSION }}"
-          draft: false
-          prerelease: false
-          files: |
-            launcher-tauri/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
-      - name: Commit version bump
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add "launcher-tauri/src-tauri/tauri.conf.json"
-          git commit -m "chore: bump launcher to ${{ env.VERSION }}" || echo "No changes to commit"
           git push
