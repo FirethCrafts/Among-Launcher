@@ -41,15 +41,15 @@ jobs:
       - name: Bump AmongApi version
         shell: pwsh
         run: |
-          # Read current version from tauri.conf.json
-          $config = Get-Content "launcher-tauri/src-tauri/tauri.conf.json" | ConvertFrom-Json
-          $version = $config.amongApiVersion
+          # Read current version from versions.json
+          $versions = Get-Content "launcher-tauri/versions.json" | ConvertFrom-Json
+          $version = $versions.amongApiVersion
           $parts = $version.Split('.')
           $parts[2] = [int]$parts[2] + 1
           $newVersion = $parts -join '.'
-          # Update tauri.conf.json
-          $config.amongApiVersion = $newVersion
-          $config | ConvertTo-Json -Depth 10 | Set-Content "launcher-tauri/src-tauri/tauri.conf.json"
+          # Update versions.json
+          $versions.amongApiVersion = $newVersion
+          $versions | ConvertTo-Json | Set-Content "launcher-tauri/versions.json"
           # Update Among API.csproj
           (Get-Content "Among API/Among API.csproj") -replace '<Version>.*?</Version>', "<Version>$newVersion</Version>" | Set-Content "Among API/Among API.csproj"
           (Get-Content "Among API/Among API.csproj") -replace '<FileVersion>.*?</FileVersion>', "<FileVersion>$newVersion</FileVersion>" | Set-Content "Among API/Among API.csproj"
@@ -76,7 +76,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add "Among API/Among API.csproj" "launcher-tauri/src-tauri/tauri.conf.json"
+          git add "Among API/Among API.csproj" "launcher-tauri/versions.json"
           git commit -m "chore: bump AmongApi to ${{ env.VERSION }}" || echo "No changes to commit"
           git push
 

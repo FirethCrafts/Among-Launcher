@@ -2,7 +2,6 @@
   "$schema": "https://raw.githubusercontent.com/nicholasgasior/tauri-config-schema/tauri-v2/schema.json",
   "productName": "Among Launcher",
   "version": "1.0.0",
-  "amongApiVersion": "1.0.14",
   "identifier": "com.amonglauncher.app",
   "build": {
     "beforeDevCommand": "npm run dev",
