@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -8,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { showToast } from "@/components/Toast";
-import { Play, Square, Gamepad2, FolderOpen, Package, Folder, Copy } from "lucide-react";
+import { Play, Square, Gamepad2, FolderOpen, Package, Folder, Copy, Trash2 } from "lucide-react";
 
 interface GameSearchResult {
   path?: string | null;
@@ -50,6 +51,7 @@ function formatBytes(bytes: number): string {
 }
 
 export default function HomeView() {
+  const navigate = useNavigate();
   const [gamePath, setGamePath] = useState<string | null>(null);
   const [storefront, setStorefront] = useState<string | null>(null);
   const [isRunning, setIsRunning] = useState(false);
@@ -195,6 +197,17 @@ export default function HomeView() {
     }
   }
 
+  async function removeMod(mod: ModEntry) {
+    if (!gamePath) return;
+    try {
+      await invoke("remove_mod", { gamePath, filename: mod.filename });
+      await loadMods();
+      showToast("Mod removed", "success");
+    } catch {
+      showToast("Failed to remove mod", "error");
+    }
+  }
+
   async function handleImportMod() {
     if (!gamePath) return;
     try {
@@ -211,6 +224,8 @@ export default function HomeView() {
       showToast("Failed to import mod", "error");
     }
   }
+
+  const isReady = !!gamePath && bepinexInstalled && amongApiInstalled;
 
   return (
     <div className="min-h-full p-6 space-y-6">
@@ -272,84 +287,83 @@ export default function HomeView() {
         </Card>
       )}
 
-      <div className="grid gap-6 md:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Gamepad2 className="h-5 w-5" />
-              Game Status
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-muted-foreground">Status</span>
-              {gamePath ? (
-                <Badge variant="neutral" showDot dotColor="emerald">
-                  Installed
-                </Badge>
+      <Card className="glow">
+        <CardContent className="p-8">
+          <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
+            <div className="space-y-2">
+              <div className="flex items-center gap-3">
+                <h2 className="text-3xl font-bold tracking-tight">
+                  {isReady ? "Game Ready" : "Setup Needed"}
+                </h2>
+                {isReady ? (
+                  <Badge variant="neutral" showDot dotColor="emerald">
+                    Ready
+                  </Badge>
+                ) : (
+                  <Badge variant="muted" showDot dotColor="red">
+                    Incomplete
+                  </Badge>
+                )}
+              </div>
+              <p className="text-sm text-muted-foreground">
+                {isReady
+                  ? "Everything is set up. Jump into a lobby."
+                  : "Finish installing Among Us + BepInEx to play."}
+              </p>
+            </div>
+            <div>
+              {isReady ? (
+                isRunning ? (
+                  <Button onClick={stopGame} variant="destructive" size="lg">
+                    <Square className="h-5 w-5" />
+                    Stop
+                  </Button>
+                ) : (
+                  <Button onClick={launchGame} size="lg">
+                    <Play className="h-5 w-5" />
+                    Launch
+                  </Button>
+                )
               ) : (
-                <Badge variant="muted" showDot dotColor="red">
-                  Not Installed
-                </Badge>
+                <Button onClick={() => navigate("/setup")} variant="outline" size="lg">
+                  <Gamepad2 className="h-5 w-5" />
+                  Set Up Game
+                </Button>
               )}
             </div>
-            {storefront && (
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-muted-foreground">Storefront</span>
-                <span className="text-sm font-medium capitalize">{storefront.replace("_", " ")}</span>
-              </div>
-            )}
-            {gamePath && (
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-sm text-muted-foreground">Path</span>
-                <div className="flex items-center gap-1">
-                  <span className="text-xs font-mono text-muted-foreground truncate max-w-[200px]">
-                    {gamePath}
-                  </span>
-                  <Button variant="ghost" size="sm" onClick={copyPath} aria-label="Copy game path">
-                    <Copy className="h-3 w-3" />
-                  </Button>
-                </div>
-              </div>
-            )}
-            {gamePath && (
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-muted-foreground">BepInEx</span>
-                <Badge variant={bepinexInstalled ? "neutral" : "muted"}>
-                  {bepinexInstalled ? "Installed" : "Not Installed"}
-                </Badge>
-              </div>
-            )}
-            {gamePath && (
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-muted-foreground">AmongApi</span>
-                <Badge variant={amongApiInstalled ? "neutral" : "muted"}>
-                  {amongApiInstalled ? "Installed" : "Not Installed"}
-                </Badge>
-              </div>
-            )}
-            <div className="flex gap-2 pt-2">
-              <Button
-                onClick={launchGame}
-                disabled={!gamePath || isRunning}
-                className="flex-1"
-              >
-                <Play className="h-4 w-4" />
-                Launch
-              </Button>
-              <Button
-                onClick={stopGame}
-                disabled={!isRunning}
-                variant="destructive"
-                className="flex-1"
-              >
-                <Square className="h-4 w-4" />
-                Stop
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
+          </div>
 
+          <div className="mt-6 flex flex-wrap items-center gap-3 border-t pt-6">
+            {storefront && (
+              <Badge variant="muted" className="capitalize">
+                {storefront.replace("_", " ")}
+              </Badge>
+            )}
+            {gamePath ? (
+              <div className="flex min-w-0 items-center gap-1">
+                <span className="text-xs font-mono text-muted-foreground truncate max-w-[320px]">
+                  {gamePath}
+                </span>
+                <Button variant="ghost" size="sm" onClick={copyPath} aria-label="Copy game path">
+                  <Copy className="h-3 w-3" />
+                </Button>
+              </div>
+            ) : (
+              <span className="text-xs text-muted-foreground">No game path detected</span>
+            )}
+            <div className="flex items-center gap-2">
+              <Badge variant={bepinexInstalled ? "neutral" : "muted"}>
+                BepInEx {bepinexInstalled ? "installed" : "missing"}
+              </Badge>
+              <Badge variant={amongApiInstalled ? "neutral" : "muted"}>
+                AmongApi {amongApiInstalled ? "installed" : "missing"}
+              </Badge>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <div className="grid gap-6 md:grid-cols-2">
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -373,13 +387,23 @@ export default function HomeView() {
                         {formatBytes(mod.size)}
                       </span>
                     </div>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => browseFiles(mod.path)}
-                    >
-                      <Folder className="h-3 w-3" />
-                    </Button>
+                    <div className="flex items-center gap-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => browseFiles(mod.path)}
+                      >
+                        <Folder className="h-3 w-3" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => removeMod(mod)}
+                        aria-label={`Remove ${mod.name}`}
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
+                    </div>
                   </li>
                 ))}
               </ul>
@@ -390,31 +414,31 @@ export default function HomeView() {
             </Button>
           </CardContent>
         </Card>
-      </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Options</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-medium">Auto-post game data</span>
-              <Switch
-                checked={autoPost}
-                onCheckedChange={() => handleToggle("auto_post_lobby", autoPost)}
-              />
+        <Card>
+          <CardHeader>
+            <CardTitle>Options</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium">Auto-post game data</span>
+                <Switch
+                  checked={autoPost}
+                  onCheckedChange={() => handleToggle("auto_post_lobby", autoPost)}
+                />
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium">Debug mode</span>
+                <Switch
+                  checked={debugMode}
+                  onCheckedChange={() => handleToggle("debug_mode", debugMode)}
+                />
+              </div>
             </div>
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-medium">Debug mode</span>
-              <Switch
-                checked={debugMode}
-                onCheckedChange={() => handleToggle("debug_mode", debugMode)}
-              />
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      </div>
         </>
       )}
     </div>
