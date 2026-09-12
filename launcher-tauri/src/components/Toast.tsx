@@ -39,7 +39,7 @@ export function ToastHost() {
   return (
     <div className="fixed bottom-6 right-6 z-50 flex flex-col gap-2">
       {items.map((t) => (
-        <div key={t.id} className="rounded-lg border bg-card px-4 py-2 text-sm shadow-lg">{t.message}</div>
+        <div key={t.id} className="rounded-xl border border-white/10 bg-card/70 px-4 py-2 text-sm shadow-[0_8px_24px_-8px_rgb(0_0_0/0.45),0_2px_8px_-2px_rgb(0_0_0/0.3)] backdrop-blur-md">{t.message}</div>
       ))}
     </div>
   );

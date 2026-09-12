@@ -27,8 +27,8 @@ export function Modal({ isOpen, onClose, title, children, allowDismiss = true }:
       onClick={allowDismiss ? onClose : undefined}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in">
       <div onClick={e => e.stopPropagation()}
-        className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-md mx-4 animate-in zoom-in-95 slide-in-from-bottom-4">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-border">
+        className="bg-card/70 border border-white/10 rounded-2xl backdrop-blur-md shadow-[0_8px_24px_-8px_rgb(0_0_0/0.45),0_2px_8px_-2px_rgb(0_0_0/0.3)] w-full max-w-md mx-4 animate-in zoom-in-95 slide-in-from-bottom-4">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
           <h2 className="text-lg font-semibold">{title}</h2>
           {allowDismiss && (
             <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors">
@@ -61,7 +61,7 @@ export function ConfirmModal({ isOpen, onClose, onConfirm, title, message, dange
       <p className="text-muted-foreground mb-6">{message}</p>
       <div className="flex justify-end gap-3">
         <button onClick={onClose}
-          className="px-4 py-2 rounded-lg border border-border hover:bg-muted transition-colors">
+          className="px-4 py-2 rounded-lg border border-white/10 hover:bg-muted/60 transition-colors">
           Cancel
         </button>
         <button onClick={() => { onConfirm(); onClose(); }}
