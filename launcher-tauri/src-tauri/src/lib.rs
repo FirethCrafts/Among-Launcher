@@ -691,7 +691,6 @@ pub struct AppState {
     pub config: SharedConfig,
     pub lobby_state: SharedLobbyState,
     pipe_handle: Arc<tokio::sync::Mutex<Option<ipc::PipeServerHandle>>>,
-    pub oauth_code: Arc<tokio::sync::Mutex<Option<String>>>,
 }
 
 #[tauri::command]
@@ -1481,50 +1480,16 @@ async fn kick_player(
 }
 
 #[tauri::command]
-async fn set_oauth_code(state: State<'_, AppState>, code: String) -> Result<(), LauncherError> {
-    let mut oauth = state.oauth_code.lock().await;
-    *oauth = Some(code);
-    Ok(())
-}
-
-#[tauri::command]
 async fn login_discord(state: State<'_, AppState>) -> Result<auth::UserInfo, LauncherError> {
     auth::DiscordAuth::new()?;
     let url = auth::DiscordAuth::authorize_url();
 
-    // Clear any previous code
-    {
-        let mut oauth = state.oauth_code.lock().await;
-        *oauth = None;
-    }
-
-    // Open browser for Discord OAuth
     open::that(&url).map_err(|e| LauncherError::Auth(e.to_string()))?;
 
-    // Wait for deep link callback to set the code
-    let code = {
-        let start = std::time::Instant::now();
-        let timeout = std::time::Duration::from_secs(120);
-        loop {
-            if start.elapsed() > timeout {
-                return Err(LauncherError::Auth("Timeout waiting for Discord callback".into()));
-            }
-            {
-                let oauth = state.oauth_code.lock().await;
-                if let Some(code) = oauth.as_ref() {
-                    let code = code.clone();
-                    drop(oauth);
-                    // Clear it
-                    let mut oauth = state.oauth_code.lock().await;
-                    *oauth = None;
-                    break code;
-                }
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-        }
-    };
+    let code = auth::DiscordAuth::wait_for_callback()?;
 
     let token_resp = auth::DiscordAuth::exchange_token(&code).await?;
+
     let user = auth::DiscordAuth::fetch_user(&token_resp.access_token).await?;
 
     {
@@ -1558,7 +1523,6 @@ pub fn run() {
         config: shared_config,
         lobby_state: lobby_state.clone(),
         pipe_handle: Arc::new(tokio::sync::Mutex::new(Some(pipe_handle.clone()))),
-        oauth_code: Arc::new(tokio::sync::Mutex::new(None)),
     };
 
     tauri::Builder::default()
@@ -1587,7 +1551,6 @@ pub fn run() {
             disband_lobby,
             kick_player,
             login_discord,
-            set_oauth_code,
             remove_mod,
             save_profile,
             apply_profile,
@@ -1603,33 +1566,6 @@ pub fn run() {
         ])
         .setup(move |app| {
             let app_handle = app.handle().clone();
-
-            // Register amonglauncher:// protocol
-            #[cfg(target_os = "windows")]
-            {
-                use std::process::Command;
-                let exe_path = std::env::current_exe().unwrap_or_default();
-                let _ = Command::new("reg")
-                    .args([
-                        "add",
-                        "HKCU\\Software\\Classes\\amonglauncher",
-                        "/ve",
-                        "/d",
-                        "URL:Among Launcher Protocol",
-                        "/f",
-                    ])
-                    .output();
-                let _ = Command::new("reg")
-                    .args([
-                        "add",
-                        "HKCU\\Software\\Classes\\amonglauncher\\shell\\open\\command",
-                        "/ve",
-                        "/d",
-                        &format!("\"{}\" \"%1\"", exe_path.display()),
-                        "/f",
-                    ])
-                    .output();
-            }
 
             // Restore window state
             {
@@ -1686,27 +1622,6 @@ pub fn run() {
             tauri::async_runtime::spawn(async move {
                 ipc::start_pipe_server(app_handle, pipe_handle).await;
             });
-
-            // Handle deep links (amonglauncher://callback?code=...)
-            {
-                let app_handle_clone = app.handle().clone();
-                app.on_open_url(move |event| {
-                    for url in event.urls() {
-                        let url_str = url.to_string();
-                        if url_str.starts_with("amonglauncher://callback") {
-                            if let Some(code) = url_str.split("code=").nth(1) {
-                                let code = code.split('&').next().unwrap_or(code).to_string();
-                                let app = app_handle_clone.clone();
-                                tokio::spawn(async move {
-                                    let state = app.state::<AppState>();
-                                    let mut oauth = state.oauth_code.lock().await;
-                                    *oauth = Some(code);
-                                });
-                            }
-                        }
-                    }
-                });
-            }
 
             Ok(())
         })
