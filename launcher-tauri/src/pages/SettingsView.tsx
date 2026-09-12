@@ -5,17 +5,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import type { ReactNode } from "react";
-// TEMP Task 2 shim: ui/3d-card deleted; Tasks 3-4 remove these tilt wrappers.
-const CardContainer = ({ children, className }: { children?: ReactNode; className?: string }) => (
-  <div className={className}>{children}</div>
-);
-const CardBody = ({ children, className }: { children?: ReactNode; className?: string }) => (
-  <div className={className}>{children}</div>
-);
-const CardItem = ({ children, className }: { children?: ReactNode; className?: string; translateZ?: number }) => (
-  <div className={className}>{children}</div>
-);
 import { User, FolderOpen, RotateCcw, Info, LogOut, Store } from "lucide-react";
 import pkg from "../../package.json";
 
@@ -142,142 +131,119 @@ export default function SettingsView() {
   }
 
   return (
-    <div className="min-h-full bg-grid p-6 space-y-6">
-      <h1 className="font-display text-3xl font-bold text-primary">Settings</h1>
+    <div className="min-h-full p-6 space-y-6">
+      <h1 className="text-3xl font-bold tracking-tight">Settings</h1>
 
       <div className="grid gap-6 md:grid-cols-2">
-        <CardContainer className="w-full">
-          <CardBody>
-            <CardItem translateZ={20}>
-              <Card className="w-full glow-emerald">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <User className="h-5 w-5" />
-                    Account
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  {account ? (
-                    <>
-                      <div className="flex items-center gap-4">
-                        {account.avatarUrl ? (
-                          <img
-                            src={account.avatarUrl}
-                            alt="Avatar"
-                            className="h-12 w-12 rounded-full border-2 border-primary"
-                          />
-                        ) : (
-                          <div className="h-12 w-12 rounded-full bg-secondary flex items-center justify-center">
-                            <User className="h-6 w-6 text-muted-foreground" />
-                          </div>
-                        )}
-                        <div>
-                          <p className="font-medium">{account.username}</p>
-                          <Badge variant="neutral">Discord</Badge>
-                        </div>
-                      </div>
-                      <Button onClick={logout} variant="destructive" className="w-full">
-                        <LogOut className="h-4 w-4" />
-                        Logout
-                      </Button>
-                    </>
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <User className="h-5 w-5" />
+              Account
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {account ? (
+              <>
+                <div className="flex items-center gap-4">
+                  {account.avatarUrl ? (
+                    <img
+                      src={account.avatarUrl}
+                      alt="Avatar"
+                      className="h-12 w-12 rounded-full border-2 border-primary"
+                    />
                   ) : (
-                    <p className="text-sm text-muted-foreground">Not logged in.</p>
-                  )}
-                </CardContent>
-              </Card>
-            </CardItem>
-          </CardBody>
-        </CardContainer>
-
-        <CardContainer className="w-full">
-          <CardBody>
-            <CardItem translateZ={20}>
-              <Card className="w-full glow-amber">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <FolderOpen className="h-5 w-5" />
-                    Storage
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">Game Path</label>
-                    <div className="flex gap-2">
-                      <Input
-                        value={gamePath}
-                        readOnly
-                        placeholder="No path set"
-                        className="flex-1 font-mono text-xs"
-                      />
-                      <Button onClick={browseGamePath} variant="outline" size="icon">
-                        <FolderOpen className="h-4 w-4" />
-                      </Button>
-                      <Button onClick={resetGamePath} variant="outline" size="icon">
-                        <RotateCcw className="h-4 w-4" />
-                      </Button>
+                    <div className="h-12 w-12 rounded-full bg-secondary flex items-center justify-center">
+                      <User className="h-6 w-6 text-muted-foreground" />
                     </div>
+                  )}
+                  <div>
+                    <p className="font-medium">{account.username}</p>
+                    <Badge variant="neutral">Discord</Badge>
                   </div>
-                </CardContent>
-              </Card>
-            </CardItem>
-          </CardBody>
-        </CardContainer>
+                </div>
+                <Button onClick={logout} variant="destructive" className="w-full">
+                  <LogOut className="h-4 w-4" />
+                  Logout
+                </Button>
+              </>
+            ) : (
+              <p className="text-sm text-muted-foreground">Not logged in.</p>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <FolderOpen className="h-5 w-5" />
+              Storage
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Game Path</label>
+              <div className="flex gap-2">
+                <Input
+                  value={gamePath}
+                  readOnly
+                  placeholder="No path set"
+                  className="flex-1 font-mono text-xs"
+                />
+                <Button onClick={browseGamePath} variant="outline" size="icon">
+                  <FolderOpen className="h-4 w-4" />
+                </Button>
+                <Button onClick={resetGamePath} variant="outline" size="icon">
+                  <RotateCcw className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
       <div className="grid gap-6 md:grid-cols-2">
-        <CardContainer className="w-full">
-          <CardBody>
-            <CardItem translateZ={20}>
-              <Card className="w-full glow-purple">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Store className="h-5 w-5" />
-                    Storefront
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">Platform</label>
-                    <div className="flex flex-col gap-2">
-                      {STOREFRONT_OPTIONS.map((option) => (
-                        <Button
-                          key={option.value}
-                          variant={storefront === option.value ? "default" : "outline"}
-                          className="w-full justify-start"
-                          onClick={() => setStorefrontValue(option.value)}
-                        >
-                          {option.label}
-                        </Button>
-                      ))}
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </CardItem>
-          </CardBody>
-        </CardContainer>
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Store className="h-5 w-5" />
+              Storefront
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Platform</label>
+              <div className="flex gap-2">
+                {STOREFRONT_OPTIONS.map((option) => (
+                  <Button
+                    key={option.value}
+                    variant={storefront === option.value ? "default" : "outline"}
+                    size="sm"
+                    className="flex-1"
+                    onClick={() => setStorefrontValue(option.value)}
+                  >
+                    {option.label}
+                  </Button>
+                ))}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
 
-        <CardContainer className="w-full">
-          <CardBody>
-            <CardItem translateZ={20}>
-              <Card className="w-full glow-sky">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Info className="h-5 w-5" />
-                    About
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm text-muted-foreground">Version</span>
-                    <Badge variant="muted">{version || "Unknown"}</Badge>
-                  </div>
-                </CardContent>
-              </Card>
-            </CardItem>
-          </CardBody>
-        </CardContainer>
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Info className="h-5 w-5" />
+              About
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-muted-foreground">Version</span>
+              <Badge variant="muted">{version || "Unknown"}</Badge>
+            </div>
+          </CardContent>
+        </Card>
       </div>
     </div>
   );

@@ -6,18 +6,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import type { ReactNode } from "react";
-// TEMP Task 2 shim: ui/3d-card deleted; Tasks 3-4 remove these tilt wrappers.
-const CardContainer = ({ children, className }: { children?: ReactNode; className?: string }) => (
-  <div className={className}>{children}</div>
-);
-const CardBody = ({ children, className }: { children?: ReactNode; className?: string }) => (
-  <div className={className}>{children}</div>
-);
-const CardItem = ({ children, className }: { children?: ReactNode; className?: string; translateZ?: number }) => (
-  <div className={className}>{children}</div>
-);
-import { Play, Square, Gamepad2, CheckCircle2, XCircle, FolderOpen, Package, Folder } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import { showToast } from "@/components/Toast";
+import { Play, Square, Gamepad2, FolderOpen, Package, Folder, Copy } from "lucide-react";
 
 interface GameSearchResult {
   path?: string | null;
@@ -105,8 +96,8 @@ export default function HomeView() {
         setGamePath(result.path);
         setStorefront(result.storefront || null);
       }
-    } catch (e) {
-      console.error("Failed to detect game:", e);
+    } catch {
+      showToast("Failed to detect game", "error");
     }
   }
 
@@ -116,8 +107,8 @@ export default function HomeView() {
       setConfig(cfg);
       setAutoPost(cfg.auto_post_lobby);
       setDebugMode(cfg.debug_mode);
-    } catch (e) {
-      console.error("Failed to load config:", e);
+    } catch {
+      showToast("Failed to load config", "error");
     }
   }
 
@@ -127,8 +118,8 @@ export default function HomeView() {
       const status = await invoke<InstallStatus>("get_install_status", { gamePath });
       setBepinexInstalled(status.bepinex_installed);
       setAmongApiInstalled(status.among_api_installed);
-    } catch (e) {
-      console.error("Failed to get install status:", e);
+    } catch {
+      showToast("Failed to get install status", "error");
     }
   }
 
@@ -137,16 +128,26 @@ export default function HomeView() {
     try {
       const installedMods = await invoke<ModEntry[]>("get_mod_list", { gamePath });
       setMods(installedMods);
-    } catch (e) {
-      console.error("Failed to get mods:", e);
+    } catch {
+      showToast("Failed to get mods", "error");
     }
   }
 
   async function browseFiles(path: string) {
     try {
       await invoke("browse_files", { path });
-    } catch (e) {
-      console.error("Failed to browse files:", e);
+    } catch {
+      showToast("Failed to open file browser", "error");
+    }
+  }
+
+  async function copyPath() {
+    if (!gamePath) return;
+    try {
+      await navigator.clipboard.writeText(gamePath);
+      showToast("Path copied to clipboard", "success");
+    } catch {
+      showToast("Failed to copy path", "error");
     }
   }
 
@@ -155,8 +156,8 @@ export default function HomeView() {
     try {
       await invoke("launch_game", { gamePath });
       setIsRunning(true);
-    } catch (e) {
-      console.error("Failed to launch game:", e);
+    } catch {
+      showToast("Failed to launch game", "error");
     }
   }
 
@@ -164,8 +165,8 @@ export default function HomeView() {
     try {
       await invoke("stop_game");
       setIsRunning(false);
-    } catch (e) {
-      console.error("Failed to stop game:", e);
+    } catch {
+      showToast("Failed to stop game", "error");
     }
   }
 
@@ -179,8 +180,8 @@ export default function HomeView() {
       try {
         await invoke("write_config", { newConfig });
         setConfig(newConfig);
-      } catch (e) {
-        console.error("Failed to write config:", e);
+      } catch {
+        showToast("Failed to save option", "error");
         if (field === "auto_post_lobby") setAutoPost(!newValue);
         if (field === "debug_mode") setDebugMode(!newValue);
       }
@@ -199,14 +200,14 @@ export default function HomeView() {
         await invoke("import_mod", { gamePath, modPaths: paths });
         await loadMods();
       }
-    } catch (e) {
-      console.error("Failed to import mod:", e);
+    } catch {
+      showToast("Failed to import mod", "error");
     }
   }
 
   return (
-    <div className="min-h-full bg-grid p-6 space-y-6">
-      <h1 className="font-display text-3xl font-bold text-primary">Home</h1>
+    <div className="min-h-full p-6 space-y-6">
+      <h1 className="text-3xl font-bold tracking-tight">Home</h1>
 
       {loading ? (
         <div className="grid gap-6 md:grid-cols-2">
@@ -235,7 +236,7 @@ export default function HomeView() {
       ) : (
         <>
           {installProgress && (
-            <Card className="glow-primary">
+            <Card>
           <CardContent className="pt-6">
             <div className="space-y-2">
               <div className="flex items-center justify-between text-sm">
@@ -265,170 +266,145 @@ export default function HomeView() {
       )}
 
       <div className="grid gap-6 md:grid-cols-2">
-        <CardContainer className="w-full">
-          <CardBody>
-            <CardItem translateZ={20}>
-              <Card className="w-full glow-primary">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Gamepad2 className="h-5 w-5" />
-                    Game Status
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm text-muted-foreground">Status</span>
-                    <Badge variant={gamePath ? "neutral" : "muted"}>
-                      {gamePath ? (
-                        <span className="flex items-center gap-1">
-                          <CheckCircle2 className="h-3 w-3" /> Installed
-                        </span>
-                      ) : (
-                        <span className="flex items-center gap-1">
-                          <XCircle className="h-3 w-3 text-destructive" /> Not Installed
-                        </span>
-                      )}
-                    </Badge>
-                  </div>
-                  {storefront && (
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm text-muted-foreground">Storefront</span>
-                      <span className="text-sm font-medium capitalize">{storefront.replace("_", " ")}</span>
-                    </div>
-                  )}
-                  {gamePath && (
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm text-muted-foreground">Path</span>
-                      <span className="text-xs font-mono text-muted-foreground truncate max-w-[200px]">
-                        {gamePath}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Gamepad2 className="h-5 w-5" />
+              Game Status
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-muted-foreground">Status</span>
+              {gamePath ? (
+                <Badge variant="neutral" showDot dotColor="emerald">
+                  Installed
+                </Badge>
+              ) : (
+                <Badge variant="muted" showDot dotColor="red">
+                  Not Installed
+                </Badge>
+              )}
+            </div>
+            {storefront && (
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-muted-foreground">Storefront</span>
+                <span className="text-sm font-medium capitalize">{storefront.replace("_", " ")}</span>
+              </div>
+            )}
+            {gamePath && (
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm text-muted-foreground">Path</span>
+                <div className="flex items-center gap-1">
+                  <span className="text-xs font-mono text-muted-foreground truncate max-w-[200px]">
+                    {gamePath}
+                  </span>
+                  <Button variant="ghost" size="sm" onClick={copyPath} aria-label="Copy game path">
+                    <Copy className="h-3 w-3" />
+                  </Button>
+                </div>
+              </div>
+            )}
+            {gamePath && (
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-muted-foreground">BepInEx</span>
+                <Badge variant={bepinexInstalled ? "neutral" : "muted"}>
+                  {bepinexInstalled ? "Installed" : "Not Installed"}
+                </Badge>
+              </div>
+            )}
+            {gamePath && (
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-muted-foreground">AmongApi</span>
+                <Badge variant={amongApiInstalled ? "neutral" : "muted"}>
+                  {amongApiInstalled ? "Installed" : "Not Installed"}
+                </Badge>
+              </div>
+            )}
+            <div className="flex gap-2 pt-2">
+              <Button
+                onClick={launchGame}
+                disabled={!gamePath || isRunning}
+                className="flex-1"
+              >
+                <Play className="h-4 w-4" />
+                Launch
+              </Button>
+              <Button
+                onClick={stopGame}
+                disabled={!isRunning}
+                variant="destructive"
+                className="flex-1"
+              >
+                <Square className="h-4 w-4" />
+                Stop
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Package className="h-5 w-5" />
+              Installed Mods
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {mods.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No mods installed.</p>
+            ) : (
+              <ul className="space-y-2">
+                {mods.map((mod) => (
+                  <li
+                    key={mod.filename}
+                    className="flex items-center justify-between rounded-lg border px-3 py-2"
+                  >
+                    <div className="min-w-0">
+                      <span className="text-sm font-medium">{mod.name}</span>
+                      <span className="ml-2 text-xs text-muted-foreground">
+                        {formatBytes(mod.size)}
                       </span>
                     </div>
-                  )}
-                  {gamePath && (
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm text-muted-foreground">BepInEx</span>
-                      <Badge variant={bepinexInstalled ? "neutral" : "muted"}>
-                        {bepinexInstalled ? "Installed" : "Not Installed"}
-                      </Badge>
-                    </div>
-                  )}
-                  {gamePath && (
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm text-muted-foreground">AmongApi</span>
-                      <Badge variant={amongApiInstalled ? "neutral" : "muted"}>
-                        {amongApiInstalled ? "Installed" : "Not Installed"}
-                      </Badge>
-                    </div>
-                  )}
-                  <div className="flex gap-2 pt-2">
                     <Button
-                      onClick={launchGame}
-                      disabled={!gamePath || isRunning}
-                      className="flex-1"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => browseFiles(mod.path)}
                     >
-                      <Play className="h-4 w-4" />
-                      Launch
+                      <Folder className="h-3 w-3" />
                     </Button>
-                    <Button
-                      onClick={stopGame}
-                      disabled={!isRunning}
-                      variant="destructive"
-                      className="flex-1"
-                    >
-                      <Square className="h-4 w-4" />
-                      Stop
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            </CardItem>
-          </CardBody>
-        </CardContainer>
-
-        <CardContainer className="w-full">
-          <CardBody>
-            <CardItem translateZ={20}>
-              <Card className="w-full glow-sky">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Package className="h-5 w-5" />
-                    Installed Mods
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {mods.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">No mods installed.</p>
-                  ) : (
-                    <ul className="space-y-2">
-                      {mods.map((mod) => (
-                        <li
-                          key={mod.filename}
-                          className="flex items-center justify-between rounded-lg bg-secondary/50 px-3 py-2"
-                        >
-                          <div className="min-w-0">
-                            <span className="text-sm font-medium">{mod.name}</span>
-                            <span className="ml-2 text-xs text-muted-foreground">
-                              {formatBytes(mod.size)}
-                            </span>
-                          </div>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => browseFiles(mod.path)}
-                          >
-                            <Folder className="h-3 w-3" />
-                          </Button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                  <Button onClick={handleImportMod} variant="outline" className="w-full mt-4">
-                    <FolderOpen className="h-4 w-4 mr-2" />
-                    Import Mod
-                  </Button>
-                </CardContent>
-              </Card>
-            </CardItem>
-          </CardBody>
-        </CardContainer>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <Button onClick={handleImportMod} variant="outline" className="w-full mt-4">
+              <FolderOpen className="h-4 w-4 mr-2" />
+              Import Mod
+            </Button>
+          </CardContent>
+        </Card>
       </div>
 
-      <Card className="glow-violet">
+      <Card>
         <CardHeader>
           <CardTitle>Options</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
-            <label className="flex items-center justify-between cursor-pointer">
+            <div className="flex items-center justify-between">
               <span className="text-sm font-medium">Auto-post game data</span>
-              <button
-                onClick={() => handleToggle("auto_post_lobby", autoPost)}
-                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                  autoPost ? "bg-primary" : "bg-muted"
-                }`}
-              >
-                <span
-                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                    autoPost ? "translate-x-6" : "translate-x-1"
-                  }`}
-                />
-              </button>
-            </label>
-            <label className="flex items-center justify-between cursor-pointer">
+              <Switch
+                checked={autoPost}
+                onCheckedChange={() => handleToggle("auto_post_lobby", autoPost)}
+              />
+            </div>
+            <div className="flex items-center justify-between">
               <span className="text-sm font-medium">Debug mode</span>
-              <button
-                onClick={() => handleToggle("debug_mode", debugMode)}
-                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                  debugMode ? "bg-primary" : "bg-muted"
-                }`}
-              >
-                <span
-                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                    debugMode ? "translate-x-6" : "translate-x-1"
-                  }`}
-                />
-              </button>
-            </label>
+              <Switch
+                checked={debugMode}
+                onCheckedChange={() => handleToggle("debug_mode", debugMode)}
+              />
+            </div>
           </div>
         </CardContent>
       </Card>
