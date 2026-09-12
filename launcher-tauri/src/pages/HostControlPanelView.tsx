@@ -126,7 +126,7 @@ export default function HostControlPanelView() {
     <div className="min-h-full bg-grid p-6 space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="font-display text-3xl font-bold text-primary">Host Control Panel</h1>
-        <Badge variant={posted ? "default" : "outline"}>
+        <Badge variant={posted ? "neutral" : "muted"}>
           {posted ? "Posted to Server" : "Local Only"}
         </Badge>
       </div>
@@ -226,7 +226,7 @@ export default function HostControlPanelView() {
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-medium">{player.name}</span>
                       {player.is_host && (
-                        <Badge variant="default" className="text-xs">
+                        <Badge variant="neutral" className="text-xs">
                           Host
                         </Badge>
                       )}

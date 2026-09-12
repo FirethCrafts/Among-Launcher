@@ -6,7 +6,17 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { CardContainer, CardBody, CardItem } from "@/components/ui/3d-card";
+import type { ReactNode } from "react";
+// TEMP Task 2 shim: ui/3d-card deleted; Tasks 3-4 remove these tilt wrappers.
+const CardContainer = ({ children, className }: { children?: ReactNode; className?: string }) => (
+  <div className={className}>{children}</div>
+);
+const CardBody = ({ children, className }: { children?: ReactNode; className?: string }) => (
+  <div className={className}>{children}</div>
+);
+const CardItem = ({ children, className }: { children?: ReactNode; className?: string; translateZ?: number }) => (
+  <div className={className}>{children}</div>
+);
 import { Play, Square, Gamepad2, CheckCircle2, XCircle, FolderOpen, Package, Folder } from "lucide-react";
 
 interface GameSearchResult {
@@ -268,7 +278,7 @@ export default function HomeView() {
                 <CardContent className="space-y-4">
                   <div className="flex items-center justify-between">
                     <span className="text-sm text-muted-foreground">Status</span>
-                    <Badge variant={gamePath ? "default" : "outline"}>
+                    <Badge variant={gamePath ? "neutral" : "muted"}>
                       {gamePath ? (
                         <span className="flex items-center gap-1">
                           <CheckCircle2 className="h-3 w-3" /> Installed
@@ -297,7 +307,7 @@ export default function HomeView() {
                   {gamePath && (
                     <div className="flex items-center justify-between">
                       <span className="text-sm text-muted-foreground">BepInEx</span>
-                      <Badge variant={bepinexInstalled ? "default" : "outline"}>
+                      <Badge variant={bepinexInstalled ? "neutral" : "muted"}>
                         {bepinexInstalled ? "Installed" : "Not Installed"}
                       </Badge>
                     </div>
@@ -305,7 +315,7 @@ export default function HomeView() {
                   {gamePath && (
                     <div className="flex items-center justify-between">
                       <span className="text-sm text-muted-foreground">AmongApi</span>
-                      <Badge variant={amongApiInstalled ? "default" : "outline"}>
+                      <Badge variant={amongApiInstalled ? "neutral" : "muted"}>
                         {amongApiInstalled ? "Installed" : "Not Installed"}
                       </Badge>
                     </div>

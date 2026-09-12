@@ -4,7 +4,17 @@ import { listen } from "@tauri-apps/api/event";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { CardContainer, CardBody, CardItem } from "@/components/ui/3d-card";
+import type { ReactNode } from "react";
+// TEMP Task 2 shim: ui/3d-card deleted; Tasks 3-4 remove these tilt wrappers.
+const CardContainer = ({ children, className }: { children?: ReactNode; className?: string }) => (
+  <div className={className}>{children}</div>
+);
+const CardBody = ({ children, className }: { children?: ReactNode; className?: string }) => (
+  <div className={className}>{children}</div>
+);
+const CardItem = ({ children, className }: { children?: ReactNode; className?: string; translateZ?: number }) => (
+  <div className={className}>{children}</div>
+);
 import { Users, Gamepad2, Hash, Wifi, WifiOff } from "lucide-react";
 
 interface Player {

@@ -5,7 +5,17 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { CardContainer, CardBody, CardItem } from "@/components/ui/3d-card";
+import type { ReactNode } from "react";
+// TEMP Task 2 shim: ui/3d-card deleted; Tasks 3-4 remove these tilt wrappers.
+const CardContainer = ({ children, className }: { children?: ReactNode; className?: string }) => (
+  <div className={className}>{children}</div>
+);
+const CardBody = ({ children, className }: { children?: ReactNode; className?: string }) => (
+  <div className={className}>{children}</div>
+);
+const CardItem = ({ children, className }: { children?: ReactNode; className?: string; translateZ?: number }) => (
+  <div className={className}>{children}</div>
+);
 import { User, FolderOpen, RotateCcw, Info, LogOut, Store } from "lucide-react";
 import pkg from "../../package.json";
 
@@ -163,7 +173,7 @@ export default function SettingsView() {
                         )}
                         <div>
                           <p className="font-medium">{account.username}</p>
-                          <Badge variant="secondary">Discord</Badge>
+                          <Badge variant="neutral">Discord</Badge>
                         </div>
                       </div>
                       <Button onClick={logout} variant="destructive" className="w-full">
@@ -261,7 +271,7 @@ export default function SettingsView() {
                 <CardContent>
                   <div className="flex items-center justify-between">
                     <span className="text-sm text-muted-foreground">Version</span>
-                    <Badge variant="outline">{version || "Unknown"}</Badge>
+                    <Badge variant="muted">{version || "Unknown"}</Badge>
                   </div>
                 </CardContent>
               </Card>

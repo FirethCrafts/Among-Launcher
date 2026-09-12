@@ -11,6 +11,7 @@ import { Titlebar } from "./components/Titlebar";
 import { Sidebar } from "./components/Sidebar";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { UpdateModal } from "./components/UpdateModal";
+import { ToastHost } from "./components/Toast";
 
 interface LauncherConfig {
   storefront?: string | null;
@@ -163,6 +164,7 @@ export default function App() {
           updateInfo={updateInfo}
         />
       )}
+      <ToastHost />
     </div>
   );
 }

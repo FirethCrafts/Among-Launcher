@@ -1,10 +1,12 @@
 import * as React from "react"
 import { cn } from "@/lib/utils"
 
-function Card({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
+type CardProps = { className?: string };
+
+function Card({ className, ...props }: CardProps & React.HTMLAttributes<HTMLDivElement>) {
   return (
     <div
-      className={cn("rounded-xl border bg-card text-card-foreground shadow-sm", className)}
+      className={cn("rounded-xl border bg-card text-card-foreground shadow-sm glow", className)}
       {...props}
     />
   )
@@ -31,3 +33,4 @@ function CardFooter({ className, ...props }: React.HTMLAttributes<HTMLDivElement
 }
 
 export { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter }
+export type { CardProps }

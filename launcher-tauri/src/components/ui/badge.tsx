@@ -1,28 +1,23 @@
 import * as React from "react"
-import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "@/lib/utils"
 
-const badgeVariants = cva(
-  "inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none",
-  {
-    variants: {
-      variant: {
-        default: "border-transparent bg-primary text-primary-foreground",
-        secondary: "border-transparent bg-secondary text-secondary-foreground",
-        outline: "text-foreground",
-        muted: "border-transparent bg-muted text-muted-foreground",
-      },
-    },
-    defaultVariants: { variant: "default" },
-  }
-)
+type BadgeProps = {
+  variant?: 'neutral' | 'muted';
+  showDot?: boolean;
+  dotColor?: 'emerald' | 'red';
+};
 
-function Badge({
-  className,
-  variant,
-  ...props
-}: React.HTMLAttributes<HTMLDivElement> & VariantProps<typeof badgeVariants>) {
-  return <div className={cn(badgeVariants({ variant }), className)} {...props} />
+export function Badge({ variant = 'neutral', showDot, dotColor, className, children, ...props }: BadgeProps & React.HTMLAttributes<HTMLSpanElement>) {
+  return (
+    <span className={cn(
+      "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium",
+      variant === 'neutral' ? "bg-secondary text-secondary-foreground" : "bg-muted text-muted-foreground",
+      className,
+    )} {...props}>
+      {showDot && <span className={cn("h-1.5 w-1.5 rounded-full", dotColor === 'red' ? "bg-red-500" : "bg-emerald-500")} />}
+      {children}
+    </span>
+  );
 }
 
-export { Badge, badgeVariants }
+export type { BadgeProps }
