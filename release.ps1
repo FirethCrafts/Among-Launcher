@@ -14,6 +14,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $tauriConf = "launcher-tauri\src-tauri\tauri.conf.json"
+$packageJson = "launcher-tauri\package.json"
 
 # --- Check gh CLI ---
 if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
@@ -66,10 +67,21 @@ $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 [System.IO.File]::WriteAllText((Resolve-Path $tauriConf).Path, $content, $utf8NoBom)
 Write-Host "Bumped tauri.conf.json to $newVersion" -ForegroundColor Green
 
+# --- Bump version in launcher-tauri/package.json (keep in sync with tauri.conf.json) ---
+$pkgContent = Get-Content $packageJson -Raw
+$pkgContent = $pkgContent -replace '"version":\s*"[^"]*"', "`"version`": `"$newVersion`""
+[System.IO.File]::WriteAllText((Resolve-Path $packageJson).Path, $pkgContent, $utf8NoBom)
+Write-Host "Bumped package.json to $newVersion" -ForegroundColor Green
+
 # --- Verify the file was written correctly ---
 $verifyConfig = Get-Content $tauriConf -Raw | ConvertFrom-Json
 if ($verifyConfig.version -ne $newVersion) {
     Write-Host "Error: tauri.conf.json version mismatch! Expected $newVersion, got $($verifyConfig.version)" -ForegroundColor Red
+    exit 1
+}
+$verifyPkg = Get-Content $packageJson -Raw | ConvertFrom-Json
+if ($verifyPkg.version -ne $newVersion) {
+    Write-Host "Error: package.json version mismatch! Expected $newVersion, got $($verifyPkg.version)" -ForegroundColor Red
     exit 1
 }
 
@@ -127,7 +139,7 @@ if ($LASTEXITCODE -ne 0) {
 Write-Host "Release created: https://github.com/FirethCrafts/Among-Launcher/releases/tag/$tag" -ForegroundColor Green
 
 # --- Commit version bump ---
-git add $tauriConf
+git add $tauriConf $packageJson
 git commit -m "chore: bump launcher to v$newVersion"
 git push origin master
 
