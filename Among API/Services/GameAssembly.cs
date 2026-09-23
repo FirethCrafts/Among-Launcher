@@ -679,36 +679,41 @@ public static string LocalPlayerName()
         }
     }
 
-    public static List<string> GetAllPlayerNames()
+    /// <summary>
+    /// Reads every player's name from <c>GameData.Instance.AllPlayers</c>.
+    /// Pass <paramref name="log"/> = false for high-frequency polls so the
+    /// reflection tracing does not flood the log.
+    /// </summary>
+    public static List<string> GetAllPlayerNames(bool log = true)
     {
         var names = new List<string>();
         try
         {
-            FileLogger.Info("[GameAssembly] GetAllPlayerNames: Starting...");
-            
+            if (log) FileLogger.Info("[GameAssembly] GetAllPlayerNames: Starting...");
+
             var gameDataType = Type("GameData");
-            FileLogger.Info($"[GameAssembly] GetAllPlayerNames: GameData type={gameDataType != null}");
-            
+            if (log) FileLogger.Info($"[GameAssembly] GetAllPlayerNames: GameData type={gameDataType != null}");
+
             var gameDataInstance = GetStaticProp(gameDataType, "Instance");
             if (gameDataInstance == null)
             {
-                FileLogger.Warn("[GameAssembly] GetAllPlayerNames: GameData.Instance is null");
+                if (log) FileLogger.Warn("[GameAssembly] GetAllPlayerNames: GameData.Instance is null");
                 return names;
             }
-            FileLogger.Info($"[GameAssembly] GetAllPlayerNames: GameData.Instance={gameDataInstance.GetType().FullName}");
+            if (log) FileLogger.Info($"[GameAssembly] GetAllPlayerNames: GameData.Instance={gameDataInstance.GetType().FullName}");
 
             var allPlayers = GetInstanceProp(gameDataInstance, "AllPlayers");
             if (allPlayers == null)
             {
-                FileLogger.Warn("[GameAssembly] GetAllPlayerNames: AllPlayers is null");
+                if (log) FileLogger.Warn("[GameAssembly] GetAllPlayerNames: AllPlayers is null");
                 return names;
             }
-            FileLogger.Info($"[GameAssembly] GetAllPlayerNames: AllPlayers type={allPlayers.GetType().FullName}");
+            if (log) FileLogger.Info($"[GameAssembly] GetAllPlayerNames: AllPlayers type={allPlayers.GetType().FullName}");
 
-            // AllPlayers is Il2CppSystem.Collections.Generic.List<PlayerInfo>
+            // AllPlayers is Il2CppSystem.Collections.Generic.List<NetworkedPlayerInfo>
             var countObj = GetInstanceProp(allPlayers, "Count");
             var count = ToInt(countObj);
-            FileLogger.Info($"[GameAssembly] GetAllPlayerNames: AllPlayers.Count={count}");
+            if (log) FileLogger.Info($"[GameAssembly] GetAllPlayerNames: AllPlayers.Count={count}");
 
             for (int i = 0; i < count; i++)
             {
@@ -717,7 +722,7 @@ public static string LocalPlayerName()
                     var playerInfo = CallInstanceMethod(allPlayers, "get_Item", new object[] { i }, new[] { typeof(int) });
                     if (playerInfo == null)
                     {
-                        FileLogger.Warn($"[GameAssembly] GetAllPlayerNames: player[{i}] is null");
+                        if (log) FileLogger.Warn($"[GameAssembly] GetAllPlayerNames: player[{i}] is null");
                         continue;
                     }
 
@@ -729,11 +734,11 @@ public static string LocalPlayerName()
                 }
                 catch (Exception ex)
                 {
-                    FileLogger.Warn($"[GameAssembly] GetAllPlayerNames: player[{i}] failed: {ex.Message}");
+                    if (log) FileLogger.Warn($"[GameAssembly] GetAllPlayerNames: player[{i}] failed: {ex.Message}");
                 }
             }
-            
-            FileLogger.Info($"[GameAssembly] GetAllPlayerNames: Returning {names.Count} names: [{string.Join(", ", names)}]");
+
+            if (log) FileLogger.Info($"[GameAssembly] GetAllPlayerNames: Returning {names.Count} names: [{string.Join(", ", names)}]");
         }
         catch (Exception ex)
         {
@@ -741,6 +746,75 @@ public static string LocalPlayerName()
             FileLogger.Error($"[GameAssembly] GetAllPlayerNames stack trace: {ex.StackTrace}");
         }
         return names;
+    }
+
+    /// <summary>
+    /// Best-effort read of the real lobby host's name, for use by a guest
+    /// client (whose own <see cref="LocalPlayerName"/> is NOT the host).
+    /// <c>AmongUsClient.Instance.HostId</c> is the host's client id and each
+    /// <c>GameData.Instance.AllPlayers</c> entry (<c>NetworkedPlayerInfo</c>)
+    /// exposes a matching <c>ClientId</c>, so the two are joined on that.
+    /// Returns "" when the host cannot be resolved — callers must never fall
+    /// back to the local player's name here.
+    /// </summary>
+    public static string HostPlayerName()
+    {
+        try
+        {
+            var client = AmongUsClient();
+            if (client == null)
+                return "";
+
+            var hostIdObj = GetInstanceMember(client, "HostId");
+            if (hostIdObj == null)
+                return "";
+            var hostId = ToInt(hostIdObj);
+
+            var gameDataType = Type("GameData");
+            var gameDataInstance = gameDataType != null ? GetStaticProp(gameDataType, "Instance") : null;
+            if (gameDataInstance == null)
+                return "";
+
+            var allPlayers = GetInstanceProp(gameDataInstance, "AllPlayers");
+            if (allPlayers == null)
+                return "";
+
+            var count = ToInt(GetInstanceProp(allPlayers, "Count"));
+            if (count <= 0 || count > 15)
+                return "";
+
+            for (int i = 0; i < count; i++)
+            {
+                try
+                {
+                    var playerInfo = CallInstanceMethod(allPlayers, "get_Item", new object[] { i }, new[] { typeof(int) });
+                    if (playerInfo == null)
+                        continue;
+
+                    var clientId = ToInt(GetInstanceMember(playerInfo, "ClientId"));
+                    if (clientId != hostId)
+                        continue;
+
+                    var name = ToStr(GetInstanceProp(playerInfo, "PlayerName"));
+                    if (!string.IsNullOrEmpty(name) && name != "UNKNOWN")
+                    {
+                        FileLogger.Info($"[GameAssembly] HostPlayerName: resolved host '{name}' (clientId {hostId}).");
+                        return name;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    FileLogger.Warn($"[GameAssembly] HostPlayerName: player[{i}] failed: {ex.Message}");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            FileLogger.Warn($"[GameAssembly] HostPlayerName failed: {ex.Message}");
+        }
+
+        FileLogger.Warn("[GameAssembly] HostPlayerName: could not resolve the lobby host name; returning empty.");
+        return "";
     }
 
     public static string GameVersion()

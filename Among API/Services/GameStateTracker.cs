@@ -14,9 +14,30 @@ public record LobbyInfo(
     string GameVersion = "",
     string MapName = "",
     string Language = "",
-    string ChatType = ""
+    string ChatType = "",
+    bool IsHost = false
 );
-public record PlayerInfo(string PlayerName, int PlayerCount);
+
+/// <summary>
+/// Raised when the local client leaves a lobby. <see cref="IsHost"/> records
+/// whether the local client was the host, so the launcher can tell a host
+/// disband apart from a guest leaving. <see cref="Reason"/> is reserved for
+/// future use and is currently always empty.
+/// </summary>
+public record LobbyClosedInfo(bool IsHost, string Reason = "");
+
+/// <summary>
+/// A player-list change. <see cref="PlayerName"/> is the specific player that
+/// joined/left and <see cref="PlayerNames"/> is the full current snapshot
+/// (index-aligned with <see cref="PlayerLevels"/>/<see cref="PlayerPings"/>).
+/// </summary>
+public record PlayerInfo(
+    string PlayerName,
+    int PlayerCount,
+    List<string>? PlayerNames = null,
+    List<int>? PlayerLevels = null,
+    List<int>? PlayerPings = null
+);
 
 /// <summary>
 /// Polls the game for lobby / player state via reflection (GameAssembly) and
@@ -34,11 +55,12 @@ public class GameStateTracker : IDisposable
     private CancellationTokenSource? _cts;
     private bool _wasInLobby;
     private bool _lastWasHost;
-    private int _lastPlayerCount = -1;
+    private bool? _lastLoggedIsHost;
+    private List<string> _lastPlayerNames = new();
     private DateTime _lastExceptionLogTime = DateTime.MinValue;
 
     public event EventHandler<LobbyInfo>? LobbyCreated;
-    public event EventHandler<string>? LobbyClosed;
+    public event EventHandler<LobbyClosedInfo>? LobbyClosed;
     public event EventHandler<PlayerInfo>? PlayerJoined;
     public event EventHandler<PlayerInfo>? PlayerLeft;
 
@@ -141,79 +163,56 @@ public class GameStateTracker : IDisposable
 
                     if (inLobby && !_wasInLobby)
                     {
-                        if (_lastWasHost)
-                        {
-                            var region = "UNKNOWN";
-                            var host = "UNKNOWN";
-                            int maxPlayers = 15;
-                            List<string>? playerNames = null;
-                            List<int>? playerLevels = null;
-                            List<int>? playerPings = null;
-                            try { region = GameAssembly.CurrentRegionName(); } catch { }
-                            try { host = GameAssembly.LocalPlayerName(); } catch { }
-                            try { maxPlayers = MaxPlayers(); } catch { }
-                            try { playerNames = GameAssembly.GetAllPlayerNames(); } catch { }
-                            FileLogger.Info($"[GameStateTracker] Tick: Calling GetAllPlayerLevels...");
-                            try { playerLevels = GetAllPlayerLevels(); } catch { }
-                            FileLogger.Info($"[GameStateTracker] Tick: Calling GetAllPlayerPings...");
-                            try { playerPings = GetAllPlayerPings(); } catch { }
+                        // Report every lobby entry, host or guest. Guests rely on
+                        // IsHost for authority; their Host name is the real lobby
+                        // host (or "" when it cannot be resolved) — never the
+                        // guest's own name.
+                        var region = "UNKNOWN";
+                        var host = isHost ? "UNKNOWN" : "";
+                        int maxPlayers = 15;
+                        List<string>? playerNames = null;
+                        List<int>? playerLevels = null;
+                        List<int>? playerPings = null;
+                        try { region = GameAssembly.CurrentRegionName(); } catch { }
+                        try { host = isHost ? GameAssembly.LocalPlayerName() : GameAssembly.HostPlayerName(); } catch { }
+                        try { maxPlayers = MaxPlayers(); } catch { }
+                        try { playerNames = GameAssembly.GetAllPlayerNames(); } catch { }
+                        try { playerLevels = GetAllPlayerLevels(); } catch { }
+                        try { playerPings = GetAllPlayerPings(); } catch { }
 
-                            var gameVersion = "";
-                            var mapName = "";
-                            var language = "";
-                            var chatType = "";
-                            try { gameVersion = GameAssembly.GameVersion(); } catch { }
-                            try { mapName = GameAssembly.MapName(); } catch { }
-                            try { language = GameAssembly.Language(); } catch { }
-                            try { chatType = GameAssembly.ChatType(); } catch { }
+                        var gameVersion = "";
+                        var mapName = "";
+                        var language = "";
+                        var chatType = "";
+                        try { gameVersion = GameAssembly.GameVersion(); } catch { }
+                        try { mapName = GameAssembly.MapName(); } catch { }
+                        try { language = GameAssembly.Language(); } catch { }
+                        try { chatType = GameAssembly.ChatType(); } catch { }
 
-                            var (regionIp, regionPort) = CurrentServerEndpoint();
+                        var (regionIp, regionPort) = CurrentServerEndpoint();
 
-                            _log.LogInfo($"[GameStateTracker] Lobby created (code {code}, region {region}, regionEndpoint {regionIp}:{regionPort}, host {host}, players {count}, maxPlayers {maxPlayers}).");
-                            _lastPlayerCount = count >= 0 ? count : -1;
-                            try { LobbyCreated?.Invoke(this, new LobbyInfo(code, region, regionIp, regionPort, host, count, maxPlayers, playerNames, playerLevels, playerPings, gameVersion, mapName, language, chatType)); } catch { }
-                        }
-                        else
-                        {
-                            _log.LogInfo("[GameStateTracker] Entered a lobby as a non-host; skipping lobby_created.");
-                        }
+                        _log.LogInfo($"[GameStateTracker] Lobby created (code {code}, region {region}, regionEndpoint {regionIp}:{regionPort}, host {host}, isHost {isHost}, players {count}, maxPlayers {maxPlayers}).");
+                        _lastPlayerNames = playerNames != null ? new List<string>(playerNames) : new List<string>();
+                        try { LobbyCreated?.Invoke(this, new LobbyInfo(code, region, regionIp, regionPort, host, count, maxPlayers, playerNames, playerLevels, playerPings, gameVersion, mapName, language, chatType, isHost)); } catch { }
                     }
                     else if (!inLobby && _wasInLobby)
                     {
-                        if (_lastWasHost)
-                        {
-                            _log.LogInfo("[GameStateTracker] Lobby closed.");
-                            _lastPlayerCount = -1;
-                            try { LobbyClosed?.Invoke(this, ""); } catch { }
-                        }
-                        else
-                        {
-                            _log.LogInfo("[GameStateTracker] Left a lobby as a non-host; skipping lobby_closed.");
-                        }
+                        // Report every exit regardless of host status so the
+                        // launcher can clear its state for guests too.
+                        var wasHost = _lastWasHost;
+                        _log.LogInfo(wasHost
+                            ? "[GameStateTracker] Lobby closed."
+                            : "[GameStateTracker] Left a lobby as a non-host.");
+                        _lastPlayerNames = new List<string>();
+                        try { LobbyClosed?.Invoke(this, new LobbyClosedInfo(wasHost, "")); } catch { }
                         _lastWasHost = false;
                     }
 
-                    if (inLobby && count >= 0)
-                    {
-                        if (_lastPlayerCount < 0)
-                        {
-                            _lastPlayerCount = count;
-                        }
-                        else if (count != _lastPlayerCount)
-                        {
-                            if (count > _lastPlayerCount)
-                            {
-                                _log.LogInfo($"[GameStateTracker] Player joined (count {count}).");
-                                try { PlayerJoined?.Invoke(this, new PlayerInfo("<unknown>", count)); } catch { }
-                            }
-                            else
-                            {
-                                _log.LogInfo($"[GameStateTracker] Player left (count {count}).");
-                                try { PlayerLeft?.Invoke(this, new PlayerInfo("<unknown>", count)); } catch { }
-                            }
-                            _lastPlayerCount = count;
-                        }
-                    }
+                    // Skip the entry tick: _lastPlayerNames was just seeded from
+                    // the snapshot above, so re-diffing there could only produce
+                    // spurious join events if that read came back empty.
+                    if (inLobby && _wasInLobby)
+                        UpdatePlayers(count);
 
                     _wasInLobby = inLobby;
                 }
@@ -241,7 +240,7 @@ public class GameStateTracker : IDisposable
     /// signal AmongUsClient.Instance.HostId == InnerNetClient.CurrentClient
     /// (HostId is an instance property; CurrentClient is a static int on InnerNetClient).
     /// </summary>
-    private static bool IsHost()
+    private bool IsHost()
     {
         try
         {
@@ -257,7 +256,7 @@ public class GameStateTracker : IDisposable
             if (amHostObj != null)
             {
                 var amHost = GameAssembly.ToBool(amHostObj);
-                FileLogger.Info($"[GameStateTracker] IsHost: AmHost={amHost} (type={amHostObj.GetType().Name})");
+                LogIsHostChange($"AmHost={amHost} (type={amHostObj.GetType().Name})", amHost);
                 return amHost;
             }
 
@@ -269,7 +268,7 @@ public class GameStateTracker : IDisposable
                 if (amHostObj2 != null)
                 {
                     var amHost2 = GameAssembly.ToBool(amHostObj2);
-                    FileLogger.Info($"[GameStateTracker] IsHost: InnerNetClient.AmHost={amHost2}");
+                    LogIsHostChange($"InnerNetClient.AmHost={amHost2}", amHost2);
                     return amHost2;
                 }
             }
@@ -284,14 +283,76 @@ public class GameStateTracker : IDisposable
             var currentClientObj = GameAssembly.GetStaticMember(innerNetClientType, "CurrentClient");
             var hostId = GameAssembly.ToInt(hostIdObj);
             var currentClient = GameAssembly.ToInt(currentClientObj);
-            FileLogger.Info($"[GameStateTracker] IsHost fallback: HostId={hostId}, CurrentClient={currentClient}");
-            return currentClient >= 0 && hostId == currentClient;
+            var fallbackIsHost = currentClient >= 0 && hostId == currentClient;
+            LogIsHostChange($"fallback: HostId={hostId}, CurrentClient={currentClient}", fallbackIsHost);
+            return fallbackIsHost;
         }
         catch (Exception ex)
         {
             FileLogger.Error($"[GameStateTracker] IsHost failed: {ex.Message}");
             return false;
         }
+    }
+
+    /// <summary>
+    /// Logs the resolved host value only when it changes, so the 500ms poll
+    /// does not flood the log with the same AmHost/fallback line.
+    /// </summary>
+    private void LogIsHostChange(string detail, bool isHost)
+    {
+        if (_lastLoggedIsHost == isHost)
+            return;
+        _lastLoggedIsHost = isHost;
+        FileLogger.Info($"[GameStateTracker] IsHost: {detail}");
+    }
+
+    /// <summary>
+    /// Diffs the current player-name set against the previous poll and raises
+    /// PlayerJoined/PlayerLeft with the real changed name plus a full snapshot
+    /// (used by the launcher to render the live player list). Uses the quiet
+    /// GetAllPlayerNames overload so the per-tick poll does not spam the log.
+    /// </summary>
+    private void UpdatePlayers(int count)
+    {
+        List<string> names;
+        try
+        {
+            names = GameAssembly.GetAllPlayerNames(log: false);
+        }
+        catch
+        {
+            return;
+        }
+
+        // A transient empty read (scene transition) must not look like every
+        // player leaving; keep the last known set and wait for a real read.
+        if (names.Count == 0)
+            return;
+
+        var added = names.Where(n => !_lastPlayerNames.Contains(n)).ToList();
+        var removed = _lastPlayerNames.Where(n => !names.Contains(n)).ToList();
+        if (added.Count == 0 && removed.Count == 0)
+            return;
+
+        List<int>? levels = null;
+        List<int>? pings = null;
+        try { levels = GetAllPlayerLevels(); } catch { }
+        try { pings = GetAllPlayerPings(); } catch { }
+
+        var effectiveCount = count >= 0 ? count : names.Count;
+
+        if (added.Count > 0)
+        {
+            _log.LogInfo($"[GameStateTracker] Player joined: {added[0]} (count {effectiveCount}).");
+            try { PlayerJoined?.Invoke(this, new PlayerInfo(added[0], effectiveCount, names, levels, pings)); } catch { }
+        }
+        if (removed.Count > 0)
+        {
+            _log.LogInfo($"[GameStateTracker] Player left: {removed[0]} (count {effectiveCount}).");
+            try { PlayerLeft?.Invoke(this, new PlayerInfo(removed[0], effectiveCount, names, levels, pings)); } catch { }
+        }
+
+        _lastPlayerNames = names;
     }
 
     private static string LobbyCode()

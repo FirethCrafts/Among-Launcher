@@ -7,6 +7,10 @@ use crate::ipc::IpcEnvelope;
 /// `player_joined` single events and `players_list` snapshots).
 #[derive(Debug, Clone, Deserialize)]
 pub struct PlayerEntry {
+    /// Accepts `name` (snake fixtures / older mod) or the real mod key
+    /// `playerName` — the game serializes C# anonymous types with default
+    /// `JsonSerializer` settings, so property names are verbatim.
+    #[serde(alias = "playerName")]
     pub name: String,
     #[serde(default)]
     pub level: Option<u32>,
@@ -28,16 +32,48 @@ pub enum IpcMessage {
     LobbyCreated {
         code: String,
         region: String,
+        // Real mod keys are camelCase (`regionIp`/`regionPort`); keep the
+        // snake_case names so fixtures / older mod builds still parse.
+        #[serde(default, alias = "regionIp")]
+        region_ip: Option<String>,
+        #[serde(default, alias = "regionPort")]
+        region_port: Option<u32>,
         host: String,
+        // Real mod key is camelCase (`maxPlayers`); keep the snake_case
+        // name so existing fixtures and older mod builds still parse.
+        #[serde(alias = "maxPlayers")]
         max_players: u32,
+        // Real mod key is `map_name`; `map` is kept for fixtures.
+        #[serde(alias = "map_name")]
         map: String,
+        // Mod builds before the isHost addition omit this entirely.
+        #[serde(default, alias = "isHost")]
+        is_host: bool,
+        // Full roster the mod snapshots at lobby creation. The real mod keys
+        // are camelCase (`playerNames`/`playerLevels`/`playerPings`) and the
+        // mod sends `?? new List<...>()`, so they are never null — only
+        // absent (older builds), which `default` covers. `Plugin.cs` uses
+        // `List<int>` for levels/pings, hence `i32` here.
+        #[serde(default, alias = "playerNames")]
+        player_names: Vec<String>,
+        #[serde(default, alias = "playerLevels")]
+        player_levels: Vec<i32>,
+        #[serde(default, alias = "playerPings")]
+        player_pings: Vec<i32>,
     },
     #[serde(rename = "lobby_closed")]
-    LobbyClosed,
+    LobbyClosed {
+        #[serde(default, alias = "isHost")]
+        is_host: bool,
+    },
     #[serde(rename = "player_joined")]
     PlayerJoined(PlayerEntry),
     #[serde(rename = "player_left")]
-    PlayerLeft { name: String },
+    PlayerLeft {
+        // Real mod key is `playerName`.
+        #[serde(alias = "playerName")]
+        name: String,
+    },
     #[serde(rename = "players_list")]
     PlayersList(Vec<PlayerEntry>),
     #[serde(rename = "join_lobby_result")]
@@ -94,6 +130,69 @@ fn resolve_is_host(entry_is_host: Option<bool>, lobby_host: Option<&str>, name: 
     entry_is_host.unwrap_or(false) || lobby_host == Some(name)
 }
 
+/// Whether a lobby host name is real enough to flag as the host. Mirrors the
+/// mod's `ResolveIsHost` guard: an empty or literal "UNKNOWN" host — the mod's
+/// sentinel when the name could not be resolved — must never be marked host.
+fn host_is_known(host: &str) -> bool {
+    !host.is_empty() && !host.eq_ignore_ascii_case("UNKNOWN")
+}
+
+/// Build the player list the mod snapshotted at lobby creation by zipping
+/// `playerNames` with `playerLevels`/`playerPings` **by index**. Both
+/// side-arrays may be shorter than (or absent from) the names list, so every
+/// access is bounds-checked and a missing value maps to `None` — never a
+/// panic. Negative levels/pings (the mod's "unknown" sentinel) also map to
+/// `None` rather than wrapping into a bogus `u32`. Each player's host flag is
+/// resolved against the lobby host name exactly like the `player_joined` /
+/// `players_list` paths so stored state and emitted events cannot disagree.
+fn seed_players_from_roster(
+    names: &[String],
+    levels: &[i32],
+    pings: &[i32],
+    lobby_host: Option<&str>,
+) -> Vec<crate::lobby::PlayerInfo> {
+    names
+        .iter()
+        .enumerate()
+        .map(|(i, name)| crate::lobby::PlayerInfo {
+            name: name.clone(),
+            level: levels.get(i).copied().and_then(|v| u32::try_from(v).ok()),
+            ping: pings.get(i).copied().and_then(|v| u32::try_from(v).ok()),
+            color: None,
+            is_host: resolve_is_host(None, lobby_host, name),
+        })
+        .collect()
+}
+
+/// Serialize a player list into the exact array-of-objects shape every
+/// `players_list` event carries: `{name, level, ping, color, is_host}`.
+/// Shared by the `LobbyCreated` roster emit and the `PlayersList` snapshot
+/// emit so the two can never drift.
+fn players_list_payload(players: &[crate::lobby::PlayerInfo]) -> serde_json::Value {
+    serde_json::Value::Array(
+        players
+            .iter()
+            .map(|p| {
+                serde_json::json!({
+                    "name": p.name,
+                    "level": p.level,
+                    "ping": p.ping,
+                    "color": p.color,
+                    // snake_case, matching the `player-joined` payload.
+                    "is_host": p.is_host,
+                })
+            })
+            .collect(),
+    )
+}
+
+/// The exact payload every `lobby-closed` event carries: `{ "isHost": bool }`.
+/// Shared by the `LobbyClosed` IPC arm, `disband_lobby`, and the pipe
+/// disconnect path so the frontend listener always sees one shape.
+pub(crate) fn lobby_closed_payload(is_host: bool) -> serde_json::Value {
+    serde_json::json!({ "isHost": is_host })
+}
+
 pub async fn handle_ipc_message(app: &AppHandle, msg: IpcMessage) {
     match msg {
         IpcMessage::GameReady => {
@@ -102,32 +201,63 @@ pub async fn handle_ipc_message(app: &AppHandle, msg: IpcMessage) {
         IpcMessage::LobbyCreated {
             code,
             region,
+            region_ip,
+            region_port,
             host,
             max_players,
             map,
+            is_host,
+            player_names,
+            player_levels,
+            player_pings,
         } => {
             // Populate AppState.lobby_state so post_lobby/disband_lobby/
-            // kick_player can find the lobby the game just created.
-            {
+            // kick_player can find the lobby the game just created. The mod
+            // snapshots the full roster in `playerNames`/`playerLevels`/
+            // `playerPings`; seed from it so entering a populated lobby does
+            // not show an empty player list until the first join/leave.
+            let roster: Vec<crate::lobby::PlayerInfo> = {
                 let state = app.state::<crate::AppState>();
                 let mut lobby = state.lobby_state.write().await;
                 // Any heartbeat from a previous lobby is stale now.
                 lobby.stop_heartbeat().await;
                 lobby.code = Some(code.clone());
                 lobby.region = Some(region.clone());
+                lobby.region_ip = region_ip.clone();
+                lobby.region_port = region_port;
                 lobby.host = Some(host.clone());
                 lobby.max_players = Some(max_players);
                 lobby.map = Some(map.clone());
-                lobby.players = vec![crate::lobby::PlayerInfo {
-                    name: host.clone(),
-                    level: None,
-                    ping: None,
-                    color: None,
-                    is_host: true,
-                }];
+                // Whether THIS machine is the in-game host (drives Host
+                // Panel "you are host" affordances via get_lobby_state).
+                lobby.local_is_host = is_host;
+                let seeded = seed_players_from_roster(
+                    &player_names,
+                    &player_levels,
+                    &player_pings,
+                    lobby.host.as_deref(),
+                );
+                lobby.players = if seeded.is_empty() {
+                    // No roster reported (older mod / not yet populated):
+                    // keep the historical host-only seed so the snapshot
+                    // still has something.
+                    vec![crate::lobby::PlayerInfo {
+                        name: host.clone(),
+                        level: None,
+                        ping: None,
+                        color: None,
+                        is_host: host_is_known(&host),
+                    }]
+                } else {
+                    seeded.clone()
+                };
                 // A brand-new lobby has not been posted yet.
                 lobby.posted = false;
-            }
+                // The roster the mod actually reported (empty when absent) —
+                // the emit below is gated on this, not the host-only
+                // fallback stored in `lobby.players`.
+                seeded
+            };
             let _ = app.emit(
                 "lobby-created",
                 serde_json::json!({
@@ -136,10 +266,20 @@ pub async fn handle_ipc_message(app: &AppHandle, msg: IpcMessage) {
                     "host": host,
                     "maxPlayers": max_players,
                     "map": map,
+                    "isHost": is_host,
                 }),
             );
+            // Emit the seeded roster AFTER `lobby-created`: the frontend's
+            // `lobby-created` handler resets `players` to `[]`, so this must
+            // land second to repopulate it. `roster` is the mod-reported
+            // vector (NOT the host-only fallback stored in `lobby.players`
+            // above): this emit runs whenever that vector is non-empty and is
+            // skipped only when the mod reported no roster at all.
+            if !roster.is_empty() {
+                let _ = app.emit("players_list", players_list_payload(&roster));
+            }
         }
-        IpcMessage::LobbyClosed => {
+        IpcMessage::LobbyClosed { is_host } => {
             // The in-game lobby is gone: stop the heartbeat and clear the
             // state BEFORE emitting so any snapshot read when the event
             // lands is already clean — otherwise the 30s heartbeat keeps the
@@ -150,7 +290,7 @@ pub async fn handle_ipc_message(app: &AppHandle, msg: IpcMessage) {
                 let mut lobby = state.lobby_state.write().await;
                 lobby.clear_lobby().await;
             }
-            let _ = app.emit("lobby-closed", ());
+            let _ = app.emit("lobby-closed", lobby_closed_payload(is_host));
         }
         IpcMessage::PlayerJoined(entry) => {
             let is_host = {
@@ -228,6 +368,11 @@ pub async fn handle_ipc_message(app: &AppHandle, msg: IpcMessage) {
                     }
                 })
                 .collect();
+            // Forward the snapshot so the frontend sees the full roster with
+            // real names (the `player_joined`/`player_left` events carry the
+            // literal "<unknown>" for names). Same shape as the roster emit
+            // after `lobby-created`.
+            let _ = app.emit("players_list", players_list_payload(&lobby.players));
         }
         IpcMessage::JoinResult { success, error } => {
             let _ = app.emit(
@@ -263,15 +408,23 @@ mod tests {
             IpcMessage::LobbyCreated {
                 code,
                 region,
+                region_ip,
+                region_port,
                 host,
                 max_players,
                 map,
+                is_host,
+                ..
             } => {
                 assert_eq!(code, "ABCD");
                 assert_eq!(region, "NA");
+                assert_eq!(region_ip, None);
+                assert_eq!(region_port, None);
                 assert_eq!(host, "player1");
                 assert_eq!(max_players, 10);
                 assert_eq!(map, "The Skeld");
+                // Absent from this legacy fixture → defaults to false.
+                assert!(!is_host);
             }
             _ => panic!("Expected LobbyCreated"),
         }
@@ -279,9 +432,12 @@ mod tests {
 
     #[test]
     fn test_parse_lobby_closed() {
-        let json = r#"{"type": "lobby_closed"}"#;
+        // Legacy fixture adjusted: LobbyClosed is now a struct variant, so
+        // the content field must be present (the mod always sends an
+        // object; `From<IpcEnvelope>` always injects a payload key).
+        let json = r#"{"type": "lobby_closed", "payload": {}}"#;
         let msg: IpcMessage = serde_json::from_str(json).unwrap();
-        assert!(matches!(msg, IpcMessage::LobbyClosed));
+        assert!(matches!(msg, IpcMessage::LobbyClosed { is_host: false }));
     }
 
     #[test]
@@ -370,6 +526,325 @@ mod tests {
         }
     }
 
+    // ---- Regression tests: EXACT payloads the mod actually sends ----
+    //
+    // The original bug slipped through because every fixture above is
+    // synthetic snake_case. The mod (`Among API/Plugin.cs`) serializes C#
+    // anonymous types with DEFAULT `JsonSerializer` settings, so property
+    // names are verbatim camelCase / mixedCase. These tests encode that
+    // real contract and fail against the old snake_case-only enum.
+
+    #[test]
+    fn real_mod_lobby_created_parses() {
+        // Shape copied from Among API/Plugin.cs LobbyCreated handler.
+        let json = r#"{
+            "type": "lobby_created",
+            "payload": {
+                "code": "ABCDEF",
+                "region": "NA",
+                "regionIp": "1.2.3.4",
+                "regionPort": 22023,
+                "host": "HostPlayer",
+                "playerCount": 4,
+                "maxPlayers": 10,
+                "playerNames": ["HostPlayer", "Alice", "Bob", "Carol"],
+                "playerLevels": [1, 5, 7, 9],
+                "playerPings": [0, 30, 45, 60],
+                "mod_type": "vanilla",
+                "status": "lobby",
+                "mods": [],
+                "game_version": "2023.7.12",
+                "map_name": "The Skeld",
+                "language": "en",
+                "chat_type": "chat",
+                "isHost": true
+            }
+        }"#;
+        let msg: IpcMessage = serde_json::from_str(json).unwrap();
+        match msg {
+            IpcMessage::LobbyCreated {
+                code,
+                region,
+                region_ip,
+                region_port,
+                host,
+                max_players,
+                map,
+                is_host,
+                player_names,
+                player_levels,
+                player_pings,
+            } => {
+                assert_eq!(code, "ABCDEF");
+                assert_eq!(region, "NA");
+                assert_eq!(region_ip, Some("1.2.3.4".to_string())); // regionIp
+                assert_eq!(region_port, Some(22023)); // regionPort
+                assert_eq!(host, "HostPlayer");
+                assert_eq!(max_players, 10); // maxPlayers
+                assert_eq!(map, "The Skeld"); // map_name
+                assert!(is_host); // isHost
+                assert_eq!(player_names, vec!["HostPlayer", "Alice", "Bob", "Carol"]);
+                assert_eq!(player_levels, vec![1, 5, 7, 9]);
+                assert_eq!(player_pings, vec![0, 30, 45, 60]);
+            }
+            other => panic!("Expected LobbyCreated, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn real_mod_lobby_created_without_is_host_parses() {
+        // Mod builds predating the isHost addition must still parse.
+        let json = r#"{
+            "type": "lobby_created",
+            "payload": {
+                "code": "ABCDEF",
+                "region": "NA",
+                "host": "HostPlayer",
+                "maxPlayers": 15,
+                "map_name": "Polus"
+            }
+        }"#;
+        let msg: IpcMessage = serde_json::from_str(json).unwrap();
+        match msg {
+            IpcMessage::LobbyCreated {
+                max_players,
+                map,
+                is_host,
+                ..
+            } => {
+                assert_eq!(max_players, 15);
+                assert_eq!(map, "Polus");
+                assert!(!is_host);
+            }
+            other => panic!("Expected LobbyCreated, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn real_mod_lobby_created_via_envelope_is_not_unknown() {
+        // The swallow at `From<IpcEnvelope>` turned parse failures into
+        // `Unknown`, which is why the bug was silent. Exercise the full
+        // envelope → IpcMessage path with the real payload.
+        let envelope = IpcEnvelope {
+            msg_type: "lobby_created".to_string(),
+            id: "test-id".to_string(),
+            timestamp: 1234567890,
+            payload: Some(serde_json::json!({
+                "code": "ABCDEF",
+                "region": "NA",
+                "host": "HostPlayer",
+                "maxPlayers": 10,
+                "map_name": "The Skeld",
+                "isHost": false
+            })),
+        };
+        let msg: IpcMessage = envelope.into();
+        assert!(
+            matches!(msg, IpcMessage::LobbyCreated { .. }),
+            "real mod payload must not degrade to Unknown: {:?}",
+            msg
+        );
+    }
+
+    // ---- R4: roster seeding from `lobby_created` ----
+
+    #[test]
+    fn real_mod_lobby_created_roster_parses_and_seeds_players() {
+        // Exact shape from Among API/Plugin.cs (playerNames/Levels/Pings).
+        let json = r#"{
+            "type": "lobby_created",
+            "payload": {
+                "code": "ABCDEF",
+                "region": "NA",
+                "host": "HostPlayer",
+                "maxPlayers": 10,
+                "map_name": "The Skeld",
+                "isHost": true,
+                "playerNames": ["HostPlayer", "Alice", "Bob"],
+                "playerLevels": [1, 5, 7],
+                "playerPings": [0, 30, 45]
+            }
+        }"#;
+        let msg: IpcMessage = serde_json::from_str(json).unwrap();
+        match msg {
+            IpcMessage::LobbyCreated {
+                player_names,
+                player_levels,
+                player_pings,
+                host,
+                ..
+            } => {
+                assert_eq!(player_names, vec!["HostPlayer", "Alice", "Bob"]);
+                assert_eq!(player_levels, vec![1, 5, 7]);
+                assert_eq!(player_pings, vec![0, 30, 45]);
+
+                let players =
+                    seed_players_from_roster(&player_names, &player_levels, &player_pings, Some(&host));
+                assert_eq!(players.len(), 3);
+                assert_eq!(players[0].name, "HostPlayer");
+                assert_eq!(players[0].level, Some(1));
+                assert_eq!(players[0].ping, Some(0));
+                assert_eq!(players[0].color, None);
+                assert!(players[0].is_host); // name matches lobby host
+                assert_eq!(players[1].name, "Alice");
+                assert_eq!(players[1].level, Some(5));
+                assert_eq!(players[1].ping, Some(30));
+                assert!(!players[1].is_host);
+                assert_eq!(players[2].name, "Bob");
+                assert!(!players[2].is_host);
+            }
+            other => panic!("Expected LobbyCreated, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn lobby_created_absent_roster_parses_as_empty() {
+        // Older mod builds / fixtures omit the roster entirely.
+        let json = r#"{"type": "lobby_created", "payload": {"code": "ABCDEF", "region": "NA", "host": "HostPlayer", "maxPlayers": 10, "map_name": "The Skeld"}}"#;
+        let msg: IpcMessage = serde_json::from_str(json).unwrap();
+        match msg {
+            IpcMessage::LobbyCreated {
+                player_names,
+                player_levels,
+                player_pings,
+                ..
+            } => {
+                assert!(player_names.is_empty());
+                assert!(player_levels.is_empty());
+                assert!(player_pings.is_empty());
+            }
+            other => panic!("Expected LobbyCreated, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn seed_players_from_roster_short_arrays_do_not_panic() {
+        // levels/pings shorter than names (or absent) → None, never a panic.
+        let names = vec!["Host".to_string(), "Alice".to_string(), "Bob".to_string()];
+        let players = seed_players_from_roster(&names, &[3], &[], Some("Host"));
+        assert_eq!(players.len(), 3);
+        assert_eq!(players[0].level, Some(3));
+        assert_eq!(players[0].ping, None);
+        assert_eq!(players[1].level, None);
+        assert_eq!(players[1].ping, None);
+        assert_eq!(players[2].level, None);
+        assert_eq!(players[2].ping, None);
+        assert!(players[0].is_host);
+        assert!(!players[1].is_host);
+    }
+
+    #[test]
+    fn seed_players_from_roster_negative_values_become_none() {
+        // The mod uses negative sentinels for unknown level/ping; they must
+        // not wrap into a bogus u32.
+        let names = vec!["Alice".to_string()];
+        let players = seed_players_from_roster(&names, &[-1], &[-1], None);
+        assert_eq!(players[0].level, None);
+        assert_eq!(players[0].ping, None);
+    }
+
+    #[test]
+    fn seed_players_from_roster_empty_names_is_empty() {
+        let players = seed_players_from_roster(&[], &[1, 2], &[3, 4], Some("Host"));
+        assert!(players.is_empty());
+    }
+
+    #[test]
+    fn players_list_payload_shape_is_stable() {
+        // The emitted `players_list` array element shape must stay
+        // `{name, level, ping, color, is_host}` — the frontend listener
+        // (F3) and `player-joined` consumers depend on it.
+        let players = vec![crate::lobby::PlayerInfo {
+            name: "Alice".to_string(),
+            level: Some(5),
+            ping: Some(30),
+            color: Some("#ff0000".to_string()),
+            is_host: true,
+        }];
+        let payload = players_list_payload(&players);
+        assert_eq!(
+            payload,
+            serde_json::json!([{
+                "name": "Alice",
+                "level": 5,
+                "ping": 30,
+                "color": "#ff0000",
+                "is_host": true,
+            }])
+        );
+    }
+
+    #[test]
+    fn players_list_payload_none_fields_serialize_as_null() {
+        let players = vec![crate::lobby::PlayerInfo {
+            name: "Bob".to_string(),
+            level: None,
+            ping: None,
+            color: None,
+            is_host: false,
+        }];
+        assert_eq!(
+            players_list_payload(&players),
+            serde_json::json!([{
+                "name": "Bob",
+                "level": null,
+                "ping": null,
+                "color": null,
+                "is_host": false,
+            }])
+        );
+    }
+
+    #[test]
+    fn real_mod_lobby_closed_object_parses() {
+        // Shape copied from Among API/Plugin.cs LobbyClosed handler:
+        // an OBJECT (not the old unit variant). `reason` is extra/ignored.
+        let json = r#"{"type": "lobby_closed", "payload": {"code": "ABCDEF", "reason": "disbanded"}}"#;
+        let msg: IpcMessage = serde_json::from_str(json).unwrap();
+        match msg {
+            IpcMessage::LobbyClosed { is_host } => assert!(!is_host),
+            other => panic!("Expected LobbyClosed, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn real_mod_lobby_closed_with_is_host_parses() {
+        let json = r#"{"type": "lobby_closed", "payload": {"code": "ABCDEF", "reason": "disbanded", "isHost": true}}"#;
+        let msg: IpcMessage = serde_json::from_str(json).unwrap();
+        match msg {
+            IpcMessage::LobbyClosed { is_host } => assert!(is_host),
+            other => panic!("Expected LobbyClosed, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn real_mod_player_joined_uses_player_name() {
+        // Shape copied from Among API/Plugin.cs PlayerJoined handler.
+        let json = r#"{"type": "player_joined", "payload": {"playerName": "Alice", "playerCount": 3}}"#;
+        let msg: IpcMessage = serde_json::from_str(json).unwrap();
+        match msg {
+            IpcMessage::PlayerJoined(entry) => {
+                assert_eq!(entry.name, "Alice"); // playerName
+                assert_eq!(entry.level, None);
+                assert_eq!(entry.ping, None);
+                assert_eq!(entry.color, None);
+                assert_eq!(entry.is_host, None);
+            }
+            other => panic!("Expected PlayerJoined, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn real_mod_player_left_uses_player_name() {
+        // Shape copied from Among API/Plugin.cs PlayerLeft handler.
+        let json = r#"{"type": "player_left", "payload": {"playerName": "Charlie", "playerCount": 2}}"#;
+        let msg: IpcMessage = serde_json::from_str(json).unwrap();
+        match msg {
+            IpcMessage::PlayerLeft { name } => assert_eq!(name, "Charlie"), // playerName
+            other => panic!("Expected PlayerLeft, got {:?}", other),
+        }
+    }
+
     #[test]
     fn test_parse_join_result_success() {
         let json = r#"{"type": "join_lobby_result", "payload": {"success": true}}"#;
@@ -441,5 +916,33 @@ mod tests {
         assert!(resolve_is_host(None, Some("Alice"), "Alice"));
         assert!(resolve_is_host(Some(false), Some("Alice"), "Alice"));
         assert!(!resolve_is_host(None, Some("Alice"), "Bob"));
+    }
+
+    #[test]
+    fn host_is_known_rejects_blank_and_unknown() {
+        // The fallback seed must not flag a blank or literal "UNKNOWN"
+        // host — the mod uses "UNKNOWN" as its unresolved-name sentinel
+        // (case-insensitively), mirroring the mod's own `ResolveIsHost`.
+        assert!(host_is_known("Alice"));
+        assert!(host_is_known("unknownPlayer"));
+        assert!(!host_is_known(""));
+        assert!(!host_is_known("UNKNOWN"));
+        assert!(!host_is_known("unknown"));
+        assert!(!host_is_known("UnKnOwN"));
+    }
+
+    #[test]
+    fn lobby_closed_payload_shape_is_stable() {
+        // Every `lobby-closed` producer (the `LobbyClosed` IPC arm,
+        // `disband_lobby`, and the pipe disconnect path) must emit this
+        // exact shape — the frontend listener keys off `isHost`.
+        assert_eq!(
+            lobby_closed_payload(true),
+            serde_json::json!({ "isHost": true })
+        );
+        assert_eq!(
+            lobby_closed_payload(false),
+            serde_json::json!({ "isHost": false })
+        );
     }
 }

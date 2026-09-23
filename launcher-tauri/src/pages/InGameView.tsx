@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { showToast, formatError } from "@/components/Toast";
+import { ConfirmModal } from "@/components/Modal";
 import { Users, Gamepad2, Hash } from "lucide-react";
 
 interface Player {
@@ -48,6 +49,12 @@ interface InGameViewProps {
    * alone would miss events that fired before mount).
    */
   connected: boolean;
+  /**
+   * App-level lobby membership (true while in a lobby, as host or guest).
+   * Used to guard a re-join: joining another lobby kicks you from the
+   * current one, so we confirm first.
+   */
+  inLobby?: boolean;
   /** Pending lobby code from an `amonglauncher://join` deep link, if any. */
   initialJoinCode?: string | null;
   /** Called once the pending deep-link code has been handed to the join flow. */
@@ -56,6 +63,7 @@ interface InGameViewProps {
 
 export default function InGameView({
   connected,
+  inLobby = false,
   initialJoinCode,
   onJoinCodeConsumed,
 }: InGameViewProps) {
@@ -64,6 +72,8 @@ export default function InGameView({
   const [players, setPlayers] = useState<Player[]>([]);
   const [mods, setMods] = useState<ModEntry[]>([]);
   const [joining, setJoining] = useState(false);
+  // Code awaiting confirmation because the user is already in a lobby.
+  const [confirmJoinCode, setConfirmJoinCode] = useState<string | null>(null);
   // Code of the most recent join request — used to set the active lobby on
   // `join_lobby_result` success (the payload carries no code).
   const lastSubmittedCode = useRef<string | null>(null);
@@ -186,13 +196,21 @@ export default function InGameView({
     // Gate on `connected`: the backend now errors honestly with
     // "Not connected" instead of silently queueing the message.
     if (!code || !connected || joining) return;
+    // Guard rail: joining another lobby kicks you from the current one, so
+    // confirm first. This is the single funnel for manual join, Enter,
+    // deep links, and pending-link recovery — one check covers all.
+    if (inLobby) {
+      setConfirmJoinCode(code);
+      return;
+    }
+    await performJoin(code);
+  }
+
+  async function performJoin(code: string) {
     lastSubmittedCode.current = code;
     setJoining(true);
     try {
-      await invoke("send_ipc_message", {
-        msgType: "join_lobby",
-        payload: { code },
-      });
+      await invoke("join_lobby", { code });
     } catch (e) {
       showToast(`Failed to join lobby: ${formatError(e)}`, "error");
     } finally {
@@ -333,6 +351,21 @@ export default function InGameView({
           )}
         </CardContent>
       </Card>
+
+      {/* Guard rail: joining while already in a lobby kicks you from the
+          current one, so make the consequence explicit before proceeding.
+          Non-danger styling — this is a warning, not a destructive action. */}
+      <ConfirmModal
+        isOpen={confirmJoinCode !== null}
+        onClose={() => setConfirmJoinCode(null)}
+        onConfirm={() => {
+          const code = confirmJoinCode;
+          if (code) void performJoin(code);
+        }}
+        title="Join another lobby?"
+        message="You're already in a lobby. Joining another will kick you from your current lobby."
+        confirmText="Join anyway"
+      />
     </div>
   );
 }

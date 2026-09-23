@@ -1,5 +1,11 @@
 import { useState, useEffect, useRef, type ReactNode } from "react";
-import { Routes, Route, useNavigate, Navigate } from "react-router-dom";
+import {
+  Routes,
+  Route,
+  useNavigate,
+  useLocation,
+  Navigate,
+} from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import HomeView from "@/pages/HomeView";
@@ -53,10 +59,16 @@ export default function App() {
 function AppShell() {
   const { config, loggedIn, username, avatarUrl, login } = useLauncher();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const [gameConnected, setGameConnected] = useState(false);
   const [needsSetup, setNeedsSetup] = useState<boolean | null>(null);
   const [pendingJoinCode, setPendingJoinCode] = useState<string | null>(null);
+  // App-level lobby membership, sourced from the backend's lobby lifecycle
+  // events: `null` = not in a lobby; `true`/`false` = in a lobby as
+  // host/guest. Owned here (not in a page) so navigation can react to it and
+  // InGameView can guard re-joins even before its own ipc listeners mount.
+  const [lobbyIsHost, setLobbyIsHost] = useState<boolean | null>(null);
   const [showUpdateModal, setShowUpdateModal] = useState(false);
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const updateChecked = useRef(false);
@@ -73,6 +85,25 @@ function AppShell() {
   // Tracks the previous `gameConnected` value so the pending-deep-link
   // recovery fetch fires exactly on the false→true transition.
   const prevGameConnected = useRef(false);
+  // Latest path, mirrored into a ref so the lobby-closed listener (registered
+  // once) can tell whether the user is currently on /host without having to
+  // re-subscribe on every navigation.
+  const locationRef = useRef(location.pathname);
+  useEffect(() => {
+    locationRef.current = location.pathname;
+  }, [location.pathname]);
+
+  // `useNavigate()` is NOT a stable identity under <HashRouter> (it is not a
+  // data router): the returned function changes on every navigation. Effects
+  // that should navigate only on a STATE transition must not list it as a
+  // dependency, or they re-fire after every route change — which bounced a
+  // host straight back off /ingame and swallowed a deep-link's confirm modal.
+  // Mirror it into a ref and depend only on the state that should trigger the
+  // navigation.
+  const navigateRef = useRef(navigate);
+  useEffect(() => {
+    navigateRef.current = navigate;
+  });
 
   // IPC connection state — registered here at App level, before any page
   // mounts, so pages can take `gameConnected` as pre-mount truth.
@@ -81,8 +112,16 @@ function AppShell() {
       setGameConnected(true);
     });
 
+    // Defense-in-depth alongside the Rust `lobby-closed`-on-disconnect fix:
+    // a host who exits/restarts the game goes through the Rust disconnect
+    // path, which clears `lobby_state` but historically did NOT emit
+    // `lobby-closed`. Without clearing `lobbyIsHost` here, the next
+    // false→true `gameConnected` transition would auto-open a dead /host
+    // panel ("No active lobby"). Clearing both edges guarantees the state
+    // is gone regardless of which event arrives.
     const unlistenDisconnected = listen("ipc:client-disconnected", () => {
       setGameConnected(false);
+      setLobbyIsHost(null);
     });
 
     return () => {
@@ -162,11 +201,83 @@ function AppShell() {
 
   // The /ingame route only exists while the game pipe is up, so defer
   // navigation until connected (otherwise the catch-all redirects home).
+  // Keyed on the code/connection transition only — `navigateRef` keeps this
+  // from re-firing on every unrelated route change.
   useEffect(() => {
     if (pendingJoinCode && gameConnected) {
-      navigate("/ingame");
+      navigateRef.current("/ingame");
     }
-  }, [pendingJoinCode, gameConnected, navigate]);
+  }, [pendingJoinCode, gameConnected]);
+
+  // Lobby lifecycle listeners, registered at App level (before any page can
+  // mount) so lobby membership is known app-wide. `lobby-created` carries
+  // `isHost` (true when THIS machine created the lobby, false for a guest);
+  // `lobby-closed` clears membership and, if the host is looking at the Host
+  // Panel, drops them back to the in-game view (the panel is meaningless
+  // without a lobby). Registered exactly ONCE (empty deps): `navigate` goes
+  // through `navigateRef` so an unstable router identity can't re-subscribe
+  // the listeners on every navigation.
+  useEffect(() => {
+    const unlistenLobbyCreated = listen<{ isHost?: boolean } | null>(
+      "lobby-created",
+      (event) => {
+        setLobbyIsHost(Boolean(event.payload?.isHost));
+      }
+    );
+
+    const unlistenLobbyClosed = listen<{ isHost?: boolean } | null>(
+      "lobby-closed",
+      () => {
+        setLobbyIsHost(null);
+        if (locationRef.current === "/host") {
+          navigateRef.current("/ingame");
+        }
+      }
+    );
+
+    return () => {
+      unlistenLobbyCreated.then((fn) => fn());
+      unlistenLobbyClosed.then((fn) => fn());
+    };
+  }, []);
+
+  // Hosts auto-open the Host Panel. Deferred until `gameConnected` because
+  // the /host route only exists while the pipe is up — same reason the
+  // /ingame navigation above is gated. Guests (lobbyIsHost === false) are
+  // deliberately NOT redirected: they stay on InGameView.
+  //
+  // ONE-SHOT per lobby transition, guarded by `autoOpenedForLobby` rather
+  // than by the dependency array. Listing the unstable `navigate` re-fired
+  // this on every navigation, so a host could never stay on /ingame and a
+  // deep-link confirm modal was bounced away immediately after mounting.
+  // Listing `pendingJoinCode` re-introduced that same class of bug a second
+  // way: InGameView CONSUMES the code on prefill (clearing it to null), and
+  // that null transition re-ran this effect — with `lobbyIsHost === true` and
+  // no pending code it navigated /host, unmounting InGameView and destroying
+  // the just-opened confirm modal (silently swallowing the join). So
+  // `pendingJoinCode` is read here at transition time but is NOT a dependency;
+  // the ref fires exactly once per lobby and only resets when the lobby closes.
+  //
+  // The `!pendingJoinCode` guard resolves a same-commit race: if a deep-link
+  // join lands in the exact commit that `lobbyIsHost` flips true, the
+  // pending-join effect above (declared earlier) navigates /ingame and this
+  // effect (declared later) would then navigate /host — last-write-wins,
+  // dropping the confirm modal. Deferring to the pending join lets /ingame
+  // win. A normal host lobby creation has a null code, so the auto-open
+  // still fires.
+  const autoOpenedForLobby = useRef(false);
+  useEffect(() => {
+    if (lobbyIsHost !== true) {
+      autoOpenedForLobby.current = false; // reset for the next lobby
+      return;
+    }
+    if (!gameConnected || autoOpenedForLobby.current) return;
+    autoOpenedForLobby.current = true;
+    // Read (not depend on) pendingJoinCode: consuming it must NOT re-fire.
+    // If a join is pending at the transition, defer to it (the deep-link wins).
+    if (!pendingJoinCode) navigateRef.current("/host");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lobbyIsHost, gameConnected]);
 
   // Update check runs once, after login, in the background AFTER first
   // paint so a slow network (GitHub) can't block login/render.
@@ -318,6 +429,7 @@ function AppShell() {
             gameConnected={gameConnected}
             username={username}
             avatarUrl={avatarUrl}
+            lobbyIsHost={lobbyIsHost}
           />
           <main className="flex-1 overflow-y-auto p-6">
             <Routes>
@@ -331,6 +443,7 @@ function AppShell() {
                   element={
                     <InGameView
                       connected={gameConnected}
+                      inLobby={lobbyIsHost !== null}
                       initialJoinCode={pendingJoinCode}
                       onJoinCodeConsumed={() => setPendingJoinCode(null)}
                     />

@@ -22,10 +22,13 @@ interface LobbyInfo {
   host?: string;
   maxPlayers?: number;
   map?: string;
+  /** Present on the `lobby-created` event: true when THIS machine is host. */
+  isHost?: boolean;
 }
 
-// Mirrors the `get_lobby_state` command (camelCase — note `isHost` exists
-// ONLY here; the `player-joined` event uses snake_case `is_host`).
+// Mirrors the `get_lobby_state` command (camelCase — note the top-level
+// `isHost` and each player's `isHost` are camelCase; the `player-joined`
+// event uses snake_case `is_host`).
 interface LobbyStateSnapshot {
   code: string | null;
   posted: boolean;
@@ -39,6 +42,8 @@ interface LobbyStateSnapshot {
   hostName: string | null;
   map: string | null;
   maxPlayers: number | null;
+  /** Whether THIS machine is the in-game host. */
+  isHost: boolean;
 }
 
 interface HeartbeatStatus {
@@ -50,6 +55,10 @@ export default function HostControlPanelView() {
   const [lobbyInfo, setLobbyInfo] = useState<LobbyInfo | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
   const [posted, setPosted] = useState(false);
+  // Whether THIS machine is the host. `null` = unknown (no lobby or a
+  // snapshot/event that predates the `isHost` field). A known `false` means
+  // we are a guest in someone else's lobby — render read-only.
+  const [isHost, setIsHost] = useState<boolean | null>(null);
   const [heartbeatOk, setHeartbeatOk] = useState(false);
   const [copied, setCopied] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -89,6 +98,10 @@ export default function HostControlPanelView() {
           );
         }
         if (!sawLobbyEvent.current) {
+          // Fail-closed: a snapshot from an older backend/contract that omits
+          // `isHost` must NOT fall through to the full host panel. The event
+          // path already normalizes with `Boolean(...)`; match it here.
+          setIsHost(Boolean(snapshot.isHost));
           if (snapshot.code) {
             setLobbyInfo({
               code: snapshot.code,
@@ -112,6 +125,7 @@ export default function HostControlPanelView() {
       sawPostedEvent.current = true;
       sawPlayerEvent.current = true;
       setLobbyInfo(event.payload);
+      setIsHost(Boolean(event.payload?.isHost));
       setPlayers([]);
       // POST must stay clickable (it used to be permanently disabled here).
       setPosted(false);
@@ -128,6 +142,7 @@ export default function HostControlPanelView() {
       sawPostedEvent.current = true;
       sawPlayerEvent.current = true;
       setLobbyInfo(null);
+      setIsHost(null);
       setPlayers([]);
       setPosted(false);
       setHeartbeatOk(false);
@@ -149,6 +164,28 @@ export default function HostControlPanelView() {
       setPlayers((prev) => prev.filter((p) => p.name !== event.payload.name));
     });
 
+    const unlistenPlayersList = listen<Player[]>("players_list", (event) => {
+      // Full roster snapshot, emitted right after `lobby-created` (seeded
+      // from the mod's playerNames/playerLevels/playerPings). Without this
+      // the panel showed an empty roster until the first join/leave or a
+      // remount. Player payload only — claim `sawPlayerEvent` so an
+      // in-flight mount snapshot can't clobber a fresher list; must NOT
+      // gate lobbyInfo/posted. Event order is lobby-created → players_list,
+      // so the empty `setPlayers([])` in that handler is replaced here.
+      sawPlayerEvent.current = true;
+      const list = Array.isArray(event.payload) ? event.payload : [];
+      const next: Player[] = list.map((p) => ({
+        name: p.name,
+        level: p.level ?? undefined,
+        ping: p.ping ?? undefined,
+        color: p.color ?? undefined,
+        // Event is snake_case `is_host`; normalize like the snapshot path.
+        is_host: Boolean(p.is_host),
+      }));
+      // Skip the state update when there is nothing to change.
+      setPlayers((prev) => (prev.length === 0 && next.length === 0 ? prev : next));
+    });
+
     const unlistenHeartbeat = listen<HeartbeatStatus>("heartbeat-status", (event) => {
       // Deliberately NOT a snapshot gate: heartbeat only reports HTTP health,
       // it never mutates lobby state (the snapshot can't be made stale by it),
@@ -163,6 +200,7 @@ export default function HostControlPanelView() {
       unlistenLobbyClosed.then((fn) => fn());
       unlistenPlayerJoined.then((fn) => fn());
       unlistenPlayerLeft.then((fn) => fn());
+      unlistenPlayersList.then((fn) => fn());
       unlistenHeartbeat.then((fn) => fn());
     };
   }, []);
@@ -206,6 +244,7 @@ export default function HostControlPanelView() {
       sawPostedEvent.current = true;
       sawPlayerEvent.current = true;
       setLobbyInfo(null);
+      setIsHost(null);
       setPlayers([]);
       setPosted(false);
       setHeartbeatOk(false);
@@ -236,6 +275,33 @@ export default function HostControlPanelView() {
             <p className="text-sm text-muted-foreground text-center">
               No active lobby. Create a lobby in-game to manage it here.
             </p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  // A guest in someone else's lobby: there is a lobby, but this machine has
+  // no host authority. Show read-only lobby info instead of the POST/
+  // Disband/Kick controls.
+  if (isHost === false) {
+    return (
+      <div className="min-h-full p-6 space-y-6">
+        <h1 className="text-3xl font-bold">Host Control Panel</h1>
+        <Card>
+          <CardContent className="pt-6 space-y-4">
+            <p className="text-sm text-muted-foreground text-center">
+              You're in a lobby, but you're not the host. Only the host can
+              post, kick players, or disband it.
+            </p>
+            {lobbyInfo.code && (
+              <div className="flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3">
+                <span className="text-sm text-muted-foreground">Lobby Code</span>
+                <span className="font-mono text-lg font-bold tracking-widest text-primary">
+                  {lobbyInfo.code}
+                </span>
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>

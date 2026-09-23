@@ -7,20 +7,27 @@ const navItems = [
   { path: '/settings', label: 'Settings', icon: Settings },
 ];
 
-const gameItems = [
-  { path: '/ingame', label: 'In Game', icon: Gamepad2 },
-  { path: '/host', label: 'Host Panel', icon: Users },
-];
-
 interface SidebarProps {
   gameConnected: boolean;
   username: string;
   avatarUrl: string;
+  /** App-level lobby membership: `true` = this machine hosts the lobby. */
+  lobbyIsHost: boolean | null;
 }
 
-export function Sidebar({ gameConnected, username, avatarUrl }: SidebarProps) {
+export function Sidebar({ gameConnected, username, avatarUrl, lobbyIsHost }: SidebarProps) {
   const navigate = useNavigate();
   const location = useLocation();
+
+  // "In Game" is available to anyone connected. "Host Panel" only makes sense
+  // while THIS machine actually hosts a lobby — a guest's panel is read-only,
+  // so hide the item rather than tease it.
+  const gameItems = [
+    { path: '/ingame', label: 'In Game', icon: Gamepad2 },
+    ...(lobbyIsHost === true
+      ? [{ path: '/host', label: 'Host Panel', icon: Users }]
+      : []),
+  ];
 
   return (
     <nav className="w-16 flex flex-col items-center py-4 gap-2 bg-card border-r border-border" aria-label="Main navigation">

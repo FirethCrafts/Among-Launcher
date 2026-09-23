@@ -161,10 +161,11 @@ public class Plugin : BasePlugin
                         game_version = info.GameVersion,
                         map_name = info.MapName,
                         language = info.Language,
-                        chat_type = info.ChatType
+                        chat_type = info.ChatType,
+                        isHost = info.IsHost
                     });
 
-                if (_autoPost && !string.IsNullOrEmpty(_serverUrl))
+                if (_autoPost && info.IsHost && !string.IsNullOrEmpty(_serverUrl))
                 {
                     FileLogger.Info("Auto-post: dispatching lobby POST to background thread...");
                     _ = Task.Run(async () =>
@@ -181,21 +182,48 @@ public class Plugin : BasePlugin
                     });
                 }
             };
-            tracker.LobbyClosed += (_, reason) =>
+            tracker.LobbyClosed += (_, closed) =>
             {
-                FileLogger.Info($"Lobby closed: {_lastLobby?.Code ?? ""}");
-                _ = pipe.SendMessageAsync("lobby_closed", new { code = _lastLobby?.Code ?? "", reason });
+                FileLogger.Info($"Lobby closed: {_lastLobby?.Code ?? ""} (wasHost={closed.IsHost})");
+                _ = pipe.SendMessageAsync("lobby_closed", new
+                {
+                    code = _lastLobby?.Code ?? "",
+                    reason = closed.Reason,
+                    isHost = closed.IsHost
+                });
                 _lastLobby = null;
             };
             tracker.PlayerJoined += (_, p) =>
             {
-                FileLogger.Info($"Player joined: count {p.PlayerCount}");
-                _ = pipe.SendMessageAsync("player_joined", new { playerName = p.PlayerName, playerCount = p.PlayerCount });
+                FileLogger.Info($"Player joined: {p.PlayerName} (count {p.PlayerCount})");
+                _ = pipe.SendMessageAsync("player_joined", new
+                {
+                    // `playerName`/`playerCount` keep the original payload shape
+                    // the WPF launcher reads; `name` is the same value under the
+                    // key the tauri launcher's PlayerEntry expects. `is_host` is
+                    // resolved against the known lobby host so the launcher does
+                    // not have to infer it from the name alone.
+                    playerName = p.PlayerName,
+                    name = p.PlayerName,
+                    playerCount = p.PlayerCount,
+                    playerLevel = ClampedSnapshotValue(p.PlayerLevels, p.PlayerNames, p.PlayerName),
+                    level = ClampedSnapshotValue(p.PlayerLevels, p.PlayerNames, p.PlayerName),
+                    playerPing = ClampedSnapshotValue(p.PlayerPings, p.PlayerNames, p.PlayerName),
+                    ping = ClampedSnapshotValue(p.PlayerPings, p.PlayerNames, p.PlayerName),
+                    is_host = ResolveIsHost(p.PlayerName)
+                });
+                SendPlayersList(pipe, p);
             };
             tracker.PlayerLeft += (_, p) =>
             {
-                FileLogger.Info($"Player left: count {p.PlayerCount}");
-                _ = pipe.SendMessageAsync("player_left", new { playerName = p.PlayerName, playerCount = p.PlayerCount });
+                FileLogger.Info($"Player left: {p.PlayerName} (count {p.PlayerCount})");
+                _ = pipe.SendMessageAsync("player_left", new
+                {
+                    playerName = p.PlayerName,
+                    name = p.PlayerName,
+                    playerCount = p.PlayerCount
+                });
+                SendPlayersList(pipe, p);
             };
             tracker.Start();
 
@@ -297,6 +325,71 @@ public class Plugin : BasePlugin
         }
     }
 
+    /// <summary>
+    /// Emits a full `players_list` snapshot (the tauri launcher parses this as
+    /// a list of PlayerEntry). Entry `is_host` is resolved by matching the name
+    /// against the known lobby host so guests still mark the real host.
+    /// </summary>
+    private void SendPlayersList(PipeClient pipe, PlayerInfo p)
+    {
+        var names = p.PlayerNames;
+        if (names == null || names.Count == 0)
+            return;
+
+        var entries = new List<object>(names.Count);
+        for (int i = 0; i < names.Count; i++)
+        {
+            var name = names[i];
+            entries.Add(new
+            {
+                name,
+                level = i < (p.PlayerLevels?.Count ?? 0) ? Math.Max(0, p.PlayerLevels![i]) : (int?)null,
+                ping = i < (p.PlayerPings?.Count ?? 0) ? Math.Max(0, p.PlayerPings![i]) : (int?)null,
+                is_host = ResolveIsHost(name)
+            });
+        }
+
+        _ = pipe.SendMessageAsync("players_list", entries);
+    }
+
+    /// <summary>
+    /// Reads the value aligned to <paramref name="name"/> from a snapshot list
+    /// (names and values are index-aligned by GameData.AllPlayers order).
+    /// </summary>
+    private static int? SnapshotValue(List<int>? values, List<string>? names, string name)
+    {
+        if (values == null || names == null)
+            return null;
+        var index = names.IndexOf(name);
+        if (index < 0 || index >= values.Count)
+            return null;
+        return values[index];
+    }
+
+    /// <summary>
+    /// Same as <see cref="SnapshotValue"/> but clamps negative values to 0.
+    /// The launcher parses `level`/`ping` as `Option<u32>`, and a negative
+    /// value would fail that parse and drop the whole message.
+    /// </summary>
+    private static int? ClampedSnapshotValue(List<int>? values, List<string>? names, string name)
+    {
+        var value = SnapshotValue(values, names, name);
+        return value.HasValue ? Math.Max(0, value.Value) : (int?)null;
+    }
+
+    /// <summary>
+    /// Resolves whether <paramref name="name"/> is the lobby host by matching
+    /// it against the host name captured at lobby creation. Returns false when
+    /// the host name could not be resolved (empty or "UNKNOWN").
+    /// </summary>
+    private bool ResolveIsHost(string name)
+    {
+        var hostName = _lastLobby?.Host;
+        return !string.IsNullOrEmpty(hostName)
+               && !hostName.Equals("UNKNOWN", StringComparison.OrdinalIgnoreCase)
+               && string.Equals(name, hostName, StringComparison.OrdinalIgnoreCase);
+    }
+
     private async Task PostLobbyToBackend(LobbyInfo lobby, CancellationToken ct)
     {
         if (string.IsNullOrEmpty(_serverUrl))
@@ -327,6 +420,8 @@ public class Plugin : BasePlugin
         {
             code = lobby.Code,
             region = lobby.Region,
+            region_ip = lobby.RegionIp,
+            region_port = lobby.RegionPort,
             host = hostName,
             mod_type = modType,
             status = "lobby",

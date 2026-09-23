@@ -619,16 +619,32 @@ mod ipc {
                                 // disconnect — otherwise the 30s heartbeat keeps
                                 // the backend lobby alive (zombie listing) and a
                                 // later snapshot read resurrects a ghost lobby.
-                                {
+                                // Capture the host flag BEFORE wiping: the
+                                // frontend's app-level lobby state keys off
+                                // `isHost` to decide whether to show the Host
+                                // Panel. A host who exits/restarts the game
+                                // would otherwise stay pinned to a dead
+                                // `/host` panel on the next connect.
+                                let was_host = {
                                     let state = app.state::<AppState>();
                                     let mut lobby = state.lobby_state.write().await;
+                                    let was_host = lobby.local_is_host;
                                     lobby.clear_lobby().await;
-                                }
+                                    was_host
+                                };
                                 let _ = app.emit("ipc:client-disconnected", ());
                                 // The game's mod closes the pipe when the game
                                 // exits naturally (not via stop_game), so treat
                                 // disconnect as game-stopped too.
                                 let _ = app.emit("game-stopped", ());
+                                // Same event name/payload shape the
+                                // `LobbyClosed` IPC arm and `disband_lobby`
+                                // emit, so the frontend clears its local lobby
+                                // state uniformly on a game exit too.
+                                let _ = app.emit(
+                                    "lobby-closed",
+                                    ipc_handler::lobby_closed_payload(was_host),
+                                );
                                 eprintln!("[PipeServer] Client disconnected.");
                             }
                             Err(e) => {
@@ -796,9 +812,12 @@ async fn install_game(
 
 #[tauri::command]
 async fn launch_game(
-    _state: State<'_, AppState>,
+    state: State<'_, AppState>,
     game_path: String,
 ) -> Result<String, LauncherError> {
+    // Point the mod at the backend and tell it whether to auto-post, both at
+    // launch time so it is configured before the game's IPC pipe comes up.
+    let auto_post = state.config.read().await.auto_post_lobby;
     let exe = Path::new(&game_path).join("Among Us.exe");
     let game_path = game_path.clone();
     tokio::task::spawn_blocking(move || {
@@ -807,6 +826,8 @@ async fn launch_game(
         }
         std::process::Command::new(&exe)
             .current_dir(&game_path)
+            .arg(if auto_post { "--autopost" } else { "--no-autopost" })
+            .arg(format!("--server-url={}", crate::lobby_backend::BASE_URL))
             .spawn()
             .map_err(|e| LauncherError::InstallFailed(format!("Failed to launch: {}", e)))?;
         Ok("Game launched".to_string())
@@ -1655,6 +1676,9 @@ struct LobbyStateSnapshot {
     host_name: Option<String>,
     map: Option<String>,
     max_players: Option<u32>,
+    /// Serialized as `isHost` (camelCase). Whether this machine is the
+    /// in-game host.
+    is_host: bool,
 }
 
 #[derive(serde::Serialize)]
@@ -1687,6 +1711,7 @@ async fn get_lobby_state(state: State<'_, AppState>) -> Result<LobbyStateSnapsho
         host_name: lobby.host.clone(),
         map: lobby.map.clone(),
         max_players: lobby.max_players,
+        is_host: lobby.local_is_host,
     })
 }
 
@@ -1701,7 +1726,7 @@ fn post_still_valid(state_code: Option<&str>, posted_code: &str) -> bool {
 
 #[tauri::command]
 async fn post_lobby(app: AppHandle, state: State<'_, AppState>) -> Result<(), LauncherError> {
-    let (code, region, max_players, token) = {
+    let (code, region, max_players, region_ip, region_port, token) = {
         let config = state.config.read().await;
         let lobby = state.lobby_state.read().await;
         let code = lobby
@@ -1718,12 +1743,16 @@ async fn post_lobby(app: AppHandle, state: State<'_, AppState>) -> Result<(), La
             code,
             lobby.region.clone().unwrap_or_else(|| "NA".into()),
             lobby.max_players.unwrap_or(10),
+            lobby.region_ip.clone(),
+            lobby.region_port,
             token,
         )
     };
 
     let client = lobby_backend::LobbyBackendClient::new(token.clone());
-    client.create_lobby(&code, &region, max_players).await?;
+    client
+        .create_lobby(&code, &region, max_players, region_ip.as_deref(), region_port)
+        .await?;
 
     {
         let mut lobby = state.lobby_state.write().await;
@@ -1748,8 +1777,59 @@ async fn post_lobby(app: AppHandle, state: State<'_, AppState>) -> Result<(), La
     Ok(())
 }
 
+/// Build the `join_lobby` IPC payload the mod's handler expects.
+///
+/// The mod reads these keys **case-sensitively** as camelCase (`code`,
+/// `region`, `regionIp`, `regionPort`). When the lobby was never posted
+/// (`endpoint` is `None`) or a field is missing we send empty/default
+/// values, so the mod can still attempt the join with its current region
+/// instead of rejecting the message.
+fn join_payload(code: &str, endpoint: Option<lobby_backend::LobbyEndpoint>) -> serde_json::Value {
+    let endpoint = endpoint.unwrap_or(lobby_backend::LobbyEndpoint {
+        region: None,
+        region_ip: None,
+        region_port: None,
+    });
+    serde_json::json!({
+        "code": code,
+        "region": endpoint.region.unwrap_or_default(),
+        "regionIp": endpoint.region_ip.unwrap_or_default(),
+        "regionPort": endpoint.region_port.unwrap_or(0),
+    })
+}
+
+/// Join a lobby by code: resolve its region endpoint from the backend and
+/// hand it to the game's `join_lobby` IPC handler.
+///
+/// A lobby that is missing from the backend is NOT an error — we forward
+/// empty region fields and let the mod fall back to its current region.
 #[tauri::command]
-async fn disband_lobby(state: State<'_, AppState>) -> Result<(), LauncherError> {
+async fn join_lobby(state: State<'_, AppState>, code: String) -> Result<(), LauncherError> {
+    let token = {
+        let config = state.config.read().await;
+        let token = config.discord_access_token.clone();
+        if token.is_empty() {
+            return Err(LauncherError::Auth("Not logged in".into()));
+        }
+        token
+    };
+
+    let client = lobby_backend::LobbyBackendClient::new(token);
+    let endpoint = client.get_lobby_endpoint(&code).await?;
+    let payload = join_payload(&code, endpoint);
+
+    let handle = state.pipe_handle.lock().await;
+    if let Some(ref h) = *handle {
+        h.send_envelope("join_lobby", Some(payload))
+            .await
+            .map_err(LauncherError::Ipc)
+    } else {
+        Err(LauncherError::Ipc("Pipe server not initialized".to_string()))
+    }
+}
+
+#[tauri::command]
+async fn disband_lobby(app: AppHandle, state: State<'_, AppState>) -> Result<(), LauncherError> {
     let (code, token) = {
         let config = state.config.read().await;
         let lobby = state.lobby_state.read().await;
@@ -1765,13 +1845,25 @@ async fn disband_lobby(state: State<'_, AppState>) -> Result<(), LauncherError> 
     };
 
     let client = lobby_backend::LobbyBackendClient::new(token);
-    client.disband(&code).await?;
+    // A 404 means the backend lobby is already gone (expired / already
+    // disbanded) — that is success, so the local clear + `lobby-closed`
+    // emit below always run and the host is never stranded on the panel.
+    client.disband_allow_missing(&code).await?;
 
-    let mut lobby = state.lobby_state.write().await;
-    lobby.stop_heartbeat().await;
-    lobby.code = None;
-    lobby.posted = false;
-    lobby.players.clear();
+    // Capture the host flag before wiping: the frontend's app-level lobby
+    // state keys off `isHost` to decide whether to show the Host Panel.
+    let was_host = {
+        let mut lobby = state.lobby_state.write().await;
+        let was_host = lobby.local_is_host;
+        // Full clear via the shared helper (stop_heartbeat + wipe ALL
+        // fields) so a later `get_lobby_state` cannot report a dead
+        // lobby's region/host/map metadata.
+        lobby.clear_lobby().await;
+        was_host
+    };
+    // Same event shape the `LobbyClosed` IPC arm emits, so the frontend
+    // listener clears its local lobby state uniformly.
+    let _ = app.emit("lobby-closed", ipc_handler::lobby_closed_payload(was_host));
     Ok(())
 }
 
@@ -2069,6 +2161,7 @@ pub fn run() {
             browse_files,
             get_mod_list,
             post_lobby,
+            join_lobby,
             disband_lobby,
             kick_player,
             get_lobby_state,
@@ -2395,5 +2488,60 @@ mod post_lobby_tests {
     fn post_still_valid_rejects_replaced_state() {
         // A different lobby replaced this one mid-HTTP.
         assert!(!post_still_valid(Some("ZZ99YY"), "AB12CD"));
+    }
+
+    #[test]
+    fn join_payload_uses_camel_case_keys_with_endpoint() {
+        let payload = join_payload(
+            "AB12CD",
+            Some(lobby_backend::LobbyEndpoint {
+                region: Some("EU".into()),
+                region_ip: Some("5.6.7.8".into()),
+                region_port: Some(22023),
+            }),
+        );
+        assert_eq!(
+            payload,
+            serde_json::json!({
+                "code": "AB12CD",
+                "region": "EU",
+                "regionIp": "5.6.7.8",
+                "regionPort": 22023,
+            })
+        );
+        // The mod reads these keys case-sensitively: camelCase only.
+        assert!(payload.get("regionIp").is_some());
+        assert!(payload.get("region_ip").is_none());
+    }
+
+    #[test]
+    fn join_payload_falls_back_to_empty_defaults_when_not_posted() {
+        // `get_lobby_endpoint` returned Ok(None) (404): not posted / gone.
+        let payload = join_payload("ZZ99YY", None);
+        assert_eq!(
+            payload,
+            serde_json::json!({
+                "code": "ZZ99YY",
+                "region": "",
+                "regionIp": "",
+                "regionPort": 0,
+            })
+        );
+    }
+
+    #[test]
+    fn join_payload_fills_missing_endpoint_fields_with_defaults() {
+        // Backend row exists but region_ip/region_port were null.
+        let payload = join_payload(
+            "AB12CD",
+            Some(lobby_backend::LobbyEndpoint {
+                region: Some("NA".into()),
+                region_ip: None,
+                region_port: None,
+            }),
+        );
+        assert_eq!(payload["region"], "NA");
+        assert_eq!(payload["regionIp"], "");
+        assert_eq!(payload["regionPort"], 0);
     }
 }
