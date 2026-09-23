@@ -6,32 +6,14 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { User, FolderOpen, RotateCcw, Info, LogOut, Store, Wand2, Copy, Loader2 } from "lucide-react";
-import { showToast } from "@/components/Toast";
-import pkg from "../../package.json";
+import { User, FolderOpen, RotateCcw, Info, LogOut, LogIn, Store, Wand2, Copy, Loader2 } from "lucide-react";
+import { showToast, formatError } from "@/components/Toast";
+import { useLauncher, type UserInfo } from "@/state/LauncherContext";
 
 interface GameSearchResult {
   path?: string | null;
   storefront?: string | null;
   detected_but_unavailable?: boolean;
-}
-
-interface LauncherConfig {
-  storefront: string | null;
-  modded_install_path: string;
-  avatar_url: string;
-  username: string;
-  discord_access_token: string;
-  profiles: Array<{ name: string; mods: Array<{ name: string }> }>;
-  library: Array<{ path: string; storefront: string | null }>;
-  debug_mode: boolean;
-  auto_post_lobby: boolean;
-  last_seen_version: string;
-}
-
-interface AccountInfo {
-  username: string;
-  avatarUrl: string | null;
 }
 
 const STOREFRONT_OPTIONS = [
@@ -41,48 +23,36 @@ const STOREFRONT_OPTIONS = [
 ] as const;
 
 export default function SettingsView() {
-  const [account, setAccount] = useState<AccountInfo | null>(null);
-  const [gamePath, setGamePath] = useState("");
+  const { config, updateConfig, loggedIn, username, avatarUrl, login, logout } =
+    useLauncher();
   const [version, setVersion] = useState("");
-  const [storefront, setStorefront] = useState<string>("");
-  const [fullConfig, setFullConfig] = useState<LauncherConfig | null>(null);
   const [detectedPath, setDetectedPath] = useState<string | null>(null);
   const [detectedStorefront, setDetectedStorefront] = useState<string | null>(null);
   const [detecting, setDetecting] = useState(false);
+  const [signingIn, setSigningIn] = useState(false);
+
+  // Config I/O lives in the shared context — no local read_config /
+  // whole-object write_config copies that can go stale and clobber
+  // concurrent updates from other pages.
+  const gamePath = config?.modded_install_path ?? "";
+  const storefront = config?.storefront ?? "";
 
   useEffect(() => {
-    loadSettings();
-  }, []);
-
-  async function loadSettings() {
-    try {
-      const config = await invoke<LauncherConfig>("read_config");
-      setFullConfig(config);
-
-      if (config.username) {
-        setAccount({
-          username: config.username,
-          avatarUrl: config.avatar_url || null,
-        });
-      } else {
-        setAccount(null);
-      }
-
-      setGamePath(config.modded_install_path || "");
-      setStorefront(config.storefront || "");
-      setVersion(pkg.version || "Unknown");
-
-      try {
-        const result = await invoke<GameSearchResult>("detect_game", {});
+    // Runtime version from the Rust side — package.json's build-time
+    // version goes stale (historic builds shipped 1.0.x while the release
+    // was 1.2.x). Rejection (command not available) falls back to "Unknown".
+    invoke<string>("get_version")
+      .then((v) => setVersion(v || "Unknown"))
+      .catch(() => setVersion("Unknown"));
+    invoke<GameSearchResult>("detect_game", {})
+      .then((result) => {
         setDetectedPath(result.path ?? null);
         setDetectedStorefront(result.storefront ?? null);
-      } catch {
+      })
+      .catch(() => {
         // Silent: detection is non-critical
-      }
-    } catch (e) {
-      showToast("Failed to load settings", "error");
-    }
-  }
+      });
+  }, []);
 
   async function browseGamePath() {
     try {
@@ -92,14 +62,9 @@ export default function SettingsView() {
       });
       if (selected) {
         const newPath = Array.isArray(selected) ? selected[0] : selected;
-        setGamePath(newPath);
-        if (fullConfig) {
-          const updatedConfig = { ...fullConfig, modded_install_path: newPath };
-          await invoke("write_config", { newConfig: updatedConfig });
-          setFullConfig(updatedConfig);
-        }
+        await updateConfig({ modded_install_path: newPath });
       }
-    } catch (e) {
+    } catch {
       showToast("Failed to browse", "error");
     }
   }
@@ -108,45 +73,40 @@ export default function SettingsView() {
     try {
       const localData = await localDataDir();
       const defaultPath = await join(localData, "AmongLauncher", "ModdedAmongUs");
-      setGamePath(defaultPath);
-      if (fullConfig) {
-        const updatedConfig = { ...fullConfig, modded_install_path: defaultPath };
-        await invoke("write_config", { newConfig: updatedConfig });
-        setFullConfig(updatedConfig);
-      }
-    } catch (e) {
+      await updateConfig({ modded_install_path: defaultPath });
+    } catch {
       showToast("Failed to reset path", "error");
     }
   }
 
-  async function logout() {
+  async function handleLogout() {
     try {
-      if (fullConfig) {
-        const updatedConfig = {
-          ...fullConfig,
-          discord_access_token: "",
-          username: "",
-          avatar_url: "",
-        };
-        await invoke("write_config", { newConfig: updatedConfig });
-        setFullConfig(updatedConfig);
-        setAccount(null);
-        showToast("Logged out", "success");
-      }
+      // Context logout clears credentials in the backend config AND flips
+      // app auth state, so App switches straight to the Welcome screen.
+      await logout();
+      showToast("Logged out", "success");
     } catch (e) {
-      showToast("Failed to logout", "error");
+      showToast(`Failed to logout: ${formatError(e)}`, "error");
+    }
+  }
+
+  async function signIn() {
+    setSigningIn(true);
+    try {
+      const user = await invoke<UserInfo>("login_discord");
+      await login(user);
+      showToast("Signed in", "success");
+    } catch (e) {
+      showToast(formatError(e), "error");
+    } finally {
+      setSigningIn(false);
     }
   }
 
   async function setStorefrontValue(value: string) {
     try {
-      setStorefront(value);
-      if (fullConfig) {
-        const updatedConfig = { ...fullConfig, storefront: value };
-        await invoke("write_config", { newConfig: updatedConfig });
-        setFullConfig(updatedConfig);
-      }
-    } catch (e) {
+      await updateConfig({ storefront: value });
+    } catch {
       showToast("Failed to set storefront", "error");
     }
   }
@@ -169,7 +129,7 @@ export default function SettingsView() {
       } else {
         showToast("No Among Us installation found", "error");
       }
-    } catch (e) {
+    } catch {
       showToast("No Among Us installation found", "error");
     } finally {
       setDetecting(false);
@@ -199,12 +159,12 @@ export default function SettingsView() {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            {account ? (
+            {loggedIn ? (
               <>
                 <div className="flex items-center gap-4">
-                  {account.avatarUrl ? (
+                  {avatarUrl ? (
                     <img
-                      src={account.avatarUrl}
+                      src={avatarUrl}
                       alt="Avatar"
                       className="h-12 w-12 rounded-full border-2 border-primary"
                     />
@@ -214,17 +174,27 @@ export default function SettingsView() {
                     </div>
                   )}
                   <div>
-                    <p className="font-medium">{account.username}</p>
+                    <p className="font-medium">{username || "Signed in"}</p>
                     <Badge variant="neutral">Discord</Badge>
                   </div>
                 </div>
-                <Button onClick={logout} variant="destructive" className="w-full">
+                <Button onClick={() => void handleLogout()} variant="destructive" className="w-full">
                   <LogOut className="h-4 w-4" />
                   Logout
                 </Button>
               </>
             ) : (
-              <p className="text-sm text-muted-foreground">Not logged in.</p>
+              <>
+                <p className="text-sm text-muted-foreground">Not logged in.</p>
+                <Button onClick={() => void signIn()} className="w-full" disabled={signingIn}>
+                  {signingIn ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <LogIn className="h-4 w-4" />
+                  )}
+                  Sign in
+                </Button>
+              </>
             )}
           </CardContent>
         </Card>
@@ -246,7 +216,14 @@ export default function SettingsView() {
                   placeholder="Not detected — install Among Us via Steam/Epic first"
                   className="flex-1 font-mono text-xs"
                 />
-                <Button onClick={copyDetectedPath} variant="ghost" size="icon" disabled={!detectedPath}>
+                <Button
+                  onClick={() => void copyDetectedPath()}
+                  variant="ghost"
+                  size="icon"
+                  disabled={!detectedPath}
+                  title="Copy detected path"
+                  aria-label="Copy detected path"
+                >
                   <Copy className="h-4 w-4" />
                 </Button>
               </div>
@@ -260,10 +237,22 @@ export default function SettingsView() {
                   placeholder="No path set"
                   className="flex-1 font-mono text-xs"
                 />
-                <Button onClick={browseGamePath} variant="outline" size="icon">
+                <Button
+                  onClick={() => void browseGamePath()}
+                  variant="outline"
+                  size="icon"
+                  title="Browse for modded game folder"
+                  aria-label="Browse for modded game folder"
+                >
                   <FolderOpen className="h-4 w-4" />
                 </Button>
-                <Button onClick={resetGamePath} variant="outline" size="icon">
+                <Button
+                  onClick={() => void resetGamePath()}
+                  variant="outline"
+                  size="icon"
+                  title="Reset to default path"
+                  aria-label="Reset to default path"
+                >
                   <RotateCcw className="h-4 w-4" />
                 </Button>
               </div>
@@ -284,7 +273,7 @@ export default function SettingsView() {
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <label className="text-sm font-medium">Platform</label>
-                <Button variant="outline" size="sm" onClick={autoDetect} disabled={detecting}>
+                <Button variant="outline" size="sm" onClick={() => void autoDetect()} disabled={detecting}>
                   {detecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
                   {detecting ? "Detecting..." : "Auto-detect"}
                 </Button>
@@ -296,7 +285,7 @@ export default function SettingsView() {
                     variant={storefront === option.value ? "default" : "outline"}
                     size="sm"
                     className="flex-1"
-                    onClick={() => setStorefrontValue(option.value)}
+                    onClick={() => void setStorefrontValue(option.value)}
                   >
                     {option.label}
                   </Button>
@@ -316,7 +305,7 @@ export default function SettingsView() {
           <CardContent>
             <div className="flex items-center justify-between">
               <span className="text-sm text-muted-foreground">Version</span>
-              <Badge variant="muted">{version || "Unknown"}</Badge>
+              <Badge variant="muted">{version || "…"}</Badge>
             </div>
           </CardContent>
         </Card>

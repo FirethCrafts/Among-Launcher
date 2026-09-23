@@ -9,7 +9,9 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { showToast } from "@/components/Toast";
+import { ConfirmModal } from "@/components/Modal";
 import { LibraryPickerModal } from "@/components/LibraryPickerModal";
+import { useLauncher, type LauncherConfig } from "@/state/LauncherContext";
 import { Play, Square, Gamepad2, FolderOpen, Package, Folder, Copy, Trash2, Archive, Library } from "lucide-react";
 
 interface GameSearchResult {
@@ -21,13 +23,6 @@ interface GameSearchResult {
 interface InstallStatus {
   bepinex_installed: boolean;
   among_api_installed: boolean;
-}
-
-interface LauncherConfig {
-  storefront?: string | null;
-  modded_install_path: string;
-  debug_mode: boolean;
-  auto_post_lobby: boolean;
 }
 
 interface ModEntry {
@@ -54,22 +49,35 @@ function formatBytes(bytes: number): string {
 
 export default function HomeView() {
   const navigate = useNavigate();
+  const { config, updateConfig } = useLauncher();
   const [gamePath, setGamePath] = useState<string | null>(null);
   const [storefront, setStorefront] = useState<string | null>(null);
+  const [detected, setDetected] = useState<GameSearchResult | null>(null);
   const [isRunning, setIsRunning] = useState(false);
-  const [autoPost, setAutoPost] = useState(false);
-  const [debugMode, setDebugMode] = useState(false);
   const [bepinexInstalled, setBepinexInstalled] = useState(false);
   const [amongApiInstalled, setAmongApiInstalled] = useState(false);
   const [mods, setMods] = useState<ModEntry[]>([]);
-  const [config, setConfig] = useState<LauncherConfig | null>(null);
   const [installProgress, setInstallProgress] = useState<InstallProgress | null>(null);
   const [loading, setLoading] = useState(true);
   const [libraryPickerOpen, setLibraryPickerOpen] = useState(false);
+  const [removeTarget, setRemoveTarget] = useState<ModEntry | null>(null);
+  const [confirmStop, setConfirmStop] = useState(false);
 
   useEffect(() => {
-    load().finally(() => setLoading(false));
+    let cancelled = false;
+    (async () => {
+      try {
+        const result = await invoke<GameSearchResult>("detect_game", {});
+        if (!cancelled) setDetected(result);
+      } catch {
+        if (!cancelled) showToast("Failed to detect game", "error");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
 
+    // `game-stopped` also fires on natural game exit and can fire twice on a
+    // manual stop (command + IPC disconnect) — setting false is idempotent.
     const unlistenGameStopped = listen("game-stopped", () => {
       setIsRunning(false);
     });
@@ -82,10 +90,23 @@ export default function HomeView() {
     });
 
     return () => {
+      cancelled = true;
       unlistenGameStopped.then((fn) => fn());
       unlistenInstallProgress.then((fn) => fn());
     };
   }, []);
+
+  // Derive path + storefront from the shared config (context) plus local
+  // detection fallback — no per-page read_config/whole-object write.
+  useEffect(() => {
+    if (!config) return;
+    setStorefront(config.storefront || detected?.storefront || null);
+    const moddedPath =
+      config.modded_install_path && config.modded_install_path.trim()
+        ? config.modded_install_path
+        : null;
+    setGamePath(moddedPath || detected?.path || null);
+  }, [config, detected]);
 
   useEffect(() => {
     if (gamePath) {
@@ -93,36 +114,6 @@ export default function HomeView() {
       loadMods();
     }
   }, [gamePath]);
-
-  async function load() {
-    let detected: GameSearchResult | null = null;
-    let cfg: LauncherConfig | null = null;
-    try {
-      detected = await invoke<GameSearchResult>("detect_game", {});
-    } catch {
-      showToast("Failed to detect game", "error");
-    }
-    try {
-      cfg = await invoke<LauncherConfig>("read_config");
-    } catch {
-      showToast("Failed to load config", "error");
-    }
-
-    if (cfg) {
-      setConfig(cfg);
-      setAutoPost(cfg.auto_post_lobby);
-      setDebugMode(cfg.debug_mode);
-      setStorefront(cfg.storefront || detected?.storefront || null);
-      const moddedPath =
-        cfg.modded_install_path && cfg.modded_install_path.trim()
-          ? cfg.modded_install_path
-          : null;
-      setGamePath(moddedPath || detected?.path || null);
-    } else if (detected?.path) {
-      setGamePath(detected.path);
-      setStorefront(detected.storefront || null);
-    }
-  }
 
   async function checkInstallStatus() {
     if (!gamePath) return;
@@ -182,21 +173,23 @@ export default function HomeView() {
     }
   }
 
-  async function handleToggle(field: keyof LauncherConfig, currentValue: boolean) {
-    const newValue = !currentValue;
-    if (field === "auto_post_lobby") setAutoPost(newValue);
-    if (field === "debug_mode") setDebugMode(newValue);
-
-    if (config) {
-      const newConfig = { ...config, [field]: newValue };
-      try {
-        await invoke("write_config", { newConfig });
-        setConfig(newConfig);
-      } catch {
-        showToast("Failed to save option", "error");
-        if (field === "auto_post_lobby") setAutoPost(!newValue);
-        if (field === "debug_mode") setDebugMode(!newValue);
-      }
+  async function handleToggle(field: "auto_post_lobby" | "debug_mode") {
+    // Guard BEFORE any optimistic flip: without config there is nothing to
+    // merge into or persist, and flipping first shows a phantom toggle. (#8)
+    if (!config) {
+      showToast("Settings are still loading", "error");
+      return;
+    }
+    try {
+      const partial: Partial<LauncherConfig> =
+        field === "auto_post_lobby"
+          ? { auto_post_lobby: !config.auto_post_lobby }
+          : { debug_mode: !config.debug_mode };
+      // updateConfig applies the flip optimistically and rolls it back on
+      // failure — no local mirror state to desync.
+      await updateConfig(partial);
+    } catch {
+      showToast("Failed to save option", "error");
     }
   }
 
@@ -238,6 +231,7 @@ export default function HomeView() {
   }
 
   const isReady = !!gamePath && bepinexInstalled && amongApiInstalled;
+  const libraryCount = config?.library.length ?? 0;
 
   return (
     <div className="min-h-full p-6 space-y-6">
@@ -326,12 +320,12 @@ export default function HomeView() {
             <div>
               {isReady ? (
                 isRunning ? (
-                  <Button onClick={stopGame} variant="destructive" size="lg">
+                  <Button onClick={() => setConfirmStop(true)} variant="destructive" size="lg">
                     <Square className="h-5 w-5" />
                     Stop
                   </Button>
                 ) : (
-                  <Button onClick={launchGame} size="lg">
+                  <Button onClick={() => void launchGame()} size="lg">
                     <Play className="h-5 w-5" />
                     Launch
                   </Button>
@@ -356,7 +350,13 @@ export default function HomeView() {
                 <span className="text-xs font-mono text-muted-foreground truncate max-w-[320px]">
                   {gamePath}
                 </span>
-                <Button variant="ghost" size="sm" onClick={copyPath} aria-label="Copy game path">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => void copyPath()}
+                  aria-label="Copy game path"
+                  title="Copy game path"
+                >
                   <Copy className="h-3 w-3" />
                 </Button>
               </div>
@@ -385,7 +385,9 @@ export default function HomeView() {
           </CardHeader>
           <CardContent>
             {mods.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No mods installed.</p>
+              <p className="text-sm text-muted-foreground">
+                No mods installed yet — use Import Mod or From Library below.
+              </p>
             ) : (
               <ul className="space-y-1">
                 {mods.map((mod) => (
@@ -408,7 +410,7 @@ export default function HomeView() {
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => copyModToLibrary(mod)}
+                        onClick={() => void copyModToLibrary(mod)}
                         aria-label={`Save ${mod.name} to library`}
                         title="Save to library"
                       >
@@ -417,15 +419,18 @@ export default function HomeView() {
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => browseFiles(mod.path)}
+                        onClick={() => void browseFiles(mod.path)}
+                        aria-label={`Open ${mod.name} folder`}
+                        title="Open folder"
                       >
                         <Folder className="h-3 w-3" />
                       </Button>
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => removeMod(mod)}
+                        onClick={() => setRemoveTarget(mod)}
                         aria-label={`Remove ${mod.name}`}
+                        title="Remove mod"
                       >
                         <Trash2 className="h-3 w-3" />
                       </Button>
@@ -435,11 +440,17 @@ export default function HomeView() {
               </ul>
             )}
             <div className="flex gap-2 mt-4">
-              <Button onClick={handleImportMod} variant="outline" className="flex-1">
+              <Button onClick={() => void handleImportMod()} variant="outline" className="flex-1">
                 <FolderOpen className="h-4 w-4 mr-2" />
                 Import Mod
               </Button>
-              <Button onClick={() => setLibraryPickerOpen(true)} variant="outline" className="flex-1">
+              <Button
+                onClick={() => setLibraryPickerOpen(true)}
+                variant="outline"
+                className="flex-1"
+                disabled={libraryCount === 0}
+                title={libraryCount === 0 ? "Library is empty" : "Install a mod from your library"}
+              >
                 <Library className="h-4 w-4 mr-2" />
                 From Library
               </Button>
@@ -462,21 +473,44 @@ export default function HomeView() {
               <div className="flex items-center justify-between">
                 <span className="text-sm font-medium">Auto-post game data</span>
                 <Switch
-                  checked={autoPost}
-                  onCheckedChange={() => handleToggle("auto_post_lobby", autoPost)}
+                  checked={config?.auto_post_lobby ?? false}
+                  disabled={!config}
+                  onCheckedChange={() => void handleToggle("auto_post_lobby")}
                 />
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-sm font-medium">Debug mode</span>
                 <Switch
-                  checked={debugMode}
-                  onCheckedChange={() => handleToggle("debug_mode", debugMode)}
+                  checked={config?.debug_mode ?? false}
+                  disabled={!config}
+                  onCheckedChange={() => void handleToggle("debug_mode")}
                 />
               </div>
             </div>
           </CardContent>
         </Card>
       </div>
+
+      <ConfirmModal
+        isOpen={removeTarget !== null}
+        onClose={() => setRemoveTarget(null)}
+        onConfirm={() => {
+          const mod = removeTarget;
+          if (mod) void removeMod(mod);
+        }}
+        title="Remove mod?"
+        message={`Remove ${removeTarget?.filename ?? ""} from the modded install? You can add it back later via Import Mod or Library.`}
+        danger
+        confirmText="Remove"
+      />
+      <ConfirmModal
+        isOpen={confirmStop}
+        onClose={() => setConfirmStop(false)}
+        onConfirm={() => void stopGame()}
+        title="Stop the game?"
+        message="Among Us will close immediately. Progress in the current match is lost."
+        confirmText="Stop"
+      />
         </>
       )}
     </div>

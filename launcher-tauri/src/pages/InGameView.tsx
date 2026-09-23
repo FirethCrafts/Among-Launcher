@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -34,13 +34,41 @@ interface PlayerPayload {
   color: string;
 }
 
-export default function InGameView() {
+// Payload of the game's `join_lobby_result` IPC message (see
+// src-tauri/src/ipc_handler.rs — `JoinResult { success, error }`).
+interface JoinResultPayload {
+  success?: boolean;
+  error?: string | null;
+}
+
+interface InGameViewProps {
+  /**
+   * Game connection state owned by App — App registers its listener before
+   * this page can mount, so this reflects pre-mount truth (a local listener
+   * alone would miss events that fired before mount).
+   */
+  connected: boolean;
+  /** Pending lobby code from an `amonglauncher://join` deep link, if any. */
+  initialJoinCode?: string | null;
+  /** Called once the pending deep-link code has been handed to the join flow. */
+  onJoinCodeConsumed?: () => void;
+}
+
+export default function InGameView({
+  connected,
+  initialJoinCode,
+  onJoinCodeConsumed,
+}: InGameViewProps) {
   const [lobbyCode, setLobbyCode] = useState("");
   const [activeLobbyCode, setActiveLobbyCode] = useState<string | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
   const [mods, setMods] = useState<ModEntry[]>([]);
-  const [connected, setConnected] = useState(false);
   const [joining, setJoining] = useState(false);
+  // Code of the most recent join request — used to set the active lobby on
+  // `join_lobby_result` success (the payload carries no code).
+  const lastSubmittedCode = useRef<string | null>(null);
+  // Deep-link codes must auto-submit at most once each.
+  const autoJoinHandled = useRef<string | null>(null);
 
   const handleIpcMessage = useCallback((event: { payload: IpcEnvelope }) => {
     const { type, payload } = event.payload;
@@ -81,6 +109,24 @@ export default function InGameView() {
         }
         break;
       }
+      case "join_lobby_result": {
+        // The game's answer to our join request — success/failure was
+        // previously invisible. Payload: { success, error }.
+        const result = payload as JoinResultPayload;
+        if (result?.success) {
+          const code = (lastSubmittedCode.current ?? "").trim().toUpperCase();
+          if (code) {
+            setActiveLobbyCode(code);
+          }
+          showToast(`Joined lobby ${code || "lobby"}`, "success");
+        } else {
+          showToast(
+            `Failed to join lobby: ${result?.error || "unknown error"}`,
+            "error"
+          );
+        }
+        break;
+      }
     }
   }, []);
 
@@ -88,19 +134,43 @@ export default function InGameView() {
     loadMods();
 
     const unlistenMessage = listen<IpcEnvelope>("ipc:message", handleIpcMessage);
-    const unlistenConnected = listen("ipc:client-connected", () => setConnected(true));
+    // Connection state itself comes from the `connected` prop (App level);
+    // this listener just clears stale lobby data immediately on disconnect
+    // (App will unmount this route right after).
     const unlistenDisconnected = listen("ipc:client-disconnected", () => {
-      setConnected(false);
       setActiveLobbyCode(null);
       setPlayers([]);
     });
 
     return () => {
       unlistenMessage.then((fn) => fn());
-      unlistenConnected.then((fn) => fn());
       unlistenDisconnected.then((fn) => fn());
     };
   }, [handleIpcMessage]);
+
+  // Deep-link join: prefill the input and auto-submit once connected.
+  useEffect(() => {
+    if (!initialJoinCode) return;
+    const code = initialJoinCode.trim().toUpperCase();
+    if (!code) {
+      onJoinCodeConsumed?.();
+      return;
+    }
+    setLobbyCode(code);
+    // Consume the pending code in EVERY path that handles it: a repeat
+    // same-code deep link used to skip this branch and strand App's
+    // `pendingJoinCode` non-null until this view remounted. `autoJoinHandled`
+    // alone now gates the submit-once behavior (submitJoin still self-gates
+    // on `connected`).
+    onJoinCodeConsumed?.();
+    if (autoJoinHandled.current !== code) {
+      autoJoinHandled.current = code;
+      void submitJoin(code);
+    }
+    // `onJoinCodeConsumed` intentionally omitted: it is re-created on every
+    // App render and must not retrigger this effect.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialJoinCode, connected]);
 
   async function loadMods() {
     try {
@@ -111,19 +181,27 @@ export default function InGameView() {
     }
   }
 
-  async function joinLobby() {
-    if (!lobbyCode.trim()) return;
+  async function submitJoin(rawCode: string) {
+    const code = rawCode.trim().toUpperCase();
+    // Gate on `connected`: the backend now errors honestly with
+    // "Not connected" instead of silently queueing the message.
+    if (!code || !connected || joining) return;
+    lastSubmittedCode.current = code;
     setJoining(true);
     try {
       await invoke("send_ipc_message", {
         msgType: "join_lobby",
-        payload: { code: lobbyCode.trim().toUpperCase() },
+        payload: { code },
       });
     } catch (e) {
       showToast(`Failed to join lobby: ${formatError(e)}`, "error");
     } finally {
       setJoining(false);
     }
+  }
+
+  async function joinLobby() {
+    await submitJoin(lobbyCode);
   }
 
   async function leaveLobby() {
@@ -165,7 +243,7 @@ export default function InGameView() {
                     {activeLobbyCode}
                   </span>
                 </div>
-                <Button onClick={leaveLobby} variant="destructive" className="w-full">
+                <Button onClick={() => void leaveLobby()} variant="destructive" className="w-full">
                   Leave Lobby
                 </Button>
               </div>
@@ -179,7 +257,11 @@ export default function InGameView() {
                   maxLength={6}
                   onKeyDown={(e) => e.key === "Enter" && joinLobby()}
                 />
-                <Button onClick={joinLobby} disabled={!lobbyCode.trim() || joining}>
+                <Button
+                  onClick={() => void joinLobby()}
+                  disabled={!lobbyCode.trim() || joining || !connected}
+                  title={connected ? "Join lobby" : "Connect to the game first"}
+                >
                   {joining ? "Joining..." : "Join"}
                 </Button>
               </div>

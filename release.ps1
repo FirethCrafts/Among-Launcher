@@ -22,13 +22,36 @@ if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
     exit 1
 }
 
-# --- Get latest version from GitHub releases (not from local file) ---
-Write-Host "Fetching latest release version from GitHub..." -ForegroundColor Yellow
-$latestTag = gh release list --repo "FirethCrafts/Among-Launcher" --limit 1 --json tagName --jq '.[0].tagName' 2>$null
-if ($latestTag -and $latestTag -match 'launcher/v(.+)') {
-    $currentVersion = $matches[1]
-    Write-Host "Latest release: $latestTag ($currentVersion)" -ForegroundColor Cyan
+# --- Get latest LAUNCHER version from GitHub releases (not from local file) ---
+# gh release list returns newest-of-any-kind first, so a mod/v* release at
+# the head used to defeat the old single-entry regex and fall back to a
+# hardcoded 1.0.0 (which seeded bogus launcher/v1.0.1 releases and would
+# next run collide on an existing tag). Fetch ~30 releases instead, keep
+# only launcher/* tags, and derive the version from those.
+Write-Host "Fetching latest launcher release from GitHub..." -ForegroundColor Yellow
+$releaseListJson = gh release list --repo "FirethCrafts/Among-Launcher" --limit 30 --json tagName 2>$null
+if ($LASTEXITCODE -ne 0) {
+    throw "Failed to fetch release list from GitHub (gh exit code $LASTEXITCODE) - refusing to guess a version."
+}
+$launcherTags = @()
+if ($releaseListJson) {
+    $parsedReleases = $releaseListJson | ConvertFrom-Json
+    $launcherTags = @($parsedReleases | Where-Object { $_.tagName -like 'launcher/*' } | ForEach-Object { $_.tagName })
+}
+$launcherVersions = @()
+foreach ($t in $launcherTags) {
+    if ($t -match '^launcher/v(.+)$') {
+        $launcherVersions += $matches[1]
+    }
+}
+if ($launcherVersions.Count -gt 0) {
+    # gh lists releases newest first, so index 0 is the newest launcher release.
+    $currentVersion = $launcherVersions[0]
+    Write-Host "Latest launcher release: launcher/v$currentVersion" -ForegroundColor Cyan
+} elseif ($launcherTags.Count -gt 0) {
+    throw "Launcher releases exist but none parse as 'launcher/v<version>' (newest: $($launcherTags[0])) - cannot derive current version."
 } else {
+    # Seeding 1.0.0 is allowed ONLY when zero launcher releases exist at all.
     $currentVersion = "1.0.0"
     Write-Host "No launcher releases found, starting at $currentVersion" -ForegroundColor Yellow
 }
@@ -73,6 +96,16 @@ $pkgContent = $pkgContent -replace '"version":\s*"[^"]*"', "`"version`": `"$newV
 [System.IO.File]::WriteAllText((Resolve-Path $packageJson).Path, $pkgContent, $utf8NoBom)
 Write-Host "Bumped package.json to $newVersion" -ForegroundColor Green
 
+# --- Bump version in src-tauri/Cargo.toml ([package] section only) ---
+# Anchored to the [package] section and to a line-start `version =` so the
+# dependency versions elsewhere in the file are never touched.
+$cargoToml = "launcher-tauri\src-tauri\Cargo.toml"
+$cargoLock = "launcher-tauri\src-tauri\Cargo.lock"
+$cargoContent = Get-Content $cargoToml -Raw
+$cargoContent = [regex]::Replace($cargoContent, '(?ms)(\[package\][^\[]*?^version\s*=\s*)"[^"]*"', ('$1"' + $newVersion + '"'), 1)
+[System.IO.File]::WriteAllText((Resolve-Path $cargoToml).Path, $cargoContent, $utf8NoBom)
+Write-Host "Bumped Cargo.toml to $newVersion" -ForegroundColor Green
+
 # --- Verify the file was written correctly ---
 $verifyConfig = Get-Content $tauriConf -Raw | ConvertFrom-Json
 if ($verifyConfig.version -ne $newVersion) {
@@ -82,6 +115,14 @@ if ($verifyConfig.version -ne $newVersion) {
 $verifyPkg = Get-Content $packageJson -Raw | ConvertFrom-Json
 if ($verifyPkg.version -ne $newVersion) {
     Write-Host "Error: package.json version mismatch! Expected $newVersion, got $($verifyPkg.version)" -ForegroundColor Red
+    exit 1
+}
+$cargoPkgVersion = $null
+if ((Get-Content $cargoToml -Raw) -match '(?ms)\[package\][^\[]*?^version\s*=\s*"([^"]+)"') {
+    $cargoPkgVersion = $matches[1]
+}
+if ($cargoPkgVersion -ne $newVersion) {
+    Write-Host "Error: Cargo.toml [package] version mismatch! Expected $newVersion, got $cargoPkgVersion" -ForegroundColor Red
     exit 1
 }
 
@@ -121,7 +162,26 @@ if ($installer.Name -notmatch $newVersion.Replace('.', '\.')) {
     Write-Host "Warning: Installer filename $($installer.Name) doesn't contain expected version $newVersion" -ForegroundColor Yellow
 }
 
-# --- Create GitHub Release ---
+# --- Commit the version bump BEFORE tagging ---
+# gh release create never pushes local commits: with no --target it creates
+# the tag server-side from the REMOTE default-branch HEAD. The bump commit
+# must therefore be committed AND pushed first, otherwise every release tag
+# would keep pointing at the previous version's commit (verified root cause:
+# tag launcher/v1.2.10's source tree contained 1.2.9).
+git add $tauriConf $packageJson $cargoToml $cargoLock
+git commit -m "chore: bump launcher to v$newVersion"
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "Error: Failed to commit version bump" -ForegroundColor Red
+    exit 1
+}
+
+git push origin master
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "Error: Failed to push version bump - release would tag the wrong commit" -ForegroundColor Red
+    exit 1
+}
+
+# --- Create GitHub Release (tags the just-pushed bump commit) ---
 $tag = "launcher/v$newVersion"
 $releaseName = "Launcher v$newVersion"
 
@@ -138,9 +198,8 @@ if ($LASTEXITCODE -ne 0) {
 }
 Write-Host "Release created: https://github.com/FirethCrafts/Among-Launcher/releases/tag/$tag" -ForegroundColor Green
 
-# --- Commit version bump ---
-git add $tauriConf $packageJson
-git commit -m "chore: bump launcher to v$newVersion"
+# --- Push after the release (original script tail: push happens after
+#     release creation; no-op when the pre-release push above succeeded) ---
 git push origin master
 
 Write-Host ""

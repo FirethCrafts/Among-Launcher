@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { showToast, formatError } from "@/components/Toast";
+import { useLauncher } from "@/state/LauncherContext";
 import { Gamepad2, FolderOpen, Play, Check, Loader2 } from "lucide-react";
 
 interface GameSearchResult {
@@ -19,17 +20,6 @@ interface GameSearchResult {
 interface InstallStatus {
   bepinex_installed: boolean;
   among_api_installed: boolean;
-}
-
-interface LauncherConfig {
-  storefront?: string | null;
-  modded_install_path: string;
-  debug_mode: boolean;
-  auto_post_lobby: boolean;
-  discord_access_token: string;
-  username: string;
-  avatar_url: string;
-  last_seen_version: string;
 }
 
 interface InstallProgress {
@@ -48,59 +38,52 @@ function dirOfExe(path: string): string {
 }
 
 export default function SetupView({ onComplete }: SetupViewProps) {
+  // Config comes from the shared context — no per-page read_config.
+  const { config, refreshConfig } = useLauncher();
   const [gamePath, setGamePath] = useState<string | null>(null);
   const [storefront, setStorefront] = useState("");
   const [detected, setDetected] = useState(false);
   const [bepinexInstalled, setBepinexInstalled] = useState(false);
   const [amongApiInstalled, setAmongApiInstalled] = useState(false);
-  const [config, setConfig] = useState<LauncherConfig | null>(null);
   const [installProgress, setInstallProgress] = useState<InstallProgress | null>(null);
   const [installing, setInstalling] = useState(false);
   const [loading, setLoading] = useState(true);
   const [success, setSuccess] = useState(false);
   const successToastShown = useRef(false);
+  // The install-progress listener is registered once on mount; reading config
+  // through this ref keeps it from capturing a stale closure (#8).
+  const configRef = useRef(config);
 
+  useEffect(() => {
+    configRef.current = config;
+  }, [config]);
+
+  // Mount: detect the source game (config is owned by the shared context).
   useEffect(() => {
     let cancelled = false;
 
-    async function init() {
+    (async () => {
       try {
-        const [result, cfg] = await Promise.all([
-          invoke<GameSearchResult>("detect_game", {}),
-          invoke<LauncherConfig>("read_config"),
-        ]);
+        const result = await invoke<GameSearchResult>("detect_game", {});
         if (cancelled) return;
-        setConfig(cfg);
-        setStorefront(result.storefront || cfg.storefront || "");
-        const sourcePath = result.path || null;
-        if (sourcePath) {
-          setGamePath(sourcePath);
+        setStorefront(result.storefront || "");
+        if (result.path) {
+          setGamePath(result.path);
           setDetected(true);
-        }
-        if (cfg.modded_install_path) {
-          const status = await invoke<InstallStatus>("get_install_status", {
-            gamePath: cfg.modded_install_path,
-          });
-          if (cancelled) return;
-          setBepinexInstalled(status.bepinex_installed);
-          setAmongApiInstalled(status.among_api_installed);
-          if (status.bepinex_installed && status.among_api_installed) {
-            setSuccess(true);
-          }
         }
       } catch {
         if (!cancelled) showToast("Failed to detect game", "error");
       } finally {
         if (!cancelled) setLoading(false);
       }
-    }
-
-    init();
+    })();
 
     const unlistenInstall = listen<InstallProgress>("install-progress", (event) => {
       setInstallProgress(event.payload);
       if (event.payload.stage === "complete") {
-        confirmInstalled();
+        // confirmInstalled reads configRef.current — always fresh, even from
+        // this mount-registered listener.
+        void confirmInstalled();
       }
     });
 
@@ -110,13 +93,50 @@ export default function SetupView({ onComplete }: SetupViewProps) {
     };
   }, []);
 
+  // Storefront fallback from the shared config (may arrive after detection).
+  useEffect(() => {
+    const sf = config?.storefront;
+    if (sf) setStorefront((prev) => prev || sf);
+  }, [config]);
+
+  // Install status for the configured modded path (fresh config value).
+  useEffect(() => {
+    const target = config?.modded_install_path;
+    if (!target) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const status = await invoke<InstallStatus>("get_install_status", {
+          gamePath: target,
+        });
+        if (cancelled) return;
+        setBepinexInstalled(status.bepinex_installed);
+        setAmongApiInstalled(status.among_api_installed);
+        if (status.bepinex_installed && status.among_api_installed) {
+          setSuccess(true);
+        }
+      } catch {
+        // Non-fatal: status badges simply stay as-is.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [config?.modded_install_path]);
+
   function moddedPath(): string | null {
-    return config?.modded_install_path || null;
+    return configRef.current?.modded_install_path || null;
   }
 
   async function confirmInstalled() {
+    // Pick up any config writes install_game persisted backend-side (it can
+    // default+save the modded path) before verifying against it.
+    await refreshConfig();
     const target = moddedPath();
-    if (!target) return;
+    if (!target) {
+      setInstalling(false);
+      return;
+    }
     try {
       const status = await invoke<InstallStatus>("get_install_status", { gamePath: target });
       setBepinexInstalled(status.bepinex_installed);
@@ -151,16 +171,7 @@ export default function SetupView({ onComplete }: SetupViewProps) {
       setDetected(true);
       setSuccess(false);
 
-      let cfg = config;
-      if (!cfg) {
-        try {
-          cfg = await invoke<LauncherConfig>("read_config");
-          setConfig(cfg);
-        } catch {
-          // config unavailable; fall back to the browsed path
-        }
-      }
-      const target = cfg?.modded_install_path || dir;
+      const target = configRef.current?.modded_install_path || dir;
       const status = await invoke<InstallStatus>("get_install_status", { gamePath: target });
       setBepinexInstalled(status.bepinex_installed);
       setAmongApiInstalled(status.among_api_installed);
@@ -221,7 +232,7 @@ export default function SetupView({ onComplete }: SetupViewProps) {
                     placeholder="Path to your Among Us installation"
                     className="flex-1"
                   />
-                  <Button variant="outline" onClick={handleBrowse} disabled={installing}>
+                  <Button variant="outline" onClick={() => void handleBrowse()} disabled={installing}>
                     <FolderOpen className="h-4 w-4" />
                     Browse
                   </Button>
@@ -283,7 +294,7 @@ export default function SetupView({ onComplete }: SetupViewProps) {
                 </div>
               ) : (
                 <Button
-                  onClick={handleInstall}
+                  onClick={() => void handleInstall()}
                   disabled={!gamePath || installing}
                   size="lg"
                   className="w-full"

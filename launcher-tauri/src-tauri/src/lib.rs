@@ -580,15 +580,18 @@ mod ipc {
         pub async fn set_sender(&self, tx: mpsc::Sender<String>) {
             *self.write_tx.lock().await = Some(tx);
         }
+
+        /// Drop the sender so sends fail honestly when no client is
+        /// connected (and the old channel + buffer are discarded).
+        pub async fn clear_sender(&self) {
+            *self.write_tx.lock().await = None;
+        }
     }
 
     pub async fn start_pipe_server(app: AppHandle, handle: PipeServerHandle) {
         tokio::spawn(async move {
             let mut first_instance = true;
             loop {
-                let (tx, mut rx) = mpsc::channel::<String>(64);
-                handle.set_sender(tx).await;
-
                 let mut options = ServerOptions::new();
                 options.first_pipe_instance(first_instance);
                 first_instance = false;
@@ -599,11 +602,33 @@ mod ipc {
                         match server.connect().await {
                             Ok(()) => {
                                 eprintln!("[PipeServer] Client connected!");
+                                // Only install a sender AFTER the client has
+                                // connected; otherwise send_ipc_message would
+                                // report Ok while buffering messages that flush
+                                // into the NEXT game session.
+                                let (tx, mut rx) = mpsc::channel::<String>(64);
+                                handle.set_sender(tx).await;
                                 handle.set_connected(true);
                                 let _ = app.emit("ipc:client-connected", ());
                                 run_connection(server, &app, &mut rx).await;
                                 handle.set_connected(false);
+                                // Old channel + any buffered messages are dropped here.
+                                handle.clear_sender().await;
+                                // The game is gone: stop its heartbeat and wipe
+                                // its lobby state BEFORE announcing the
+                                // disconnect — otherwise the 30s heartbeat keeps
+                                // the backend lobby alive (zombie listing) and a
+                                // later snapshot read resurrects a ghost lobby.
+                                {
+                                    let state = app.state::<AppState>();
+                                    let mut lobby = state.lobby_state.write().await;
+                                    lobby.clear_lobby().await;
+                                }
                                 let _ = app.emit("ipc:client-disconnected", ());
+                                // The game's mod closes the pipe when the game
+                                // exits naturally (not via stop_game), so treat
+                                // disconnect as game-stopped too.
+                                let _ = app.emit("game-stopped", ());
                                 eprintln!("[PipeServer] Client disconnected.");
                             }
                             Err(e) => {
@@ -637,7 +662,12 @@ mod ipc {
                                 );
                                 let _ = app.emit("ipc:message", &envelope);
                                 let msg: ipc_handler::IpcMessage = envelope.into();
-                                ipc_handler::handle_ipc_message(app, msg);
+                                ipc_handler::handle_ipc_message(app, msg).await;
+                            } else {
+                                eprintln!(
+                                    "[PipeServer] Dropping malformed JSON: {}",
+                                    json.chars().take(500).collect::<String>()
+                                );
                             }
                         }
                         Ok(None) => break,
@@ -693,6 +723,11 @@ pub struct AppState {
     pub lobby_state: SharedLobbyState,
     pipe_handle: Arc<tokio::sync::Mutex<Option<ipc::PipeServerHandle>>>,
     pub oauth_code: std::sync::Mutex<Option<String>>,
+    /// One-shot storage for a join deep-link whose `deep-link` event may
+    /// have been missed (cold start slower than the 1500ms delayed emit —
+    /// Tauri does not queue events). Taken + cleared by
+    /// `get_pending_deep_link`. Private field: `DeepLink` is not `pub`.
+    pending_deep_link: std::sync::Mutex<Option<DeepLink>>,
 }
 
 #[tauri::command]
@@ -863,84 +898,102 @@ async fn get_filesystem_mods(game_path: String) -> Result<Vec<FilesystemMod>, La
 
 #[tauri::command]
 async fn import_mod(game_path: String, mod_paths: Vec<String>) -> Result<(), LauncherError> {
-    let plugins_dir = Path::new(&game_path).join("BepInEx").join("Plugins");
+    tokio::task::spawn_blocking(move || {
+        let plugins_dir = Path::new(&game_path).join("BepInEx").join("Plugins");
 
-    if !plugins_dir.exists() {
-        fs::create_dir_all(&plugins_dir)
-            .map_err(|e| LauncherError::InstallFailed(format!("Failed to create Plugins dir: {}", e)))?;
-    }
+        if !plugins_dir.exists() {
+            fs::create_dir_all(&plugins_dir).map_err(|e| {
+                LauncherError::InstallFailed(format!("Failed to create Plugins dir: {}", e))
+            })?;
+        }
 
-    for mod_path_str in &mod_paths {
-        let src = Path::new(mod_path_str);
-        let file_name = src
-            .file_name()
-            .ok_or_else(|| LauncherError::InstallFailed(format!("Invalid path: {}", mod_path_str)))?;
-        let dest = plugins_dir.join(file_name);
-        fs::copy(src, &dest).map_err(|e| {
-            LauncherError::InstallFailed(format!(
-                "Failed to copy {} to Plugins: {}",
-                file_name.to_string_lossy(),
-                e
-            ))
-        })?;
-    }
+        for mod_path_str in &mod_paths {
+            let src = Path::new(mod_path_str);
+            let file_name = src.file_name().ok_or_else(|| {
+                LauncherError::InstallFailed(format!("Invalid path: {}", mod_path_str))
+            })?;
+            let dest = plugins_dir.join(file_name);
+            fs::copy(src, &dest).map_err(|e| {
+                LauncherError::InstallFailed(format!(
+                    "Failed to copy {} to Plugins: {}",
+                    file_name.to_string_lossy(),
+                    e
+                ))
+            })?;
+        }
 
-    Ok(())
+        Ok::<(), LauncherError>(())
+    })
+    .await
+    .map_err(|e| LauncherError::InstallFailed(format!("Task join error: {}", e)))?
 }
 
 #[tauri::command]
 async fn stop_game(app: AppHandle) -> Result<(), LauncherError> {
     #[cfg(target_os = "windows")]
     {
-        use std::process::Command;
-        let output = Command::new("tasklist")
-            .args(["/FI", "IMAGENAME eq Among Us.exe", "/FO", "CSV", "/NH"])
-            .output()
-            .map_err(|e| LauncherError::InstallFailed(format!("Failed to run tasklist: {}", e)))?;
+        tokio::task::spawn_blocking(|| -> Result<(), LauncherError> {
+            use std::process::Command;
+            let output = Command::new("tasklist")
+                .args(["/FI", "IMAGENAME eq Among Us.exe", "/FO", "CSV", "/NH"])
+                .output()
+                .map_err(|e| LauncherError::InstallFailed(format!("Failed to run tasklist: {}", e)))?;
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            eprintln!("[stop_game] tasklist failed: {}", stderr);
-            return Err(LauncherError::InstallFailed(format!(
-                "tasklist exited with code {:?}",
-                output.status.code()
-            )));
-        }
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                eprintln!("[stop_game] tasklist failed: {}", stderr);
+                return Err(LauncherError::InstallFailed(format!(
+                    "tasklist exited with code {:?}",
+                    output.status.code()
+                )));
+            }
 
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let mut killed = false;
-        for line in stdout.lines() {
-            if line.contains("Among Us.exe") {
-                let pid = line
-                    .split(',')
-                    .nth(1)
-                    .and_then(|s| s.trim_matches('"').parse::<u32>().ok());
-                if let Some(pid) = pid {
-                    let kill_output = Command::new("taskkill")
-                        .args(["/PID", &pid.to_string(), "/F"])
-                        .output()
-                        .map_err(|e| LauncherError::InstallFailed(format!("Failed to kill process: {}", e)))?;
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let mut killed = false;
+            for line in stdout.lines() {
+                if line.contains("Among Us.exe") {
+                    let pid = line
+                        .split(',')
+                        .nth(1)
+                        .and_then(|s| s.trim_matches('"').parse::<u32>().ok());
+                    if let Some(pid) = pid {
+                        let kill_output = Command::new("taskkill")
+                            .args(["/PID", &pid.to_string(), "/F"])
+                            .output()
+                            .map_err(|e| LauncherError::InstallFailed(format!("Failed to kill process: {}", e)))?;
 
-                    if !kill_output.status.success() {
-                        let stderr = String::from_utf8_lossy(&kill_output.stderr);
-                        eprintln!(
-                            "[stop_game] taskkill /PID {} failed: {}",
-                            pid, stderr
-                        );
-                        return Err(LauncherError::InstallFailed(format!(
-                            "taskkill failed for PID {}: {}",
-                            pid, stderr
-                        )));
+                        if !kill_output.status.success() {
+                            let stderr = String::from_utf8_lossy(&kill_output.stderr);
+                            eprintln!(
+                                "[stop_game] taskkill /PID {} failed: {}",
+                                pid, stderr
+                            );
+                            return Err(LauncherError::InstallFailed(format!(
+                                "taskkill failed for PID {}: {}",
+                                pid, stderr
+                            )));
+                        }
+                        killed = true;
                     }
-                    killed = true;
                 }
             }
-        }
-        if !killed {
-            eprintln!("[stop_game] Among Us.exe not found in process list");
-        }
+            if !killed {
+                eprintln!("[stop_game] Among Us.exe not found in process list");
+            }
+            Ok(())
+        })
+        .await
+        .map_err(|e| LauncherError::InstallFailed(format!("Task join error: {}", e)))??;
     }
 
+    // The game is being stopped — its lobby state is meaningless. Stop the
+    // heartbeat and clear it (same shared helper as the LobbyClosed and
+    // pipe-disconnect paths) before announcing the stop.
+    {
+        let state = app.state::<AppState>();
+        let mut lobby = state.lobby_state.write().await;
+        lobby.clear_lobby().await;
+    }
     let _ = app.emit("game-stopped", ());
     Ok(())
 }
@@ -968,7 +1021,11 @@ async fn browse_files(path: String) -> Result<(), LauncherError> {
         .parent()
         .map(|p| p.to_path_buf())
         .unwrap_or_else(|| std::path::PathBuf::from(&path));
-    open::that(&target).map_err(|e| LauncherError::Filesystem(e.to_string()))?;
+    tokio::task::spawn_blocking(move || {
+        open::that(&target).map_err(|e| LauncherError::Filesystem(e.to_string()))
+    })
+    .await
+    .map_err(|e| LauncherError::InstallFailed(format!("Task join error: {}", e)))??;
     Ok(())
 }
 
@@ -1021,8 +1078,26 @@ async fn get_mod_list(game_path: String) -> Result<Vec<ModEntry>, LauncherError>
     .map_err(|e| LauncherError::InstallFailed(format!("Task join error: {}", e)))?
 }
 
+/// Reject path traversal: the filename must be a single path component
+/// (no separators, no `..`, no drive prefixes, not empty).
+fn sanitize_filename(filename: &str) -> Result<(), LauncherError> {
+    let valid = Path::new(filename)
+        .file_name()
+        .map(|name| name == std::ffi::OsStr::new(filename))
+        .unwrap_or(false);
+    if valid {
+        Ok(())
+    } else {
+        Err(LauncherError::Filesystem(format!(
+            "Invalid filename: {}",
+            filename
+        )))
+    }
+}
+
 #[tauri::command]
 async fn remove_mod(game_path: String, filename: String) -> Result<(), LauncherError> {
+    sanitize_filename(&filename)?;
     let plugins_dir = std::path::Path::new(&game_path).join("BepInEx").join("Plugins");
     let target = plugins_dir.join(&filename);
 
@@ -1209,6 +1284,7 @@ async fn remove_from_library(
     config_debouncer: State<'_, config::ConfigDebouncer>,
     filename: String,
 ) -> Result<(), LauncherError> {
+    sanitize_filename(&filename)?;
     let lib_dir = dirs::data_local_dir()
         .unwrap_or_else(|| std::path::PathBuf::from("."))
         .join("AmongLauncher")
@@ -1240,6 +1316,7 @@ async fn install_from_library(
     game_path: String,
     filename: String,
 ) -> Result<(), LauncherError> {
+    sanitize_filename(&filename)?;
     let lib_dir = dirs::data_local_dir()
         .unwrap_or_else(|| std::path::PathBuf::from("."))
         .join("AmongLauncher")
@@ -1494,8 +1571,136 @@ async fn set_storefront(
     Ok(())
 }
 
+/// Version of the launcher itself (from the Tauri package info, i.e.
+/// tauri.conf.json's `version` field).
+/// Frontend contract: `invoke("get_version")` → `"1.2.10"` (string).
 #[tauri::command]
-async fn post_lobby(state: State<'_, AppState>) -> Result<(), LauncherError> {
+fn get_version(app: AppHandle) -> String {
+    app.package_info().version.to_string()
+}
+
+/// Payload returned by `check_for_launcher_update`.
+/// Frontend contract: `invoke("check_for_launcher_update")` →
+/// `{ version, downloadUrl, notes } | null` (camelCase; `notes` is `null`
+/// when the release has no body). `null` = up to date.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LauncherUpdateInfo {
+    version: String,
+    download_url: String,
+    notes: Option<String>,
+}
+
+/// Checks the GitHub releases list for a `launcher/v*` release newer than
+/// the running launcher.
+///
+/// Contract (CRITICAL — the user bug was failures being indistinguishable
+/// from "up to date"):
+/// - `Ok(Some(LauncherUpdateInfo))` — a strictly newer launcher release
+///   exists (`{version, downloadUrl, notes}` to the frontend).
+/// - `Ok(None)` — genuinely up to date (latest parsed ≤ current) OR the API
+///   responded successfully with no launcher release at all.
+/// - `Err(_)` — network/API failure, unparsable tag, missing `.exe` asset,
+///   or incomparable versions. NEVER silently `None` on failure; the
+///   frontend toasts the rejection as "check failed".
+#[tauri::command]
+async fn check_for_launcher_update(
+    app: AppHandle,
+) -> Result<Option<LauncherUpdateInfo>, LauncherError> {
+    let current = app.package_info().version.to_string();
+
+    let release = github::latest_launcher_release().await?;
+    let Some(release) = release else {
+        // API responded fine but has zero launcher/* releases (true first release).
+        return Ok(None);
+    };
+
+    let tag = release["tag_name"].as_str().unwrap_or_default();
+    let latest = github::parse_launcher_tag_version(tag).ok_or_else(|| {
+        LauncherError::Network(format!("Unparsable launcher release tag: {}", tag))
+    })?;
+
+    // Numeric tuple comparison (reuses Rust-B1 helpers), NOT string compare.
+    match version_checker::compare_versions(latest, &current) {
+        // latest ≤ current → up to date (also covers downgrade/rollback tags).
+        Some(std::cmp::Ordering::Less) | Some(std::cmp::Ordering::Equal) => Ok(None),
+        Some(std::cmp::Ordering::Greater) => {
+            let download_url = github::launcher_exe_asset_url(&release).ok_or_else(|| {
+                LauncherError::Network(format!(
+                    "Launcher release {} has no .exe download asset",
+                    tag
+                ))
+            })?;
+            Ok(Some(LauncherUpdateInfo {
+                version: latest.to_string(),
+                download_url,
+                notes: github::launcher_release_notes(&release),
+            }))
+        }
+        // Unparsable version on either side → report, never guess.
+        None => Err(LauncherError::Network(format!(
+            "Cannot compare launcher versions: installed {} vs release {}",
+            current, latest
+        ))),
+    }
+}
+
+/// Snapshot of the current lobby state returned by `get_lobby_state`.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LobbyStateSnapshot {
+    code: Option<String>,
+    posted: bool,
+    players: Vec<PlayerSnapshot>,
+    host_name: Option<String>,
+    map: Option<String>,
+    max_players: Option<u32>,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PlayerSnapshot {
+    name: String,
+    level: Option<u32>,
+    ping: Option<u32>,
+    color: Option<String>,
+    is_host: bool,
+}
+
+#[tauri::command]
+async fn get_lobby_state(state: State<'_, AppState>) -> Result<LobbyStateSnapshot, LauncherError> {
+    let lobby = state.lobby_state.read().await;
+    Ok(LobbyStateSnapshot {
+        code: lobby.code.clone(),
+        posted: lobby.posted,
+        players: lobby
+            .players
+            .iter()
+            .map(|p| PlayerSnapshot {
+                name: p.name.clone(),
+                level: p.level,
+                ping: p.ping,
+                color: p.color.clone(),
+                is_host: p.is_host,
+            })
+            .collect(),
+        host_name: lobby.host.clone(),
+        map: lobby.map.clone(),
+        max_players: lobby.max_players,
+    })
+}
+
+/// Re-validate that the lobby we started POSTing for is still the one held
+/// in state once the lock-free HTTP window closes. `clear_lobby` (LobbyClosed
+/// / pipe disconnect / `stop_game`) can wipe the state while `create_lobby`
+/// is in flight; committing `posted`/heartbeat then would resurrect
+/// `{code: null, posted: true}` plus a zombie heartbeat on a dead code.
+fn post_still_valid(state_code: Option<&str>, posted_code: &str) -> bool {
+    state_code == Some(posted_code)
+}
+
+#[tauri::command]
+async fn post_lobby(app: AppHandle, state: State<'_, AppState>) -> Result<(), LauncherError> {
     let (code, region, max_players, token) = {
         let config = state.config.read().await;
         let lobby = state.lobby_state.read().await;
@@ -1522,8 +1727,23 @@ async fn post_lobby(state: State<'_, AppState>) -> Result<(), LauncherError> {
 
     {
         let mut lobby = state.lobby_state.write().await;
+        // Re-validate: the state lock was dropped for the HTTP call above,
+        // so LobbyClosed / disconnect / `stop_game` may have run
+        // `clear_lobby` (or a new lobby may have replaced this one) while
+        // the POST was in flight. Committing then would resurrect
+        // `{code: null, posted: true}` + a zombie heartbeat on a dead code.
+        if !post_still_valid(lobby.code.as_deref(), &code) {
+            // The backend lobby WAS created by the HTTP call in that
+            // window; we deliberately do not disband it here (would need
+            // another network call against state we no longer own) — the
+            // message tells the user it may need re-posting.
+            return Err(LauncherError::Lobby(format!(
+                "Lobby closed while posting '{}' — it may need re-posting",
+                code
+            )));
+        }
         lobby.posted = true;
-        lobby.start_heartbeat(code, token).await;
+        lobby.start_heartbeat(app, code, token).await;
     }
     Ok(())
 }
@@ -1623,13 +1843,155 @@ async fn login_discord(state: State<'_, AppState>) -> Result<auth::UserInfo, Lau
     Ok(user)
 }
 
+/// A parsed amonglauncher:// deep link.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum DeepLink {
+    /// OAuth redirect carrying a Discord authorization code.
+    OAuthCode(String),
+    /// Join-a-lobby link carrying a lobby code.
+    Join { code: String },
+}
+
+/// Lobby codes are 4-8 ASCII alphanumerics.
+fn is_valid_lobby_code(s: &str) -> bool {
+    (4..=8).contains(&s.len()) && s.chars().all(|c| c.is_ascii_alphanumeric())
+}
+
+/// Parse amonglauncher:// deep links.
+///
+/// Supported:
+/// - `amonglauncher://callback?code=...` (OAuth redirect — unchanged behavior)
+/// - `amonglauncher://join/<CODE>`
+/// - `amonglauncher://join?code=<CODE>`
+/// - `amonglauncher://<CODE>` (bare 4-8 alphanumeric lobby code containing at
+///   least one letter AND one digit, so words like `home` don't match)
+fn parse_deep_link(url: &str) -> Option<DeepLink> {
+    // OAuth callback takes precedence and keeps its existing extraction.
+    if url.starts_with("amonglauncher://callback") {
+        return auth::DiscordAuth::extract_code_from_url(url).map(DeepLink::OAuthCode);
+    }
+
+    let rest = url.strip_prefix("amonglauncher://")?;
+
+    // amonglauncher://join/<CODE>
+    if let Some(tail) = rest.strip_prefix("join/") {
+        let code = tail.split(['?', '#']).next().unwrap_or("");
+        return if is_valid_lobby_code(code) {
+            Some(DeepLink::Join {
+                code: code.to_string(),
+            })
+        } else {
+            None
+        };
+    }
+
+    // amonglauncher://join?code=<CODE>
+    if let Some(tail) = rest.strip_prefix("join?") {
+        let query = tail.split('#').next().unwrap_or("");
+        for pair in query.split('&') {
+            if let Some(value) = pair.strip_prefix("code=") {
+                return if is_valid_lobby_code(value) {
+                    Some(DeepLink::Join {
+                        code: value.to_string(),
+                    })
+                } else {
+                    None
+                };
+            }
+        }
+        return None;
+    }
+
+    // amonglauncher://join with nothing after it is not a join link.
+    if rest == "join" {
+        return None;
+    }
+
+    // Bare: amonglauncher://<CODE>
+    // Tighter than the explicit join/ forms: require at least one letter AND
+    // one digit so ordinary words like `amonglauncher://home` or `auth` are
+    // not mistaken for a join request (InGameView accepts `^[A-Za-z0-9]{4,8}$`
+    // and real lobby codes are alphanumeric mixes; a digit is the safe
+    // discriminator). Explicit join/<CODE> / join?code= URLs above keep the
+    // plain 4-8 alnum validation.
+    if is_valid_lobby_code(rest)
+        && rest.chars().any(|c| c.is_ascii_digit())
+        && rest.chars().any(|c| c.is_ascii_alphabetic())
+    {
+        return Some(DeepLink::Join {
+            code: rest.to_string(),
+        });
+    }
+
+    None
+}
+
 #[tauri::command]
-async fn handle_deep_link(state: State<'_, AppState>, url: String) -> Result<(), LauncherError> {
-    if let Some(code) = auth::DiscordAuth::extract_code_from_url(&url) {
-        let mut oauth = state.oauth_code.lock().map_err(|e| LauncherError::Auth(e.to_string()))?;
-        *oauth = Some(code);
+async fn handle_deep_link(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    url: String,
+) -> Result<(), LauncherError> {
+    match parse_deep_link(&url) {
+        Some(DeepLink::OAuthCode(code)) => {
+            let mut oauth = state.oauth_code.lock().map_err(|e| LauncherError::Auth(e.to_string()))?;
+            *oauth = Some(code);
+        }
+        Some(DeepLink::Join { code }) => {
+            // Store first so `get_pending_deep_link` can recover the link
+            // even if the frontend misses the event; then emit for
+            // listeners already mounted. (OAuth codes are never stored.)
+            if let Ok(mut pending) = state.pending_deep_link.lock() {
+                *pending = Some(DeepLink::Join { code: code.clone() });
+            }
+            let _ = app.emit("deep-link", DeepLinkPayload::join(code));
+        }
+        None => {}
     }
     Ok(())
+}
+
+/// Payload shared by the `deep-link` event and the
+/// `get_pending_deep_link` command — `{ "kind": "join", "code": "ABCD" }`.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+struct DeepLinkPayload {
+    kind: String,
+    code: String,
+}
+
+impl DeepLinkPayload {
+    fn join(code: String) -> Self {
+        Self {
+            kind: "join".to_string(),
+            code,
+        }
+    }
+}
+
+/// One-shot take of the stored join deep-link: returns the payload AND
+/// clears the storage, so a stale link is never re-joined on a later read.
+/// Only the `Join` variant is ever stored; anything else is put back and
+/// reported as absent (defensive — OAuth codes must not be handed out here).
+fn take_pending_deep_link(
+    pending: &std::sync::Mutex<Option<DeepLink>>,
+) -> Option<DeepLinkPayload> {
+    let mut guard = pending.lock().ok()?;
+    match guard.take() {
+        Some(DeepLink::Join { code }) => Some(DeepLinkPayload::join(code)),
+        other => {
+            *guard = other;
+            None
+        }
+    }
+}
+
+/// Recovery channel for the frontend: if the `deep-link` event was missed
+/// (cold start slower than the 1500ms delayed emit — Tauri does not queue
+/// events), invoke this to fetch the pending join link exactly once.
+/// Returns `{ kind: "join", code: "..." }` or `null`.
+#[tauri::command]
+fn get_pending_deep_link(state: State<'_, AppState>) -> Option<DeepLinkPayload> {
+    take_pending_deep_link(&state.pending_deep_link)
 }
 
 // ============================================================
@@ -1648,6 +2010,7 @@ pub fn run() {
         lobby_state: lobby_state.clone(),
         pipe_handle: Arc::new(tokio::sync::Mutex::new(Some(pipe_handle.clone()))),
         oauth_code: std::sync::Mutex::new(None),
+        pending_deep_link: std::sync::Mutex::new(None),
     };
 
     tauri::Builder::default()
@@ -1658,16 +2021,29 @@ pub fn run() {
                 let _ = window.show();
                 let _ = window.set_focus();
             }
-            // If the second instance was launched via deep link, forward the
-            // OAuth code to the already-running login_discord polling loop.
+            // If the second instance was launched via deep link, forward it to
+            // the already-running instance: OAuth code → login_discord polling
+            // loop, join link → `deep-link` event for the frontend.
             for arg in &argv {
-                if let Some(code) = auth::DiscordAuth::extract_code_from_url(arg) {
-                    if let Some(state) = app.try_state::<AppState>() {
-                        if let Ok(mut oauth) = state.oauth_code.lock() {
-                            *oauth = Some(code);
+                match parse_deep_link(arg) {
+                    Some(DeepLink::OAuthCode(code)) => {
+                        if let Some(state) = app.try_state::<AppState>() {
+                            if let Ok(mut oauth) = state.oauth_code.lock() {
+                                *oauth = Some(code);
+                            }
                         }
                     }
-                    break;
+                    Some(DeepLink::Join { code }) => {
+                        // Store for `get_pending_deep_link` recovery, then
+                        // emit for the already-mounted frontend.
+                        if let Some(state) = app.try_state::<AppState>() {
+                            if let Ok(mut pending) = state.pending_deep_link.lock() {
+                                *pending = Some(DeepLink::Join { code: code.clone() });
+                            }
+                        }
+                        let _ = app.emit("deep-link", DeepLinkPayload::join(code));
+                    }
+                    None => {}
                 }
             }
         }))
@@ -1695,8 +2071,10 @@ pub fn run() {
             post_lobby,
             disband_lobby,
             kick_player,
+            get_lobby_state,
             login_discord,
             handle_deep_link,
+            get_pending_deep_link,
             remove_mod,
             save_profile,
             apply_profile,
@@ -1709,6 +2087,8 @@ pub fn run() {
             get_preset_mods,
             install_preset_mod,
             update_among_api,
+            get_version,
+            check_for_launcher_update,
             version_checker::check_for_among_api_update,
         ])
         .setup(move |app| {
@@ -1741,15 +2121,35 @@ pub fn run() {
                     .output();
             }
 
-            // Check command line args for deep link URL
+            // Check command line args for deep link URLs
             {
                 let args: Vec<String> = std::env::args().collect();
                 for arg in &args {
-                    if let Some(code) = auth::DiscordAuth::extract_code_from_url(arg) {
-                        let state = app.state::<AppState>();
-                        let mut oauth = state.oauth_code.lock().unwrap();
-                        *oauth = Some(code);
-                        break;
+                    match parse_deep_link(arg) {
+                        Some(DeepLink::OAuthCode(code)) => {
+                            let state = app.state::<AppState>();
+                            let mut oauth = state.oauth_code.lock().unwrap();
+                            *oauth = Some(code);
+                        }
+                        Some(DeepLink::Join { code }) => {
+                            // Cold start: the webview has not registered its
+                            // `deep-link` listener yet, so emit shortly after
+                            // launch instead of losing the event immediately.
+                            // ALSO store it right now so
+                            // `get_pending_deep_link` can recover it if the
+                            // webview mounts later than the 1500ms delay
+                            // (Tauri does not queue events).
+                            let state = app.state::<AppState>();
+                            if let Ok(mut pending) = state.pending_deep_link.lock() {
+                                *pending = Some(DeepLink::Join { code: code.clone() });
+                            }
+                            let handle = app_handle.clone();
+                            tauri::async_runtime::spawn(async move {
+                                tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+                                let _ = handle.emit("deep-link", DeepLinkPayload::join(code));
+                            });
+                        }
+                        None => {}
                     }
                 }
             }
@@ -1814,4 +2214,186 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod deep_link_tests {
+    use super::*;
+
+    #[test]
+    fn join_path_form() {
+        assert_eq!(
+            parse_deep_link("amonglauncher://join/ABCD1234"),
+            Some(DeepLink::Join {
+                code: "ABCD1234".into()
+            })
+        );
+    }
+
+    #[test]
+    fn join_query_form() {
+        assert_eq!(
+            parse_deep_link("amonglauncher://join?code=ABCD"),
+            Some(DeepLink::Join {
+                code: "ABCD".into()
+            })
+        );
+    }
+
+    #[test]
+    fn bare_code_form() {
+        assert_eq!(
+            parse_deep_link("amonglauncher://XYZ1"),
+            Some(DeepLink::Join {
+                code: "XYZ1".into()
+            })
+        );
+    }
+
+    #[test]
+    fn oauth_callback_still_works() {
+        assert_eq!(
+            parse_deep_link("amonglauncher://callback?code=oauthcode123&state=x"),
+            Some(DeepLink::OAuthCode("oauthcode123".into()))
+        );
+    }
+
+    #[test]
+    fn oauth_callback_without_code_is_rejected() {
+        assert_eq!(parse_deep_link("amonglauncher://callback"), None);
+    }
+
+    #[test]
+    fn bare_join_without_code_is_rejected() {
+        assert_eq!(parse_deep_link("amonglauncher://join"), None);
+    }
+
+    #[test]
+    fn join_with_traversal_is_rejected() {
+        assert_eq!(parse_deep_link("amonglauncher://join/../EVIL"), None);
+    }
+
+    #[test]
+    fn code_too_short_or_too_long_is_rejected() {
+        assert_eq!(parse_deep_link("amonglauncher://ABC"), None);
+        assert_eq!(parse_deep_link("amonglauncher://ABCDEFGHI"), None);
+    }
+
+    #[test]
+    fn non_amonglauncher_scheme_is_ignored() {
+        assert_eq!(parse_deep_link("https://join/ABCD"), None);
+    }
+
+    #[test]
+    fn bare_words_without_digits_are_rejected() {
+        // The bare form must not swallow ordinary 4-8 letter words.
+        assert_eq!(parse_deep_link("amonglauncher://home"), None);
+        assert_eq!(parse_deep_link("amonglauncher://auth"), None);
+        assert_eq!(parse_deep_link("amonglauncher://joinABC"), None);
+        assert_eq!(parse_deep_link("amonglauncher://settings"), None);
+    }
+
+    #[test]
+    fn bare_codes_with_letters_and_digits_are_accepted() {
+        for code in ["AB12CD", "Among7"] {
+            assert_eq!(
+                parse_deep_link(&format!("amonglauncher://{}", code)),
+                Some(DeepLink::Join { code: code.into() }),
+                "bare code {:?} should parse as a join",
+                code
+            );
+        }
+    }
+
+    #[test]
+    fn explicit_join_forms_still_accept_letter_only_codes() {
+        // The digit requirement applies ONLY to the bare form — explicit
+        // join URLs keep the plain 4-8 alnum validation.
+        assert_eq!(
+            parse_deep_link("amonglauncher://join/home"),
+            Some(DeepLink::Join {
+                code: "home".into()
+            })
+        );
+        assert_eq!(
+            parse_deep_link("amonglauncher://join?code=ABCD"),
+            Some(DeepLink::Join {
+                code: "ABCD".into()
+            })
+        );
+    }
+
+    #[test]
+    fn pending_deep_link_is_one_shot() {
+        let pending = std::sync::Mutex::new(Some(DeepLink::Join {
+            code: "AB12CD".into(),
+        }));
+        assert_eq!(
+            take_pending_deep_link(&pending),
+            Some(DeepLinkPayload {
+                kind: "join".into(),
+                code: "AB12CD".into(),
+            })
+        );
+        // Second read must be empty — a stale link is never re-joined.
+        assert_eq!(take_pending_deep_link(&pending), None);
+        // An empty slot reads as null.
+        let empty = std::sync::Mutex::new(None);
+        assert_eq!(take_pending_deep_link(&empty), None);
+    }
+
+    #[test]
+    fn deep_link_payload_matches_event_shape() {
+        // Frontend contract: invoke("get_pending_deep_link") and the
+        // `deep-link` event payload must be byte-identical JSON.
+        let value = serde_json::to_value(DeepLinkPayload::join("ABCD".into())).unwrap();
+        assert_eq!(
+            value,
+            serde_json::json!({ "kind": "join", "code": "ABCD" })
+        );
+    }
+
+    #[test]
+    fn sanitize_accepts_plain_filename() {
+        assert!(sanitize_filename("AmongApi.dll").is_ok());
+    }
+
+    #[test]
+    fn sanitize_rejects_traversal() {
+        assert!(sanitize_filename("..").is_err());
+        assert!(sanitize_filename(".").is_err());
+        assert!(sanitize_filename("").is_err());
+        assert!(sanitize_filename("../evil.dll").is_err());
+        assert!(sanitize_filename("sub/evil.dll").is_err());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn sanitize_rejects_backslash_traversal() {
+        assert!(sanitize_filename(r"..\evil.dll").is_err());
+        assert!(sanitize_filename(r"sub\evil.dll").is_err());
+    }
+}
+
+#[cfg(test)]
+mod post_lobby_tests {
+    use super::*;
+
+    #[test]
+    fn post_still_valid_when_state_unchanged() {
+        // Nothing cleared/replaced the lobby during the HTTP window.
+        assert!(post_still_valid(Some("AB12CD"), "AB12CD"));
+    }
+
+    #[test]
+    fn post_still_valid_rejects_cleared_state() {
+        // `clear_lobby` ran mid-HTTP (LobbyClosed / disconnect / stop_game).
+        assert!(!post_still_valid(None, "AB12CD"));
+    }
+
+    #[test]
+    fn post_still_valid_rejects_replaced_state() {
+        // A different lobby replaced this one mid-HTTP.
+        assert!(!post_still_valid(Some("ZZ99YY"), "AB12CD"));
+    }
 }

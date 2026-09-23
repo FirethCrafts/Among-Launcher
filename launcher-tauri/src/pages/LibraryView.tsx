@@ -4,6 +4,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { showToast, formatError } from "@/components/Toast";
+import { ConfirmModal } from "@/components/Modal";
+import { useLauncher } from "@/state/LauncherContext";
 import { Archive, Download, Trash2 } from "lucide-react";
 
 interface LibraryEntry {
@@ -11,34 +13,27 @@ interface LibraryEntry {
   storefront?: string | null;
 }
 
-interface LauncherConfig {
-  modded_install_path: string;
-}
-
 function filenameOf(path: string): string {
   return path.split(/[/\\]/).pop() || path;
 }
 
 export default function LibraryView() {
+  // gamePath comes from the shared config (no per-page read_config).
+  const { config, refreshConfig } = useLauncher();
   const [entries, setEntries] = useState<LibraryEntry[]>([]);
-  const [gamePath, setGamePath] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [removeTarget, setRemoveTarget] = useState<string | null>(null);
+
+  const gamePath =
+    config?.modded_install_path && config.modded_install_path.trim()
+      ? config.modded_install_path
+      : null;
 
   useEffect(() => {
     load().finally(() => setLoading(false));
   }, []);
 
   async function load() {
-    try {
-      const cfg = await invoke<LauncherConfig>("read_config");
-      const moddedPath =
-        cfg.modded_install_path && cfg.modded_install_path.trim()
-          ? cfg.modded_install_path
-          : null;
-      setGamePath(moddedPath);
-    } catch {
-      showToast("Failed to load config", "error");
-    }
     try {
       const library = await invoke<LibraryEntry[]>("list_library");
       setEntries(library);
@@ -59,11 +54,13 @@ export default function LibraryView() {
       showToast(`Failed to install ${filename}: ${formatError(e)}`, "error");
     } finally {
       await load();
+      // install_from_library mutates config.profiles backend-side; keep the
+      // shared config fresh so other pages don't write stale data back.
+      await refreshConfig();
     }
   }
 
   async function handleRemove(filename: string) {
-    if (!confirm(`Remove ${filename} from library?`)) return;
     try {
       await invoke("remove_from_library", { filename });
       showToast(`Removed ${filename}`, "success");
@@ -71,6 +68,8 @@ export default function LibraryView() {
       showToast(`Failed to remove ${filename}: ${formatError(e)}`, "error");
     } finally {
       await load();
+      // remove_from_library mutates config.library backend-side.
+      await refreshConfig();
     }
   }
 
@@ -96,9 +95,16 @@ export default function LibraryView() {
           {loading ? (
             <p className="text-sm text-muted-foreground">Loading library...</p>
           ) : entries.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              Your library is empty. Copy mods here from Home to reuse them later.
-            </p>
+            <div className="space-y-1">
+              <p className="text-sm text-muted-foreground">
+                Your library is empty — nothing saved yet.
+              </p>
+              <p className="text-sm text-muted-foreground">
+                On Home, hover an installed mod and press the Archive
+                (&quot;Save to library&quot;) button to stash it here, then
+                reinstall it with one click from this page.
+              </p>
+            </div>
           ) : (
             <ul className="space-y-2">
               {entries.map((entry) => {
@@ -118,16 +124,18 @@ export default function LibraryView() {
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => handleInstall(filename)}
+                        onClick={() => void handleInstall(filename)}
                         aria-label={`Install ${filename}`}
+                        title="Install into modded game"
                       >
                         <Download className="h-3 w-3" />
                       </Button>
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => handleRemove(filename)}
+                        onClick={() => setRemoveTarget(filename)}
                         aria-label={`Remove ${filename}`}
+                        title="Remove from library"
                       >
                         <Trash2 className="h-3 w-3" />
                       </Button>
@@ -139,6 +147,19 @@ export default function LibraryView() {
           )}
         </CardContent>
       </Card>
+
+      <ConfirmModal
+        isOpen={removeTarget !== null}
+        onClose={() => setRemoveTarget(null)}
+        onConfirm={() => {
+          const filename = removeTarget;
+          if (filename) void handleRemove(filename);
+        }}
+        title="Remove from library?"
+        message={`Delete ${removeTarget ?? ""} from your library? The installed copy in your modded game is not affected.`}
+        danger
+        confirmText="Remove"
+      />
     </div>
   );
 }
