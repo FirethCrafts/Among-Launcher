@@ -87,7 +87,7 @@ The project has three parts:
 ## Installation
 
 1. Open the [Releases page](https://github.com/FirethCrafts/Among-Launcher/releases).
-2. Download the latest launcher installer (`Among Launcher_<version>_x64-setup.exe`).
+2. Download the latest launcher installer (`Among.Launcher_<version>_x64-setup.exe`).
 3. Run the installer and launch **Among Launcher**.
 4. Sign in with **Discord** on the welcome screen.
 5. On first run, let the launcher **detect your game**, then click **Install** to create the modded copy with BepInEx and AmongApi.
