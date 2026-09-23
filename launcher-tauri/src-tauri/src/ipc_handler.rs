@@ -3,6 +3,11 @@ use tauri::{AppHandle, Emitter, Manager};
 
 use crate::ipc::IpcEnvelope;
 
+/// Launcher↔mod IPC protocol version this launcher expects. Must match
+/// `Plugin.ProtocolVersion` in `Among API/Plugin.cs` (bumped to 2 alongside
+/// the `game_ready` payload).
+pub(crate) const EXPECTED_MOD_PROTOCOL: u32 = 2;
+
 /// A player as reported by the game over IPC (used for both
 /// `player_joined` single events and `players_list` snapshots).
 #[derive(Debug, Clone, Deserialize)]
@@ -27,7 +32,13 @@ pub struct PlayerEntry {
 #[serde(tag = "type", content = "payload")]
 pub enum IpcMessage {
     #[serde(rename = "game_ready")]
-    GameReady,
+    GameReady {
+        /// Protocol version reported by the mod (`{ "protocol": 2 }`).
+        /// Absent on mod builds that predate the field — treated as
+        /// incompatible (an old mod predates the whole IPC contract).
+        #[serde(default, alias = "protocol")]
+        protocol: Option<u32>,
+    },
     #[serde(rename = "lobby_created")]
     LobbyCreated {
         code: String,
@@ -112,7 +123,15 @@ impl From<IpcEnvelope> for IpcMessage {
         if let Some(payload) = envelope.payload {
             map.insert("payload".to_string(), payload);
         } else {
-            map.insert("payload".to_string(), serde_json::Value::Null);
+            // Struct variants (`game_ready`, `lobby_closed`, …) require a
+            // content object; a missing payload is an empty object, not JSON
+            // null (which would fail to deserialize as a struct). This keeps
+            // legacy `game_ready` messages with no payload parsing as
+            // `GameReady { protocol: None }`.
+            map.insert(
+                "payload".to_string(),
+                serde_json::Value::Object(serde_json::Map::new()),
+            );
         }
         let value = serde_json::Value::Object(map);
         serde_json::from_value(value).unwrap_or_else(|e| {
@@ -193,10 +212,59 @@ pub(crate) fn lobby_closed_payload(is_host: bool) -> serde_json::Value {
     serde_json::json!({ "isHost": is_host })
 }
 
+/// Why the in-game mod's protocol version is unacceptable, or `None` when it
+/// matches what this launcher expects.
+///
+/// A `None` protocol (the field is absent) is treated as incompatible on
+/// purpose: a mod build that predates the protocol field predates the whole
+/// IPC contract, so it cannot be trusted to speak the current message shapes.
+fn protocol_mismatch_reason(protocol: Option<u32>) -> Option<String> {
+    match protocol {
+        Some(p) if p == EXPECTED_MOD_PROTOCOL => None,
+        Some(p) => Some(format!(
+            "AmongApi protocol v{} is not supported (expected v{})",
+            p, EXPECTED_MOD_PROTOCOL
+        )),
+        None => Some(
+            "AmongApi did not report a protocol version; update it in the launcher".to_string(),
+        ),
+    }
+}
+
+/// The exact payload every `mod-incompatible` event carries:
+/// `{ "reason": "<string>" }`.
+pub(crate) fn mod_incompatible_payload(reason: &str) -> serde_json::Value {
+    serde_json::json!({ "reason": reason })
+}
+
+/// Evaluate a `game_ready` protocol report: cache + announce an
+/// `incompatible` verdict on mismatch, or clear a previous verdict on match.
+async fn handle_game_ready_protocol(app: &AppHandle, protocol: Option<u32>) {
+    match protocol_mismatch_reason(protocol) {
+        Some(reason) => {
+            // The game is running a mod we cannot talk to. Cache the verdict
+            // (so `launch_game` rejects until it is updated) and tell the UI.
+            let installed = {
+                let state = app.state::<crate::AppState>();
+                let game_path = state.config.read().await.effective_modded_path();
+                crate::version_checker::read_installed_version(&game_path)
+            };
+            let state = app.state::<crate::AppState>();
+            crate::version_checker::mark_mod_incompatible(&state, installed, &reason);
+            let _ = app.emit("mod-incompatible", mod_incompatible_payload(&reason));
+        }
+        None => {
+            let state = app.state::<crate::AppState>();
+            crate::version_checker::clear_mod_incompatible(&state);
+        }
+    }
+}
+
 pub async fn handle_ipc_message(app: &AppHandle, msg: IpcMessage) {
     match msg {
-        IpcMessage::GameReady => {
+        IpcMessage::GameReady { protocol } => {
             let _ = app.emit("game-ready", ());
+            handle_game_ready_protocol(app, protocol).await;
         }
         IpcMessage::LobbyCreated {
             code,
@@ -395,9 +463,39 @@ mod tests {
 
     #[test]
     fn test_parse_game_ready() {
-        let json = r#"{"type": "game_ready"}"#;
+        // Legacy: empty payload → protocol defaults to None.
+        let json = r#"{"type": "game_ready", "payload": {}}"#;
         let msg: IpcMessage = serde_json::from_str(json).unwrap();
-        assert!(matches!(msg, IpcMessage::GameReady));
+        assert!(matches!(msg, IpcMessage::GameReady { protocol: None }));
+    }
+
+    #[test]
+    fn legacy_game_ready_without_payload_parses_via_envelope() {
+        // The pipe server parses an envelope and converts it; a legacy
+        // `game_ready` with no payload must still yield `protocol: None`.
+        let envelope = IpcEnvelope {
+            msg_type: "game_ready".to_string(),
+            id: "test-id".to_string(),
+            timestamp: 1234567890,
+            payload: None,
+        };
+        let msg: IpcMessage = envelope.into();
+        assert!(matches!(msg, IpcMessage::GameReady { protocol: None }));
+    }
+
+    #[test]
+    fn test_parse_game_ready_with_protocol() {
+        // Exact shape the mod sends (`Among API/Plugin.cs`).
+        let json = r#"{"type": "game_ready", "payload": {"protocol": 2}}"#;
+        let msg: IpcMessage = serde_json::from_str(json).unwrap();
+        assert!(matches!(msg, IpcMessage::GameReady { protocol: Some(2) }));
+    }
+
+    #[test]
+    fn test_parse_game_ready_with_unexpected_protocol() {
+        let json = r#"{"type": "game_ready", "payload": {"protocol": 1}}"#;
+        let msg: IpcMessage = serde_json::from_str(json).unwrap();
+        assert!(matches!(msg, IpcMessage::GameReady { protocol: Some(1) }));
     }
 
     #[test]
@@ -897,7 +995,41 @@ mod tests {
             payload: None,
         };
         let msg: IpcMessage = envelope.into();
-        assert!(matches!(msg, IpcMessage::GameReady));
+        assert!(matches!(msg, IpcMessage::GameReady { protocol: None }));
+    }
+
+    // ---- protocol contract (A2a) ----
+
+    #[test]
+    fn protocol_reason_none_when_version_matches() {
+        assert_eq!(protocol_mismatch_reason(Some(EXPECTED_MOD_PROTOCOL)), None);
+    }
+
+    #[test]
+    fn protocol_reason_flags_other_versions() {
+        let reason = protocol_mismatch_reason(Some(1)).expect("v1 must mismatch");
+        assert!(reason.contains("v1"), "reason: {}", reason);
+        assert!(reason.contains("v2"), "reason: {}", reason);
+        // A future protocol is rejected too (forward incompatibility).
+        assert!(protocol_mismatch_reason(Some(3)).is_some());
+    }
+
+    #[test]
+    fn protocol_reason_flags_absent_protocol() {
+        // An old mod predates the protocol field: deliberate mismatch.
+        let reason = protocol_mismatch_reason(None).expect("absent protocol must mismatch");
+        assert!(reason.contains("protocol"), "reason: {}", reason);
+        assert!(reason.contains("update"), "reason: {}", reason);
+    }
+
+    #[test]
+    fn mod_incompatible_payload_shape_is_stable() {
+        // Frontend contract: the `mod-incompatible` event payload is exactly
+        // `{ "reason": "<string>" }`.
+        assert_eq!(
+            mod_incompatible_payload("AmongApi protocol v1 is not supported (expected v2)"),
+            serde_json::json!({ "reason": "AmongApi protocol v1 is not supported (expected v2)" })
+        );
     }
 
     #[test]

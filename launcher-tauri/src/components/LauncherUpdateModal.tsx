@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-shell";
 import { Modal } from "@/components/Modal";
 import { Button } from "@/components/ui/button";
@@ -18,7 +19,13 @@ interface LauncherUpdateModalProps {
   updateInfo: LauncherUpdateInfo;
 }
 
-type Status = "idle" | "opening" | "opened";
+interface UpdateProgress {
+  stage: "downloading" | "installing";
+  progress: number;
+  total: number;
+}
+
+type Status = "idle" | "downloading" | "installing" | "error";
 
 export function LauncherUpdateModal({
   isOpen,
@@ -27,6 +34,7 @@ export function LauncherUpdateModal({
 }: LauncherUpdateModalProps) {
   const [currentVersion, setCurrentVersion] = useState("Unknown");
   const [status, setStatus] = useState<Status>("idle");
+  const [progressText, setProgressText] = useState("");
 
   // Current version for the prompt; stays "Unknown" if get_version rejects
   // (e.g. backend command not available yet).
@@ -48,27 +56,61 @@ export function LauncherUpdateModal({
     };
   }, [isOpen]);
 
+  // Progress events from `install_launcher_update`, same shape as the mod
+  // updater's `update-progress`. Subscribed only while the modal is open.
+  useEffect(() => {
+    if (!isOpen) {
+      setProgressText("");
+      return;
+    }
+    const unlisten = listen<UpdateProgress>("launcher-update-progress", (event) => {
+      const { stage, progress, total } = event.payload;
+      if (stage === "downloading") {
+        setStatus("downloading");
+        if (total > 0) {
+          const pct = Math.round((progress / total) * 100);
+          setProgressText(`Downloading… ${pct}%`);
+        } else {
+          setProgressText("Downloading…");
+        }
+      } else if (stage === "installing") {
+        setStatus("installing");
+        setProgressText("Installing…");
+      }
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, [isOpen]);
+
   async function handleUpdate() {
     if (!updateInfo.downloadUrl || status !== "idle") return;
-    setStatus("opening");
+    setStatus("downloading");
+    setProgressText("Downloading…");
     try {
-      // Chosen mechanism: hand the release URL to the system browser.
-      // Evidence: capabilities/default.json grants only `shell:default`
-      // (= `allow-open`, scoped to http(s)/tel/mailto URLs) and `fs:default`
-      // (read app dirs + mkdir only — NO write permission), and there is no
-      // generic backend download command, so saving the .exe locally from the
-      // frontend is not sanctioned. The browser downloads the NSIS installer;
-      // the user runs it from their downloads.
-      await open(updateInfo.downloadUrl);
-      setStatus("opened");
+      // Backend streams the installer to %TEMP%\AmongLauncher and runs it
+      // silently, then exits the app (~800 ms later) so the installer can
+      // replace files. This invoke resolves before that exit.
+      await invoke("install_launcher_update", {
+        downloadUrl: updateInfo.downloadUrl,
+      });
+      // The app is about to exit — show a final status instead of buttons.
+      setStatus("installing");
+      setProgressText("Restarting…");
     } catch (e) {
-      // Error → toast + back to ready state so Update is usable again.
-      setStatus("idle");
+      // Error → toast AND fall back to the browser download so the user is
+      // not stuck (e.g. non-GitHub URL, network failure, install error).
+      setStatus("error");
       showToast(`Update failed: ${formatError(e)}`, "error");
+      try {
+        await open(updateInfo.downloadUrl);
+      } catch {
+        /* browser fallback failed too; toast already shown */
+      }
     }
   }
 
-  const opening = status === "opening";
+  const busy = status === "downloading" || status === "installing";
 
   return (
     <Modal
@@ -98,52 +140,44 @@ export function LauncherUpdateModal({
           </p>
         </div>
 
-        {opening && (
+        {busy && (
           <div className="space-y-2">
-            <p className="text-xs text-muted-foreground">
-              Opening download page…
-            </p>
-            {/* Indeterminate bar: the actual download happens in the browser. */}
+            <p className="text-xs text-muted-foreground">{progressText}</p>
+            {/* Indeterminate pulse bar (the byte total may be unknown). */}
             <div className="h-1.5 w-full overflow-hidden rounded-pill bg-surface-2">
               <div className="h-full w-full animate-pulse rounded-full bg-primary" />
             </div>
           </div>
         )}
 
-        {status === "opened" && (
+        {status === "error" && (
           <p className="text-xs text-muted-foreground">
-            Your browser will download the installer — run it to update.
+            Downloading in your browser instead — run the installer to update.
           </p>
         )}
 
         <div className="flex gap-3 pt-2">
-          {status === "opened" ? (
-            <Button onClick={onClose} className="flex-1">
-              Close
-            </Button>
+          {busy ? (
+            <>
+              <Button variant="outline" className="flex-1" disabled>
+                Later
+              </Button>
+              <Button className="flex-1" disabled>
+                {status === "installing" ? "Restarting…" : "Updating…"}
+              </Button>
+            </>
           ) : (
             <>
-              <Button
-                onClick={onClose}
-                variant="outline"
-                className="flex-1"
-                disabled={opening}
-              >
+              <Button onClick={onClose} variant="outline" className="flex-1">
                 Later
               </Button>
               <Button
                 onClick={handleUpdate}
-                disabled={opening || !updateInfo.downloadUrl}
+                disabled={!updateInfo.downloadUrl}
                 className="flex-1"
               >
-                {opening ? (
-                  "Opening…"
-                ) : (
-                  <>
-                    <Download className="h-4 w-4" />
-                    Update
-                  </>
-                )}
+                <Download className="h-4 w-4" />
+                Update
               </Button>
             </>
           )}

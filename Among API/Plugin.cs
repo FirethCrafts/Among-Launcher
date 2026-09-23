@@ -7,6 +7,13 @@ namespace AmongApi;
 [BepInPlugin(MyPluginInfo.PLUGIN_GUID, MyPluginInfo.PLUGIN_NAME, MyPluginInfo.PLUGIN_VERSION)]
 public class Plugin : BasePlugin
 {
+    /// <summary>
+    /// Launcher↔mod IPC contract version. Bump this whenever a message shape or
+    /// semantic changes in a way that requires both sides to be updated together.
+    /// The launcher rejects a mod whose protocol version it does not expect.
+    /// </summary>
+    public const int ProtocolVersion = 2;
+
     internal static new ManualLogSource Log = null!;
     private LobbyInfo? _lastLobby;
     private bool _autoPost;
@@ -132,7 +139,7 @@ public class Plugin : BasePlugin
                 return new { success = result.Success, error = result.Error };
             });
 
-            await pipe.SendMessageAsync("game_ready");
+            await pipe.SendMessageAsync("game_ready", new { protocol = ProtocolVersion });
             FileLogger.Info("Game ready signal sent to launcher.");
 
             var tracker = new GameStateTracker(Log);

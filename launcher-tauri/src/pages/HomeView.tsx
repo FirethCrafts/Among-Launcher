@@ -10,10 +10,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { StatTile } from "@/components/ui/stat-tile";
 import { EmptyState } from "@/components/ui/empty-state";
-import { showToast } from "@/components/Toast";
+import { Tooltip } from "@/components/ui/tooltip";
+import { showToast, formatError } from "@/components/Toast";
 import { ConfirmModal } from "@/components/Modal";
 import { LibraryPickerModal } from "@/components/LibraryPickerModal";
 import { useLauncher, type LauncherConfig } from "@/state/LauncherContext";
+import type { ModStatus } from "@/App";
 import { Play, Square, Gamepad2, FolderOpen, Package, Folder, Copy, Trash2, Archive, Library, Store, Cpu, RefreshCw } from "lucide-react";
 
 interface GameSearchResult {
@@ -41,6 +43,13 @@ interface InstallProgress {
   total: number;
 }
 
+interface HomeViewProps {
+  /** Latest AmongApi status owned by App (null = not checked yet). */
+  modStatus?: ModStatus | null;
+  /** Opens App's forced AmongApi update prompt. */
+  onRequireModUpdate?: () => void;
+}
+
 function formatBytes(bytes: number): string {
   if (bytes === 0) return "0 B";
   const k = 1024;
@@ -49,7 +58,10 @@ function formatBytes(bytes: number): string {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
 }
 
-export default function HomeView() {
+export default function HomeView({
+  modStatus = null,
+  onRequireModUpdate,
+}: HomeViewProps) {
   const navigate = useNavigate();
   const { config, updateConfig } = useLauncher();
   const [gamePath, setGamePath] = useState<string | null>(null);
@@ -181,8 +193,14 @@ export default function HomeView() {
     try {
       await invoke("launch_game", { gamePath });
       setIsRunning(true);
-    } catch {
-      showToast("Failed to launch game", "error");
+    } catch (e) {
+      // `launch_game` now rejects when the mod isn't current — surface the
+      // backend's reason rather than a generic failure.
+      const detail = formatError(e);
+      showToast(
+        detail ? `Failed to launch game: ${detail}` : "Failed to launch game",
+        "error"
+      );
     }
   }
 
@@ -253,7 +271,57 @@ export default function HomeView() {
   }
 
   const isReady = !!gamePath && bepinexInstalled && amongApiInstalled;
+  // `unknown` (or not-yet-checked) must NOT block play — only a definitively
+  // non-current mod does. `isReady` stays the presence/setup gate.
+  const modReady =
+    !modStatus ||
+    modStatus.status === "current" ||
+    modStatus.status === "unknown";
+  const canPlay = isReady && modReady;
   const libraryCount = config?.library.length ?? 0;
+
+  // AmongApi stat tile: prefer the richer version status over the presence
+  // flag. Until the check resolves (`modStatus === null`) we say "checking"
+  // rather than claiming "up to date".
+  let amongApiValue = amongApiInstalled ? "Installed" : "Missing";
+  let amongApiHint = amongApiInstalled ? "Checking version…" : "Run setup to install";
+  let amongApiTone: "default" | "success" | "danger" | "warning" = amongApiInstalled
+    ? "success"
+    : "danger";
+  if (modStatus) {
+    switch (modStatus.status) {
+      case "current":
+        amongApiValue = "Up to date";
+        amongApiHint = modStatus.installedVersion
+          ? `v${modStatus.installedVersion}`
+          : "Mod up to date";
+        amongApiTone = "success";
+        break;
+      case "outdated":
+        amongApiValue = "Outdated";
+        amongApiHint =
+          modStatus.installedVersion && modStatus.latestVersion
+            ? `v${modStatus.installedVersion} → v${modStatus.latestVersion}`
+            : "Update available";
+        amongApiTone = "warning";
+        break;
+      case "incompatible":
+        amongApiValue = "Incompatible";
+        amongApiHint = "Update required";
+        amongApiTone = "danger";
+        break;
+      case "missing":
+        amongApiValue = "Missing";
+        amongApiHint = "Run setup to install";
+        amongApiTone = "danger";
+        break;
+      case "unknown":
+        amongApiValue = amongApiInstalled ? "Installed" : "Unknown";
+        amongApiHint = "Couldn't verify version";
+        amongApiTone = "default";
+        break;
+    }
+  }
 
   return (
     <div className="min-h-full p-6 space-y-6">
@@ -321,41 +389,64 @@ export default function HomeView() {
                 <div className="space-y-2">
                   <div className="flex items-center gap-3">
                     <h2 className="text-display font-bold tracking-tight">
-                      {isReady ? "Game Ready" : "Setup Needed"}
+                      {canPlay
+                        ? "Game Ready"
+                        : isReady
+                          ? "Update Required"
+                          : "Setup Needed"}
                     </h2>
-                    {isReady ? (
+                    {canPlay ? (
                       <Badge variant="success" showDot dotColor="success">
                         Ready
                       </Badge>
                     ) : (
                       <Badge variant="warning" showDot dotColor="warning">
-                        Incomplete
+                        {isReady ? "Update Required" : "Incomplete"}
                       </Badge>
                     )}
                   </div>
                   <p className="text-13 text-muted-foreground">
-                    {isReady
+                    {canPlay
                       ? "Everything is set up. Jump into a lobby."
-                      : "Finish installing Among Us + BepInEx to play."}
+                      : isReady
+                        ? "AmongApi needs updating before you can play."
+                        : "Finish installing Among Us + BepInEx to play."}
                   </p>
                 </div>
                 <div>
-                  {isReady ? (
-                    isRunning ? (
-                      <Button onClick={() => setConfirmStop(true)} variant="destructive" size="lg">
-                        <Square className="h-5 w-5" />
-                        Stop
-                      </Button>
-                    ) : (
-                      <Button onClick={() => void launchGame()} variant="primary" size="lg">
-                        <Play className="h-5 w-5" />
-                        Play
-                      </Button>
-                    )
-                  ) : (
+                  {!isReady ? (
                     <Button onClick={() => navigate("/setup")} variant="outline" size="lg">
                       <Gamepad2 className="h-5 w-5" />
                       Set Up Game
+                    </Button>
+                  ) : isRunning ? (
+                    <Button onClick={() => setConfirmStop(true)} variant="destructive" size="lg">
+                      <Square className="h-5 w-5" />
+                      Stop
+                    </Button>
+                  ) : !modReady ? (
+                    <div className="flex flex-col items-stretch gap-2 sm:items-end">
+                      <Tooltip content="AmongApi needs updating">
+                        <span className="inline-flex">
+                          <Button variant="primary" size="lg" disabled>
+                            <Play className="h-5 w-5" />
+                            Play
+                          </Button>
+                        </span>
+                      </Tooltip>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => onRequireModUpdate?.()}
+                      >
+                        <RefreshCw className="h-3.5 w-3.5" />
+                        Update AmongApi
+                      </Button>
+                    </div>
+                  ) : (
+                    <Button onClick={() => void launchGame()} variant="primary" size="lg">
+                      <Play className="h-5 w-5" />
+                      Play
                     </Button>
                   )}
                 </div>
@@ -413,9 +504,9 @@ export default function HomeView() {
             />
             <StatTile
               label="AmongApi"
-              value={amongApiInstalled ? "Installed" : "Missing"}
-              hint={amongApiInstalled ? "Mod up to date" : "Run setup to install"}
-              tone={amongApiInstalled ? "success" : "danger"}
+              value={amongApiValue}
+              hint={amongApiHint}
+              tone={amongApiTone}
               icon={<Cpu className="h-4 w-4" />}
             />
           </div>

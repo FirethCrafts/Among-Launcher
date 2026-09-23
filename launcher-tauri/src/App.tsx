@@ -8,6 +8,7 @@ import {
 } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { AlertTriangle } from "lucide-react";
 import HomeView from "@/pages/HomeView";
 import LibraryView from "@/pages/LibraryView";
 import SettingsView from "@/pages/SettingsView";
@@ -44,6 +45,42 @@ interface InstallStatus {
   among_api_installed: boolean;
 }
 
+/** AmongApi version status, as returned by the `get_mod_status` command. */
+export type ModStatusCode =
+  | "missing"
+  | "outdated"
+  | "current"
+  | "incompatible"
+  | "unknown";
+
+export interface ModStatus {
+  status: ModStatusCode;
+  installedVersion: string | null;
+  latestVersion: string | null;
+  downloadUrl: string | null;
+  notes: string | null;
+}
+
+// `unknown` = the check couldn't run (offline / no releases). Used whenever
+// the command times out or rejects, so the UI never falsely claims "up to date".
+const UNKNOWN_MOD_STATUS: ModStatus = {
+  status: "unknown",
+  installedVersion: null,
+  latestVersion: null,
+  downloadUrl: null,
+  notes: null,
+};
+
+const EMPTY_UPDATE_INFO: UpdateInfo = {
+  current: "Unknown",
+  latest: "Unknown",
+  changelog: "",
+  download_url: "",
+};
+
+const INCOMPATIBLE_REASON =
+  "The installed AmongApi is incompatible with this launcher version. Update it to continue.";
+
 function SetupPage() {
   const navigate = useNavigate();
   return <SetupView onComplete={() => navigate("/")} />;
@@ -72,7 +109,14 @@ function AppShell() {
   const [lobbyIsHost, setLobbyIsHost] = useState<boolean | null>(null);
   const [showUpdateModal, setShowUpdateModal] = useState(false);
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
-  const updateChecked = useRef(false);
+  // Mandatory-mod-update flow: `force` makes the prompt non-dismissable and
+  // `reason` carries extra context (e.g. the `mod-incompatible` event's reason).
+  const [modForce, setModForce] = useState(false);
+  const [modReason, setModReason] = useState<string | null>(null);
+  // Latest known AmongApi status. `null` = not checked yet; `unknown` = the
+  // check couldn't run and MUST NOT be rendered as "up to date".
+  const [modStatus, setModStatus] = useState<ModStatus | null>(null);
+  const modStatusChecked = useRef(false);
   // Launcher self-update state — deliberately separate from the mod-update
   // state above so neither check can interfere with the other.
   const [launcherUpdate, setLauncherUpdate] =
@@ -280,17 +324,38 @@ function AppShell() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lobbyIsHost, gameConnected]);
 
-  // Update check runs once, after login, in the background AFTER first
-  // paint so a slow network (GitHub) can't block login/render.
+  // AmongApi status check runs once, after login, in the background AFTER
+  // first paint so a slow network (GitHub) can't block login/render.
   useEffect(() => {
-    if (!loggedIn || updateChecked.current) return;
-    updateChecked.current = true;
+    if (!loggedIn || modStatusChecked.current) return;
+    modStatusChecked.current = true;
     const timer = setTimeout(() => {
-      void checkForUpdate();
+      void checkModStatus();
     }, 0);
     return () => clearTimeout(timer);
     // Intentionally keyed only on `loggedIn`: a one-shot background check.
   }, [loggedIn]);
+
+  // Forced prompt when the in-game mod reports a protocol version this
+  // launcher doesn't expect. Registered once at App level so it fires
+  // regardless of which route is mounted.
+  useEffect(() => {
+    const unlisten = listen<{ reason?: string } | null>(
+      "mod-incompatible",
+      (event) => {
+        const reason =
+          typeof event.payload?.reason === "string" &&
+          event.payload.reason.trim().length > 0
+            ? event.payload.reason
+            : INCOMPATIBLE_REASON;
+        void handleModIncompatible(reason);
+      }
+    );
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Launcher self-update check: runs once at mount REGARDLESS of login,
   // fully independent of the mod check above (own ref, own effect, own
@@ -333,25 +398,77 @@ function AppShell() {
     }
   }
 
-  async function checkForUpdate() {
+  // Fetch the AmongApi status once. Returns null when the check times out or
+  // rejects — callers map that to the non-blocking "unknown" state.
+  async function fetchModStatus(): Promise<ModStatus | null> {
     try {
-      const info = await Promise.race([
-        invoke<UpdateInfo | null>("check_for_among_api_update"),
+      return await Promise.race([
+        invoke<ModStatus>("get_mod_status"),
         new Promise<null>((resolve) => setTimeout(() => resolve(null), 8000)),
       ]);
-      if (info) {
-        setUpdateInfo(info);
-        setShowUpdateModal(true);
-      }
-      // Timeout (resolves null): stay silent — no "up to date" claim is made.
     } catch (e) {
-      // Non-critical, but not silent: surface failures so a broken network
-      // isn't mistaken for "no update available". App stays usable offline.
-      const detail = formatError(e);
-      showToast(
-        detail ? `Update check failed: ${detail}` : "Update check failed",
-        "error"
+      // get_mod_status "never throws for the normal cases"; a rejection is an
+      // unexpected failure. Never treat it as "up to date".
+      console.debug("get_mod_status failed", e);
+      return null;
+    }
+  }
+
+  function openForcedModUpdate(status: ModStatus, reason: string | null) {
+    setUpdateInfo({
+      current: status.installedVersion ?? "Not installed",
+      latest: status.latestVersion ?? "Unknown",
+      changelog: status.notes ?? "",
+      download_url: status.downloadUrl ?? "",
+    });
+    setModReason(reason);
+    setModForce(true);
+    setShowUpdateModal(true);
+  }
+
+  // Startup check: opens a NON-DISMISSABLE update prompt when the mod is
+  // missing/outdated/incompatible. `unknown` only warns (never blocks, never
+  // claims up to date).
+  async function checkModStatus() {
+    const status = (await fetchModStatus()) ?? UNKNOWN_MOD_STATUS;
+    setModStatus(status);
+    if (
+      status.status === "missing" ||
+      status.status === "outdated" ||
+      status.status === "incompatible"
+    ) {
+      openForcedModUpdate(
+        status,
+        status.status === "incompatible" ? INCOMPATIBLE_REASON : null
       );
+    }
+  }
+
+  // Refresh WITHOUT prompting — used after the update prompt closes so
+  // HomeView's PLAY gate reflects the post-update state without immediately
+  // re-opening the modal (which would trap a user who closed it early).
+  async function refreshModStatus() {
+    const status = (await fetchModStatus()) ?? UNKNOWN_MOD_STATUS;
+    setModStatus(status);
+  }
+
+  // `mod-incompatible` is emitted when the in-game mod reports an unexpected
+  // protocol version. Always open the forced prompt; a best-effort refresh
+  // supplies the download URL but never blocks the prompt.
+  async function handleModIncompatible(reason: string) {
+    setModReason(reason);
+    setModForce(true);
+    setUpdateInfo((prev) => prev ?? EMPTY_UPDATE_INFO);
+    setShowUpdateModal(true);
+    const status = await fetchModStatus();
+    if (status) {
+      setModStatus(status);
+      setUpdateInfo({
+        current: status.installedVersion ?? "Unknown",
+        latest: status.latestVersion ?? "Unknown",
+        changelog: status.notes ?? "",
+        download_url: status.downloadUrl ?? "",
+      });
     }
   }
 
@@ -440,8 +557,39 @@ function AppShell() {
             lobbyIsHost={lobbyIsHost}
           />
           <main className="flex-1 overflow-y-auto p-6">
+            {modStatus?.status === "unknown" && (
+              <div className="mb-4 flex items-start gap-2 rounded-control border border-warning/40 bg-warning/10 px-3 py-2 text-2xs text-foreground">
+                <AlertTriangle
+                  className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning"
+                  aria-hidden="true"
+                />
+                <span>
+                  Couldn&apos;t verify the AmongApi version. Check your
+                  connection — it may need updating.
+                </span>
+              </div>
+            )}
             <Routes>
-              <Route path="/" element={<HomeView />} />
+              <Route
+                path="/"
+                element={
+                  <HomeView
+                    modStatus={modStatus}
+                    onRequireModUpdate={() => {
+                      if (modStatus) {
+                        openForcedModUpdate(
+                          modStatus,
+                          modStatus.status === "incompatible"
+                            ? INCOMPATIBLE_REASON
+                            : null
+                        );
+                      } else {
+                        void checkModStatus();
+                      }
+                    }}
+                  />
+                }
+              />
               <Route path="/library" element={<LibraryView />} />
               <Route path="/settings" element={<SettingsView />} />
               {!gameConnected && <Route path="/setup" element={<SetupPage />} />}
@@ -472,12 +620,20 @@ function AppShell() {
           <UpdateModal
             // Ordering: the launcher prompt always goes first. The mod
             // prompt is held until the launcher check has settled AND any
-            // launcher prompt has been dismissed (Later/Close).
+            // launcher prompt has been dismissed (Later/Close). A FORCED mod
+            // prompt is likewise non-dismissable once it appears.
             isOpen={
               showUpdateModal && launcherCheckSettled && !showLauncherModal
             }
-            onClose={() => setShowUpdateModal(false)}
+            onClose={() => {
+              setShowUpdateModal(false);
+              // Reflect the post-update state in HomeView's PLAY gate without
+              // re-opening the prompt (see refreshModStatus).
+              void refreshModStatus();
+            }}
             updateInfo={updateInfo}
+            force={modForce}
+            reason={modReason}
           />
         )}
         <ToastHost />

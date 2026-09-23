@@ -17,6 +17,13 @@ interface UpdateModalProps {
   isOpen: boolean;
   onClose: () => void;
   updateInfo: UpdateInfo;
+  /**
+   * Mandatory update: hides "Later" and disables every dismissal route on the
+   * base Modal (Esc, backdrop click, and the header X) via `allowDismiss`.
+   */
+  force?: boolean;
+  /** Extra context (e.g. the mod-incompatible reason) shown above the versions. */
+  reason?: string | null;
 }
 
 interface UpdateProgress {
@@ -27,7 +34,19 @@ interface UpdateProgress {
 
 type Status = "idle" | "updating" | "done" | "error";
 
-export function UpdateModal({ isOpen, onClose, updateInfo }: UpdateModalProps) {
+// `update_among_api` reports a locked target file as a filesystem error whose
+// message contains "Close the game and try again: …". There is no dedicated
+// `is_game_running` command on the backend, so that message is the only signal
+// available to the frontend.
+const GAME_RUNNING_PATTERN = /close the game/i;
+
+export function UpdateModal({
+  isOpen,
+  onClose,
+  updateInfo,
+  force = false,
+  reason = null,
+}: UpdateModalProps) {
   const [status, setStatus] = useState<Status>("idle");
   const [progressText, setProgressText] = useState("");
   const [error, setError] = useState("");
@@ -77,10 +96,27 @@ export function UpdateModal({ isOpen, onClose, updateInfo }: UpdateModalProps) {
   }
 
   const updating = status === "updating";
+  const gameRunning = status === "error" && GAME_RUNNING_PATTERN.test(error);
+  // A forced prompt with no download URL has no action the user can take, so
+  // trapping them behind it would brick the launcher. This is the ONLY case a
+  // forced prompt may be closed before completing.
+  const canCloseEarly = force && !updateInfo.download_url;
+  const showSecondaryButton = !force || canCloseEarly;
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Update Available">
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title={force ? "AmongApi update required" : "Update Available"}
+      allowDismiss={!force}
+    >
       <div className="space-y-4">
+        {reason && (
+          <p className="rounded-control bg-surface-2 p-3 text-xs text-muted-foreground">
+            {reason}
+          </p>
+        )}
+
         <div className="flex items-center justify-between text-sm">
           <span className="text-muted-foreground">Current version</span>
           <span className="font-mono font-medium">{updateInfo.current}</span>
@@ -127,8 +163,22 @@ export function UpdateModal({ isOpen, onClose, updateInfo }: UpdateModalProps) {
           </p>
         )}
 
-        {status === "error" && error && (
+        {gameRunning && (
+          <div className="rounded-control border border-warning/50 bg-warning/10 p-3 text-xs text-foreground">
+            Close Among Us to update — the mod file is locked while the game is
+            running.
+          </div>
+        )}
+
+        {status === "error" && error && !gameRunning && (
           <p className="text-xs text-destructive">{error}</p>
+        )}
+
+        {force && !updateInfo.download_url && (
+          <p className="text-xs text-muted-foreground">
+            No download is available right now. Check your connection and try
+            again later.
+          </p>
         )}
 
         <div className="flex gap-3 pt-2">
@@ -138,9 +188,11 @@ export function UpdateModal({ isOpen, onClose, updateInfo }: UpdateModalProps) {
             </Button>
           ) : (
             <>
-              <Button onClick={onClose} variant="outline" className="flex-1">
-                Later
-              </Button>
+              {showSecondaryButton && (
+                <Button onClick={onClose} variant="outline" className="flex-1">
+                  {force ? "Close" : "Later"}
+                </Button>
+              )}
               <Button
                 onClick={handleUpdate}
                 disabled={updating || !updateInfo.download_url}
@@ -151,7 +203,7 @@ export function UpdateModal({ isOpen, onClose, updateInfo }: UpdateModalProps) {
                 ) : (
                   <>
                     <Download className="h-4 w-4" />
-                    Update
+                    {gameRunning ? "Retry" : "Update"}
                   </>
                 )}
               </Button>

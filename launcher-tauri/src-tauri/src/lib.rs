@@ -941,6 +941,10 @@ pub struct AppState {
     /// `get_pending_deep_link`. Private field: `DeepLink` is not `pub`.
     pending_deep_link: std::sync::Mutex<Option<DeepLink>>,
     pub detect_cache: Arc<DetectCache>,
+    /// Last known AmongApi status. Populated by `get_mod_status` and by the
+    /// live protocol check; read by `launch_game` to gate without a network
+    /// call. `None` (never checked) fails open.
+    pub mod_status: std::sync::Mutex<Option<version_checker::ModStatus>>,
 }
 
 impl AppState {
@@ -1086,11 +1090,41 @@ async fn install_game(
     Ok(())
 }
 
+/// Human-readable reason `launch_game` refuses to start the game, or `None`
+/// when the mod is launchable (`current`, or `unknown` — fail open).
+fn launch_block_reason(kind: version_checker::ModStatusKind) -> Option<String> {
+    use version_checker::ModStatusKind;
+    match kind {
+        ModStatusKind::Current | ModStatusKind::Unknown => None,
+        ModStatusKind::Missing => Some(
+            "AmongApi is not installed — install or update it in the launcher before playing"
+                .to_string(),
+        ),
+        ModStatusKind::Outdated => Some(
+            "AmongApi is out of date — update it in the launcher before playing".to_string(),
+        ),
+        ModStatusKind::Incompatible => Some(
+            "AmongApi is incompatible with this launcher — update it in the launcher before playing"
+                .to_string(),
+        ),
+    }
+}
+
 #[tauri::command]
 async fn launch_game(
     state: State<'_, AppState>,
     game_path: String,
 ) -> Result<String, LauncherError> {
+    // Gate: never launch when we know AmongApi is missing/outdated/
+    // incompatible. Reads the CACHED status only — no network call in this
+    // hot path. An empty/`unknown` cache fails OPEN (the frontend warns but
+    // does not block), so a failed status check can never brick play.
+    if let Some(status) = version_checker::cached_mod_status(&state) {
+        if let Some(reason) = launch_block_reason(status.status) {
+            return Err(LauncherError::InstallFailed(reason));
+        }
+    }
+
     // Point the mod at the backend and tell it whether to auto-post, both at
     // launch time so it is configured before the game's IPC pipe comes up.
     let auto_post = state.config.read().await.auto_post_lobby;
@@ -1942,6 +1976,194 @@ async fn check_for_launcher_update(
     }
 }
 
+/// Hosts allowed to serve the launcher self-update installer:
+/// `github.com` / `*.github.com` and the GitHub release CDN
+/// `githubusercontent.com` / `*.githubusercontent.com`.
+///
+/// The download URL round-trips through the webview, so without this
+/// allow-list `install_launcher_update` would be an
+/// arbitrary-executable-download-and-run primitive.
+fn is_allowed_update_host(host: &str) -> bool {
+    let host = host.to_ascii_lowercase();
+    // Exact domain or a subdomain of it. The leading dot in the suffix check
+    // means look-alikes such as `evilgithub.com` or `github.com.evil.com`
+    // do NOT match.
+    let is_domain = |domain: &str| host.as_str() == domain || host.ends_with(&format!(".{}", domain));
+    is_domain("github.com") || is_domain("githubusercontent.com")
+}
+
+/// Whether `url` is an acceptable launcher-update location: HTTPS on a
+/// GitHub-owned host (see `is_allowed_update_host`).
+///
+/// Checks BOTH scheme and host, so it can be used for the initial download URL
+/// and re-used to re-validate every redirect hop in the download client's
+/// redirect policy.
+fn is_allowed_update_url(url: &reqwest::Url) -> bool {
+    url.scheme() == "https" && url.host_str().map(is_allowed_update_host).unwrap_or(false)
+}
+
+/// Plain `.exe` file name from the URL's last path segment, or `None` when
+/// the segment is empty, contains a path separator, or does not end in
+/// `.exe`. Percent-encoded separators stay encoded (never decoded), so the
+/// value cannot escape the temp directory.
+fn update_asset_file_name(url: &reqwest::Url) -> Option<String> {
+    let last = url.path_segments()?.next_back()?;
+    if last.is_empty() || last.contains(['/', '\\']) || !last.ends_with(".exe") {
+        return None;
+    }
+    Some(last.to_string())
+}
+
+/// Downloads the NSIS installer for a newer launcher and runs it in place.
+///
+/// Security: `download_url` originates from the frontend (which got it from
+/// the GitHub API) and is therefore treated as untrusted. Only HTTPS URLs on
+/// GitHub-owned hosts are accepted, the file is written to a fixed temp
+/// directory, and only a plain `.exe` asset name is allowed. A
+/// `total`-vs-downloaded length check rejects truncated downloads before
+/// anything is executed.
+///
+/// Progress events: `launcher-update-progress` with
+/// `{ "stage": "downloading" | "installing", "progress": <bytes>, "total": <n|0> }`
+/// — same shape as the mod updater's `update-progress`.
+///
+/// Every failure returns before the installer is spawned, so the app stays
+/// usable on error. On success the installer is spawned and the app exits
+/// ~800 ms later, after the IPC reply and final progress event have flushed.
+#[tauri::command]
+async fn install_launcher_update(app: AppHandle, download_url: String) -> Result<(), LauncherError> {
+    use tokio::io::AsyncWriteExt;
+
+    // 1. Host allow-list (see `is_allowed_update_host`). Reject anything that
+    //    is not HTTPS on a GitHub-owned host.
+    let url = reqwest::Url::parse(&download_url)
+        .map_err(|_| LauncherError::Network("Refusing non-GitHub URL".into()))?;
+    if !is_allowed_update_url(&url) {
+        return Err(LauncherError::Network("Refusing non-GitHub URL".into()));
+    }
+
+    // 2. Target: %TEMP%\AmongLauncher\<asset file name>. Only a plain `.exe`
+    //    last segment is accepted.
+    let file_name = update_asset_file_name(&url)
+        .ok_or_else(|| LauncherError::Network("Refusing invalid installer URL".into()))?;
+    let dest_dir = std::env::temp_dir().join("AmongLauncher");
+    let dest = dest_dir.join(&file_name);
+    tokio::fs::create_dir_all(&dest_dir)
+        .await
+        .map_err(|e| LauncherError::Filesystem(e.to_string()))?;
+
+    // 3. Stream to disk — never buffer the whole installer in RAM.
+    let _ = app.emit(
+        "launcher-update-progress",
+        serde_json::json!({ "stage": "downloading", "progress": 0, "total": 0 }),
+    );
+
+    let client = reqwest::Client::builder()
+        .user_agent("among-launcher")
+        // Re-validate EVERY redirect hop with the same scheme + host
+        // allow-list as the initial URL. GitHub release asset URLs
+        // (`github.com/.../releases/download/...`) 302 to a signed
+        // `objects.githubusercontent.com` URL, which passes the allow-list,
+        // so the real download still works — while a redirect to any other
+        // host is refused instead of being followed.
+        .redirect(reqwest::redirect::Policy::custom(|attempt| {
+            // Bound the chain; the custom policy replaces reqwest's default
+            // limit, so enforce one here too.
+            if attempt.previous().len() >= 5 {
+                return attempt.error("too many redirects");
+            }
+            if is_allowed_update_url(attempt.url()) {
+                attempt.follow()
+            } else {
+                attempt.error("redirect to non-GitHub host")
+            }
+        }))
+        .build()
+        .map_err(|e| LauncherError::Network(e.to_string()))?;
+    let resp = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| LauncherError::Network(e.to_string()))?
+        .error_for_status()
+        .map_err(|e| LauncherError::Network(e.to_string()))?;
+
+    let total = resp.content_length().unwrap_or(0);
+    let mut downloaded: u64 = 0;
+    let mut file = tokio::fs::File::create(&dest)
+        .await
+        .map_err(|e| LauncherError::Filesystem(e.to_string()))?;
+    let mut stream = resp.bytes_stream();
+    let mut stream_error: Option<LauncherError> = None;
+    while let Some(chunk) = stream.next().await {
+        let chunk = match chunk {
+            Ok(chunk) => chunk,
+            Err(e) => {
+                stream_error = Some(LauncherError::Network(e.to_string()));
+                break;
+            }
+        };
+        if let Err(e) = file.write_all(&chunk).await {
+            stream_error = Some(LauncherError::Filesystem(e.to_string()));
+            break;
+        }
+        downloaded += chunk.len() as u64;
+        let _ = app.emit(
+            "launcher-update-progress",
+            serde_json::json!({ "stage": "downloading", "progress": downloaded, "total": total }),
+        );
+    }
+    // Any mid-stream failure (chunk error or disk write error) drops the file
+    // handle and deletes the partial file before returning, matching the
+    // truncation path below so a retry starts from a clean slate.
+    if let Some(e) = stream_error {
+        drop(file);
+        let _ = tokio::fs::remove_file(&dest).await;
+        return Err(e);
+    }
+    if let Err(e) = file.flush().await {
+        drop(file);
+        let _ = tokio::fs::remove_file(&dest).await;
+        return Err(LauncherError::Filesystem(e.to_string()));
+    }
+    drop(file);
+
+    // 4. Truncated download → delete the partial file and fail before any
+    //    spawn. `total == 0` means the server sent no length, so the check is
+    //    skipped (HTTPS + host allow-list still apply).
+    if total > 0 && downloaded != total {
+        let _ = tokio::fs::remove_file(&dest).await;
+        return Err(LauncherError::Network(format!(
+            "Truncated launcher update download: got {} of {} bytes",
+            downloaded, total
+        )));
+    }
+
+    // 5. Run the NSIS installer silently. `/S` = silent (skips the wizard);
+    //    `/R` = relaunch afterwards (the Tauri NSIS template's
+    //    `.onInstSuccess` runs `RunAsUser "$INSTDIR\among-launcher.exe"`).
+    std::process::Command::new(&dest)
+        .args(["/S", "/R"])
+        .spawn()
+        .map_err(|e| LauncherError::Filesystem(format!("Failed to run installer: {}", e)))?;
+
+    let _ = app.emit(
+        "launcher-update-progress",
+        serde_json::json!({ "stage": "installing", "progress": downloaded, "total": total }),
+    );
+
+    // 6. Exit shortly after so this IPC reply and the progress event flush.
+    //    Spawning happened above, so any earlier failure returned already and
+    //    the app is left usable.
+    let app_handle = app.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+        app_handle.exit(0);
+    });
+
+    Ok(())
+}
+
 /// Snapshot of the current lobby state returned by `get_lobby_state`.
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -2437,6 +2659,7 @@ pub fn run() {
         oauth_code: std::sync::Mutex::new(None),
         pending_deep_link: std::sync::Mutex::new(None),
         detect_cache: Arc::new(DetectCache::new()),
+        mod_status: std::sync::Mutex::new(None),
     };
 
     tauri::Builder::default()
@@ -2517,7 +2740,9 @@ pub fn run() {
             update_among_api,
             get_version,
             check_for_launcher_update,
+            install_launcher_update,
             version_checker::check_for_among_api_update,
+            version_checker::get_mod_status,
         ])
         .setup(move |app| {
             startup::mark("setup:start");
@@ -2957,5 +3182,162 @@ mod detect_cache_tests {
         assert!(cache.get_fresh(ttl).is_none());
         cache.store(sample());
         assert_eq!(cache.get_fresh(ttl), Some(sample()));
+    }
+}
+
+#[cfg(test)]
+mod launcher_update_tests {
+    use super::*;
+
+    fn url(s: &str) -> reqwest::Url {
+        reqwest::Url::parse(s).expect("valid test url")
+    }
+
+    // --- host allow-list ---
+
+    #[test]
+    fn allow_list_accepts_github_hosts() {
+        assert!(is_allowed_update_host("github.com"));
+        assert!(is_allowed_update_host("api.github.com"));
+        assert!(is_allowed_update_host("githubusercontent.com"));
+        assert!(is_allowed_update_host("objects.githubusercontent.com"));
+        // case-insensitive
+        assert!(is_allowed_update_host("GitHub.com"));
+    }
+
+    #[test]
+    fn allow_list_rejects_lookalikes_and_other_hosts() {
+        assert!(!is_allowed_update_host("evil.com"));
+        assert!(!is_allowed_update_host("evilgithub.com"));
+        assert!(!is_allowed_update_host("github.com.evil.com"));
+        assert!(!is_allowed_update_host("notgithubusercontent.com"));
+        assert!(!is_allowed_update_host("githubusercontent.com.evil.com"));
+        assert!(!is_allowed_update_host(""));
+    }
+
+    // --- full-URL allow-list (scheme + host) ---
+
+    #[test]
+    fn update_url_accepts_https_github_hosts() {
+        assert!(is_allowed_update_url(&url(
+            "https://github.com/o/r/releases/download/v1/Setup.exe"
+        )));
+        assert!(is_allowed_update_url(&url(
+            "https://objects.githubusercontent.com/signed/Setup.exe"
+        )));
+        // URL parsing normalizes the host to lowercase.
+        assert!(is_allowed_update_url(&url("https://GitHub.com/o/r/Setup.exe")));
+    }
+
+    #[test]
+    fn update_url_rejects_userinfo_bypass() {
+        // `github.com` here is *userinfo*, not the host: the real host is
+        // evil.com, so this must be rejected.
+        assert!(!is_allowed_update_url(&url(
+            "https://github.com@evil.com/x.exe"
+        )));
+        assert!(!is_allowed_update_url(&url(
+            "https://github.com:pass@evil.com/x.exe"
+        )));
+    }
+
+    #[test]
+    fn update_url_rejects_non_https_scheme() {
+        assert!(!is_allowed_update_url(&url("http://github.com/x.exe")));
+        assert!(!is_allowed_update_url(&url("ftp://github.com/x.exe")));
+        // Scheme is case-insensitive but must still be https.
+        assert!(!is_allowed_update_url(&url("HTTP://github.com/x.exe")));
+    }
+
+    #[test]
+    fn update_url_rejects_trailing_dot_host() {
+        // `github.com.` is a distinct (absolute) name and is not the
+        // allow-listed `github.com`.
+        assert!(!is_allowed_update_url(&url("https://github.com./x.exe")));
+    }
+
+    #[test]
+    fn asset_name_uppercase_exe_is_fail_closed() {
+        // The asset-name check is case-sensitive, so an uppercase `.EXE`
+        // segment is rejected (GitHub release assets are named `.exe`).
+        // Asserting the current fail-closed behavior, not a desired feature.
+        assert_eq!(
+            update_asset_file_name(&url("https://github.com/o/r/Setup.EXE")),
+            None
+        );
+        assert_eq!(
+            update_asset_file_name(&url("https://github.com/o/r/Setup.exe")),
+            Some("Setup.exe".to_string())
+        );
+    }
+
+    // --- asset file name extraction ---
+
+    #[test]
+    fn asset_name_takes_plain_exe_last_segment() {
+        assert_eq!(
+            update_asset_file_name(&url(
+                "https://github.com/o/r/releases/download/launcher%2Fv1.2.13/Setup.exe"
+            )),
+            Some("Setup.exe".to_string())
+        );
+        assert_eq!(
+            update_asset_file_name(&url("https://github.com/o/r/Among.Launcher_1.2.13_x64-setup.exe")),
+            Some("Among.Launcher_1.2.13_x64-setup.exe".to_string())
+        );
+    }
+
+    #[test]
+    fn asset_name_rejects_non_exe_empty_and_traversal() {
+        assert_eq!(update_asset_file_name(&url("https://github.com/o/r/")), None);
+        assert_eq!(update_asset_file_name(&url("https://github.com/o/r")), None);
+        assert_eq!(update_asset_file_name(&url("https://github.com/o/r/Setup.zip")), None);
+        // URL normalization folds `..` away, leaving no `.exe` segment.
+        assert_eq!(update_asset_file_name(&url("https://github.com/..")), None);
+        // Percent-encoded separators stay encoded, so the name is inert.
+        assert_eq!(
+            update_asset_file_name(&url("https://github.com/a/%2e%2e%2fSetup.exe")),
+            Some("%2e%2e%2fSetup.exe".to_string())
+        );
+    }
+}
+
+#[cfg(test)]
+mod launch_gate_tests {
+    use super::*;
+    use version_checker::ModStatusKind;
+
+    #[test]
+    fn launch_allowed_for_current() {
+        assert_eq!(launch_block_reason(ModStatusKind::Current), None);
+    }
+
+    #[test]
+    fn launch_allowed_for_unknown_fails_open() {
+        // A status check that couldn't run must NOT block play.
+        assert_eq!(launch_block_reason(ModStatusKind::Unknown), None);
+    }
+
+    #[test]
+    fn launch_blocked_for_missing_outdated_incompatible() {
+        for kind in [
+            ModStatusKind::Missing,
+            ModStatusKind::Outdated,
+            ModStatusKind::Incompatible,
+        ] {
+            let reason = launch_block_reason(kind).expect("must block");
+            assert!(
+                reason.to_lowercase().contains("amongapi"),
+                "reason for {:?} should name the mod: {}",
+                kind,
+                reason
+            );
+            assert!(
+                reason.to_lowercase().contains("update"),
+                "reason for {:?} should mention updating: {}",
+                kind,
+                reason
+            );
+        }
     }
 }
