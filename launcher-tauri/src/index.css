@@ -1,56 +1,95 @@
 @import "tailwindcss";
 
+/*
+ * Flat, minimal-pro dark design tokens (D1 foundation).
+ * Dark-only. Monochrome by default; color carries meaning only.
+ * shadcn-style names (card/muted/secondary/accent/destructive) are kept as
+ * aliases so existing call sites keep compiling unchanged.
+ */
 @theme {
-  --color-background: hsl(222 47% 11%);
-  --color-card: hsl(215 25% 15%);
-  --color-card-foreground: hsl(210 40% 98%);
-  --color-primary: hsl(235 86% 65%);
-  --color-primary-foreground: hsl(210 40% 98%);
-  --color-secondary: hsl(215 20% 22%);
-  --color-secondary-foreground: hsl(210 40% 98%);
-  --color-muted: hsl(215 20% 18%);
-  --color-muted-foreground: hsl(215 20% 65%);
-  --color-accent: hsl(215 20% 22%);
-  --color-accent-foreground: hsl(210 40% 98%);
-  --color-border: rgb(255 255 255 / 0.1);
-  --color-input: rgb(255 255 255 / 0.1);
-  --color-ring: hsl(235 86% 65%);
-  --color-destructive: hsl(0 62.8% 30.6%);
-  --color-destructive-foreground: hsl(0 0% 100%);
+  /* ---- Base surfaces & text ---- */
+  --color-background: #0a0a0c; /* bg            */
+  --color-foreground: #f4f4f6; /* text          */
+  --color-surface: #121216; /* surface (cards/panels)  */
+  --color-surface-2: #17171c; /* surface-2 (rows/inputs) */
+  --color-border: #26262e; /* border        */
+  --color-input: #26262e; /* input border  */
+  --color-ring: #ededf0; /* focus ring    */
+
+  /* ---- shadcn-style aliases kept for existing call sites ---- */
+  --color-card: #121216; /* = surface     */
+  --color-card-foreground: #f4f4f6;
+  --color-muted: #17171c; /* = surface-2   */
+  --color-muted-foreground: #9a9aa5; /* text-muted */
+  --color-secondary: #17171c;
+  --color-secondary-foreground: #f4f4f6;
+  --color-accent: #17171c;
+  --color-accent-foreground: #f4f4f6;
+
+  /* ---- Primary: near-white fill, dark label ---- */
+  --color-primary: #ededf0;
+  --color-primary-foreground: #0a0a0c;
+  --color-primary-hover: #ffffff;
+
+  /* ---- Semantic accents (meaning only) ---- */
+  --color-success: #3dd65b;
+  --color-danger: #d93636;
+  --color-warning: #ef7d0d;
+  --color-info: #38fedc;
+  --color-destructive: #d93636; /* alias: danger */
+  --color-destructive-foreground: #ffffff;
+
+  /* ---- Crewmate palette (player dots) ---- */
+  --color-crew-red: #c51111;
+  --color-crew-blue: #132ed1;
+  --color-crew-green: #117f2d;
+  --color-crew-pink: #ed54ba;
+  --color-crew-orange: #ef7d0d;
+  --color-crew-yellow: #f5f557;
+  --color-crew-black: #3f474e;
+  --color-crew-white: #d6e0f0;
+  --color-crew-purple: #6b2fbb;
+  --color-crew-brown: #71491e;
+  --color-crew-cyan: #38fedc;
+  --color-crew-lime: #50ef39;
+
+  /* ---- Radii: 8 controls / 12 cards / full pills ---- */
+  --radius-control: 8px;
+  --radius-card: 12px;
+  --radius-pill: 9999px;
+
+  /* ---- Flat elevation: borders do the work, no blur ---- */
+  --shadow-card: 0 1px 2px 0 rgb(0 0 0 / 0.5), 0 1px 1px -1px rgb(0 0 0 / 0.4);
+
+  /* ---- Tight type scale: 12 / 13 / 14 / 16 / 20 / 28 ---- */
+  --text-2xs: 0.75rem; /* 12 */
+  --text-2xs--line-height: 1rem;
+  --text-13: 0.8125rem; /* 13 */
+  --text-13--line-height: 1.125rem;
+  --text-display: 1.75rem; /* 28 */
+  --text-display--line-height: 2rem;
 }
 
 @layer base {
   body {
     background-color: var(--color-background);
-    color: hsl(210 40% 98%);
+    color: var(--color-foreground);
     font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
   }
   ::-webkit-scrollbar {
     width: 10px;
     height: 10px;
   }
   ::-webkit-scrollbar-thumb {
-    background: hsl(240 3.7% 22%);
+    background: var(--color-border);
     border: 3px solid transparent;
     background-clip: content-box;
     border-radius: 9999px;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: hsl(240 3.7% 32%);
-    background-clip: content-box;
+    background: #3a3a44;
   }
-}
-
-.glass-shadow {
-  box-shadow: 0 8px 24px -8px rgb(0 0 0 / 0.45), 0 2px 8px -2px rgb(0 0 0 / 0.3);
-}
-
-.glass-surface {
-  background-color: color-mix(in srgb, var(--color-card) 70%, transparent);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgb(255 255 255 / 0.1);
-  box-shadow: 0 8px 24px -8px rgb(0 0 0 / 0.45), 0 2px 8px -2px rgb(0 0 0 / 0.3);
 }
 
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }

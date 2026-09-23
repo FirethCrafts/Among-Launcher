@@ -1,6 +1,8 @@
 import { useEffect, useRef } from 'react';
+import { X } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 
-interface ModalProps {
+export interface ModalProps {
   isOpen: boolean;
   onClose: () => void;
   title: string;
@@ -25,17 +27,23 @@ export function Modal({ isOpen, onClose, title, children, allowDismiss = true }:
   return (
     <div ref={overlayRef}
       onClick={allowDismiss ? onClose : undefined}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in">
-      <div onClick={e => e.stopPropagation()}
-        className="bg-card/70 border border-white/10 rounded-2xl backdrop-blur-md shadow-[0_8px_24px_-8px_rgb(0_0_0/0.45),0_2px_8px_-2px_rgb(0_0_0/0.3)] w-full max-w-md mx-4 animate-in zoom-in-95 slide-in-from-bottom-4">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
-          <h2 className="text-lg font-semibold">{title}</h2>
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 animate-in fade-in">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        onClick={e => e.stopPropagation()}
+        className="w-full max-w-md mx-4 rounded-card border border-border bg-surface shadow-card animate-in zoom-in-95 slide-in-from-bottom-4">
+        <div className="flex items-center justify-between gap-4 border-b border-border px-6 py-4">
+          <h2 className="text-base font-semibold text-foreground">{title}</h2>
           {allowDismiss && (
-            <button onClick={onClose} title="Close" aria-label="Close dialog" className="text-muted-foreground hover:text-foreground transition-colors">
-              <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <line x1="6" y1="6" x2="18" y2="18" />
-                <line x1="6" y1="18" x2="18" y2="6" />
-              </svg>
+            <button
+              onClick={onClose}
+              title="Close"
+              aria-label="Close dialog"
+              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-control text-muted-foreground transition-colors hover:bg-surface-2 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            >
+              <X className="h-4 w-4" aria-hidden="true" />
             </button>
           )}
         </div>
@@ -45,7 +53,7 @@ export function Modal({ isOpen, onClose, title, children, allowDismiss = true }:
   );
 }
 
-interface ConfirmModalProps {
+export interface ConfirmModalProps {
   isOpen: boolean;
   onClose: () => void;
   onConfirm: () => void;
@@ -58,19 +66,17 @@ interface ConfirmModalProps {
 export function ConfirmModal({ isOpen, onClose, onConfirm, title, message, danger, confirmText = 'Confirm' }: ConfirmModalProps) {
   return (
     <Modal isOpen={isOpen} onClose={onClose} title={title} allowDismiss={true}>
-      <p className="text-muted-foreground mb-6">{message}</p>
+      <p className="mb-6 text-sm text-muted-foreground">{message}</p>
       <div className="flex justify-end gap-3">
-        <button onClick={onClose}
-          className="px-4 py-2 rounded-lg border border-white/10 hover:bg-muted/60 transition-colors">
+        <Button onClick={onClose} variant="outline">
           Cancel
-        </button>
-        <button onClick={() => { onConfirm(); onClose(); }}
-          className={`px-4 py-2 rounded-lg font-medium transition-colors
-            ${danger
-              ? 'bg-destructive text-destructive-foreground hover:bg-destructive/90'
-              : 'bg-primary text-primary-foreground hover:bg-primary/90'}`}>
+        </Button>
+        <Button
+          onClick={() => { onConfirm(); onClose(); }}
+          variant={danger ? 'destructive' : 'default'}
+        >
           {confirmText}
-        </button>
+        </Button>
       </div>
     </Modal>
   );

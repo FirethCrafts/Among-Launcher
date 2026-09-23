@@ -34,17 +34,17 @@ export default function WelcomeView({ onLogin }: WelcomeViewProps) {
   }
 
   return (
-    <div className="h-full flex items-center justify-center bg-gradient-to-b from-primary/10 via-background to-background">
-      <Card className="w-full max-w-md">
+    <div className="h-full flex items-center justify-center bg-background p-6">
+      <Card className="w-full max-w-md shadow-card">
         <CardContent className="flex flex-col items-center gap-6 p-8 text-center">
-          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary glass-shadow">
+          <div className="flex h-14 w-14 items-center justify-center rounded-card bg-primary">
             <Gamepad2 className="h-8 w-8 text-primary-foreground" />
           </div>
           <div className="space-y-2">
-            <h1 className="text-4xl font-bold tracking-tight">
+            <h1 className="text-display font-bold tracking-tight">
               Among Launcher
             </h1>
-            <p className="text-muted-foreground text-sm">
+            <p className="text-13 text-muted-foreground">
               Play modded Among Us with friends.
             </p>
           </div>
@@ -56,7 +56,7 @@ export default function WelcomeView({ onLogin }: WelcomeViewProps) {
             ].map((feature) => (
               <div
                 key={feature}
-                className="flex w-full max-w-xs items-center gap-2 text-sm text-muted-foreground"
+                className="flex w-full max-w-xs items-center gap-2 text-13 text-muted-foreground"
               >
                 <Check className="h-4 w-4 shrink-0 text-primary" />
                 {feature}
@@ -66,7 +66,7 @@ export default function WelcomeView({ onLogin }: WelcomeViewProps) {
           <Button
             onClick={handleLogin}
             disabled={loading}
-            variant="default"
+            variant="primary"
             size="lg"
             className="min-w-[200px]"
           >
@@ -84,8 +84,8 @@ export default function WelcomeView({ onLogin }: WelcomeViewProps) {
             Sign in with Discord
           </Button>
           {error && (
-            <div className="w-full rounded-lg border border-destructive/50 bg-destructive/10 px-3 py-2">
-              <p className="text-destructive text-sm max-w-sm text-center">
+            <div className="w-full rounded-control border border-danger/40 bg-danger/10 px-3 py-2">
+              <p className="text-sm text-danger max-w-sm text-center">
                 {error}
               </p>
             </div>

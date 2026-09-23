@@ -29,11 +29,17 @@ const TONE_DURATION_MS: Record<ToastTone, number> = {
   neutral: 3000,
 };
 
-// Tone accents on the shared glass toast surface (dark-only theme).
+// Tone is meaning: a flat surface with a semantic border + dot.
 const TONE_CLASS: Record<ToastTone, string> = {
-  error: "border-red-500/50 bg-red-950/40 text-red-100",
-  success: "border-emerald-500/50 bg-emerald-950/40 text-emerald-100",
-  neutral: "border-white/10 bg-card/70",
+  error: "border-danger/50 bg-danger/10 text-foreground",
+  success: "border-success/50 bg-success/10 text-foreground",
+  neutral: "border-border bg-surface-2 text-foreground",
+};
+
+const TONE_DOT: Record<ToastTone, string> = {
+  error: "bg-danger",
+  success: "bg-success",
+  neutral: "bg-muted-foreground",
 };
 
 export function showToast(message: string, tone: ToastTone = "neutral") {
@@ -63,8 +69,9 @@ export function ToastHost() {
           key={t.id}
           role="status"
           aria-live="polite"
-          className={`rounded-xl border px-4 py-2 text-sm shadow-[0_8px_24px_-8px_rgb(0_0_0/0.45),0_2px_8px_-2px_rgb(0_0_0/0.3)] backdrop-blur-md ${TONE_CLASS[t.tone]}`}
+          className={`flex items-center gap-2 rounded-control border px-4 py-2 text-sm shadow-card ${TONE_CLASS[t.tone]}`}
         >
+          <span className={`h-1.5 w-1.5 shrink-0 rounded-pill ${TONE_DOT[t.tone]}`} aria-hidden="true" />
           {t.message}
         </div>
       ))}

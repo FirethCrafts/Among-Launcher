@@ -29,23 +29,27 @@ export function Sidebar({ gameConnected, username, avatarUrl, lobbyIsHost }: Sid
       : []),
   ];
 
+  const itemClass = (path: string) =>
+    `flex h-12 w-12 items-center justify-center rounded-control transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring ${
+      location.pathname === path
+        ? 'bg-primary text-primary-foreground'
+        : 'text-muted-foreground hover:bg-surface-2 hover:text-foreground'
+    }`;
+
   return (
-    <nav className="w-16 flex flex-col items-center py-4 gap-2 bg-card border-r border-border" aria-label="Main navigation">
+    <nav className="flex w-16 flex-col items-center gap-2 border-r border-border bg-surface py-4" aria-label="Main navigation">
       {navItems.map(item => (
         <button key={item.path}
           onClick={() => navigate(item.path)}
           title={item.label}
           aria-label={item.label}
-          className={`w-12 h-12 flex items-center justify-center rounded-lg transition-colors
-            ${location.pathname === item.path
-              ? 'bg-primary/15 text-primary'
-              : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}>
-          <item.icon className="w-5 h-5" />
+          className={itemClass(item.path)}>
+          <item.icon className="h-5 w-5" />
         </button>
       ))}
       {gameConnected && (
         <>
-          <span className="mt-2 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+          <span className="mt-2 text-2xs font-semibold uppercase tracking-widest text-muted-foreground">
             Game
           </span>
           {gameItems.map(item => (
@@ -53,11 +57,8 @@ export function Sidebar({ gameConnected, username, avatarUrl, lobbyIsHost }: Sid
               onClick={() => navigate(item.path)}
               title={item.label}
               aria-label={item.label}
-              className={`w-12 h-12 flex items-center justify-center rounded-lg transition-colors
-                ${location.pathname === item.path
-                  ? 'bg-primary/15 text-primary'
-                  : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}>
-              <item.icon className="w-5 h-5" />
+              className={itemClass(item.path)}>
+              <item.icon className="h-5 w-5" />
             </button>
           ))}
         </>
@@ -67,11 +68,11 @@ export function Sidebar({ gameConnected, username, avatarUrl, lobbyIsHost }: Sid
           <img
             src={avatarUrl}
             alt={username}
-            className="w-8 h-8 rounded-full"
+            className="h-8 w-8 rounded-pill border border-border"
           />
         )}
         {username && (
-          <span className="text-xs text-muted-foreground truncate max-w-[56px]">
+          <span className="max-w-[56px] truncate text-xs text-muted-foreground">
             {username}
           </span>
         )}

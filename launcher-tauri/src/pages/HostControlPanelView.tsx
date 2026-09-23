@@ -4,9 +4,13 @@ import { listen } from "@tauri-apps/api/event";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { ConfirmModal } from "@/components/Modal";
+import { EmptyState } from "@/components/ui/empty-state";
+import { PlayerRow } from "@/components/ui/player-row";
+import { StatTile } from "@/components/ui/stat-tile";
+import { Tooltip } from "@/components/ui/tooltip";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { showToast, formatError } from "@/components/Toast";
-import { Users, Hash, Copy, Check, Trash2, UserMinus, Globe, Gamepad2 } from "lucide-react";
+import { Users, Hash, Copy, Check, Trash2, UserMinus, Globe, Gamepad2, Crown } from "lucide-react";
 
 interface Player {
   name: string;
@@ -268,13 +272,15 @@ export default function HostControlPanelView() {
 
   if (!lobbyInfo) {
     return (
-      <div className="min-h-full p-6 space-y-6">
-        <h1 className="text-3xl font-bold">Host Control Panel</h1>
+      <div className="min-h-full space-y-6 p-6">
+        <h1 className="text-display font-bold tracking-tight">Host Control Panel</h1>
         <Card>
           <CardContent className="pt-6">
-            <p className="text-sm text-muted-foreground text-center">
-              No active lobby. Create a lobby in-game to manage it here.
-            </p>
+            <EmptyState
+              icon={<Hash className="h-5 w-5" />}
+              title="No active lobby"
+              description="Create a lobby in-game to manage it here."
+            />
           </CardContent>
         </Card>
       </div>
@@ -286,17 +292,17 @@ export default function HostControlPanelView() {
   // Disband/Kick controls.
   if (isHost === false) {
     return (
-      <div className="min-h-full p-6 space-y-6">
-        <h1 className="text-3xl font-bold">Host Control Panel</h1>
+      <div className="min-h-full space-y-6 p-6">
+        <h1 className="text-display font-bold tracking-tight">Host Control Panel</h1>
         <Card>
-          <CardContent className="pt-6 space-y-4">
+          <CardContent className="space-y-4 pt-6">
             <p className="text-sm text-muted-foreground text-center">
               You're in a lobby, but you're not the host. Only the host can
               post, kick players, or disband it.
             </p>
             {lobbyInfo.code && (
-              <div className="flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3">
-                <span className="text-sm text-muted-foreground">Lobby Code</span>
+              <div className="flex items-center justify-between rounded-control border border-border bg-surface-2 px-4 py-3">
+                <span className="text-13 text-muted-foreground">Lobby Code</span>
                 <span className="font-mono text-lg font-bold tracking-widest text-primary">
                   {lobbyInfo.code}
                 </span>
@@ -309,20 +315,20 @@ export default function HostControlPanelView() {
   }
 
   return (
-    <div className="min-h-full p-6 space-y-6">
-      <h1 className="text-3xl font-bold">Host Control Panel</h1>
+    <div className="min-h-full space-y-6 p-6">
+      <h1 className="text-display font-bold tracking-tight">Host Control Panel</h1>
 
       <div className="grid gap-6 md:grid-cols-2">
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <Hash className="h-5 w-5" />
+              <Hash className="h-5 w-5 text-muted-foreground" />
               Lobby Code
               {/* Heartbeat pill: Online/Offline right next to the code. */}
               <Badge
-                variant={heartbeatOk ? "neutral" : "muted"}
+                variant={heartbeatOk ? "success" : "danger"}
                 showDot
-                dotColor={heartbeatOk ? "emerald" : "red"}
+                dotColor={heartbeatOk ? "success" : "danger"}
                 className="ml-auto"
                 title={heartbeatOk ? "Server heartbeat OK" : "No server heartbeat"}
               >
@@ -331,52 +337,57 @@ export default function HostControlPanelView() {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 transition-colors hover:bg-white/[0.07]">
+            <div className="flex items-center justify-between gap-2 rounded-control border border-border bg-surface-2 px-4 py-3">
               <span className="font-mono text-2xl font-bold tracking-widest text-primary">
                 {lobbyInfo.code}
               </span>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={copyLobbyCode}
-                className="h-8 w-8"
-                title={copied ? "Copied" : "Copy lobby code"}
-                aria-label="Copy lobby code"
-              >
-                {copied ? (
-                  <Check className="h-4 w-4 text-emerald-500" />
-                ) : (
-                  <Copy className="h-4 w-4" />
-                )}
-              </Button>
+              <Tooltip content={copied ? "Copied" : "Copy lobby code"}>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={copyLobbyCode}
+                  title={copied ? "Copied" : "Copy lobby code"}
+                  aria-label="Copy lobby code"
+                >
+                  {copied ? (
+                    <Check className="h-4 w-4 text-success" />
+                  ) : (
+                    <Copy className="h-4 w-4" />
+                  )}
+                </Button>
+              </Tooltip>
             </div>
 
-            {lobbyInfo.region && (
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-muted-foreground">Region</span>
-                <span className="text-sm font-medium flex items-center gap-1">
-                  <Globe className="h-3 w-3" />
-                  {lobbyInfo.region}
-                </span>
-              </div>
-            )}
-
-            {lobbyInfo.map && (
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-muted-foreground">Map</span>
-                <span className="text-sm font-medium flex items-center gap-1">
-                  <Gamepad2 className="h-3 w-3" />
-                  {lobbyInfo.map}
-                </span>
-              </div>
-            )}
-
-            {lobbyInfo.maxPlayers && (
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-muted-foreground">Max Players</span>
-                <span className="text-sm font-medium">{lobbyInfo.maxPlayers}</span>
-              </div>
-            )}
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+              {lobbyInfo.host && (
+                <StatTile
+                  label="Host"
+                  value={lobbyInfo.host}
+                  icon={<Crown className="h-3.5 w-3.5" />}
+                />
+              )}
+              {lobbyInfo.map && (
+                <StatTile
+                  label="Map"
+                  value={lobbyInfo.map}
+                  icon={<Gamepad2 className="h-3.5 w-3.5" />}
+                />
+              )}
+              {lobbyInfo.maxPlayers && (
+                <StatTile
+                  label="Max Players"
+                  value={lobbyInfo.maxPlayers}
+                  icon={<Users className="h-3.5 w-3.5" />}
+                />
+              )}
+              {lobbyInfo.region && (
+                <StatTile
+                  label="Region"
+                  value={lobbyInfo.region}
+                  icon={<Globe className="h-3.5 w-3.5" />}
+                />
+              )}
+            </div>
 
             <div className="flex gap-2 pt-2">
               <Button
@@ -401,9 +412,9 @@ export default function HostControlPanelView() {
                 stays visible in short (~500px) windows. */}
             <div className="flex justify-center pt-1">
               <Badge
-                variant={posted ? "neutral" : "muted"}
+                variant={posted ? "success" : "muted"}
                 showDot
-                dotColor={posted ? "emerald" : "red"}
+                dotColor={posted ? "success" : "danger"}
               >
                 {posted ? "Posted to Server" : "Local Only"}
               </Badge>
@@ -414,47 +425,40 @@ export default function HostControlPanelView() {
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <Users className="h-5 w-5" />
+              <Users className="h-5 w-5 text-muted-foreground" />
               Players ({players.length})
             </CardTitle>
           </CardHeader>
           <CardContent>
             {players.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No players in lobby.</p>
+              <EmptyState
+                icon={<Users className="h-5 w-5" />}
+                title="No players in lobby"
+                description="Players who join will show up here."
+              />
             ) : (
               <ul className="space-y-2">
                 {players.map((player) => (
-                  <li
+                  <PlayerRow
                     key={player.name}
-                    className="flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 transition-colors hover:bg-white/[0.07]"
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                      <span className="text-sm font-medium">{player.name}</span>
-                      {player.is_host && (
-                        <Badge variant="neutral" className="text-xs">
-                          Host
-                        </Badge>
-                      )}
-                      {player.level !== undefined && (
-                        <span className="text-xs text-muted-foreground">Lv.{player.level}</span>
-                      )}
-                      {player.ping !== undefined && (
-                        <span className="text-xs text-muted-foreground">{player.ping}ms</span>
-                      )}
-                    </div>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => setKickTarget(player.name)}
-                      className="h-8 w-8"
-                      disabled={player.is_host}
-                      title={`Kick ${player.name}`}
-                      aria-label={`Kick ${player.name}`}
-                    >
-                      <UserMinus className="h-4 w-4 text-destructive" />
-                    </Button>
-                  </li>
+                    name={player.name}
+                    color={player.color}
+                    level={player.level}
+                    ping={player.ping}
+                    isHost={player.is_host}
+                    actions={
+                      <Button
+                        variant="danger"
+                        size="sm"
+                        onClick={() => setKickTarget(player.name)}
+                        disabled={player.is_host}
+                        title={`Kick ${player.name}`}
+                        aria-label={`Kick ${player.name}`}
+                      >
+                        <UserMinus className="h-4 w-4" />
+                      </Button>
+                    }
+                  />
                 ))}
               </ul>
             )}
@@ -462,7 +466,7 @@ export default function HostControlPanelView() {
         </Card>
       </div>
 
-      <ConfirmModal
+      <ConfirmDialog
         isOpen={confirmDisband}
         onClose={() => setConfirmDisband(false)}
         onConfirm={() => void handleDisbandLobby()}
@@ -471,7 +475,7 @@ export default function HostControlPanelView() {
         danger
         confirmText="Disband"
       />
-      <ConfirmModal
+      <ConfirmDialog
         isOpen={kickTarget !== null}
         onClose={() => setKickTarget(null)}
         onConfirm={() => {

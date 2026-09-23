@@ -93,7 +93,7 @@ export function UpdateModal({ isOpen, onClose, updateInfo }: UpdateModalProps) {
         </div>
 
         {updateInfo.changelog && (
-          <div className="rounded-lg bg-secondary/50 p-3 max-h-40 overflow-y-auto">
+          <div className="max-h-40 overflow-y-auto rounded-control bg-surface-2 p-3">
             <p className="text-xs font-medium mb-2 text-muted-foreground">
               Changelog
             </p>

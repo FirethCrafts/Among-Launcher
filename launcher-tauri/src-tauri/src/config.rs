@@ -37,6 +37,36 @@ pub struct LauncherConfig {
     pub window_height: Option<f64>,
     #[serde(default)]
     pub window_maximized: bool,
+    /// Persisted result of the last unfiltered game detection scan. `None`
+    /// for pre-existing configs (serde default) so they load unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cached_game: Option<CachedGame>,
+}
+
+/// On-disk mirror of `game_detection::GameSearchResult` plus the time it was
+/// captured. Lives here (not in `game_detection`) so it can be serialized
+/// without pulling the detection module into the config layer. The storefront
+/// is stored in its snake_case API form ("steam" / "epic" / "microsoft_store").
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+pub struct CachedGame {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub storefront: Option<String>,
+    #[serde(default)]
+    pub detected_but_unavailable: bool,
+    /// Unix time in seconds. 0 means "unknown/never" and is always stale.
+    #[serde(default)]
+    pub detected_at_unix: u64,
+}
+
+impl CachedGame {
+    /// Detection cache lifetime: 24 hours.
+    pub const TTL_SECS: u64 = 24 * 60 * 60;
+
+    pub fn is_fresh(&self, now_unix: u64) -> bool {
+        self.detected_at_unix > 0 && now_unix.saturating_sub(self.detected_at_unix) < Self::TTL_SECS
+    }
 }
 
 fn default_modded_path() -> String {
@@ -168,5 +198,55 @@ impl ConfigDebouncer {
 
     pub async fn request_save(&self) {
         let _ = self.tx.send(()).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cached(at: u64) -> CachedGame {
+        CachedGame {
+            path: Some(r"C:\Games\Among Us".into()),
+            storefront: Some("steam".into()),
+            detected_but_unavailable: false,
+            detected_at_unix: at,
+        }
+    }
+
+    #[test]
+    fn cached_game_fresh_within_ttl() {
+        let c = cached(1_000);
+        assert!(c.is_fresh(1_000));
+        assert!(c.is_fresh(1_000 + CachedGame::TTL_SECS - 1));
+    }
+
+    #[test]
+    fn cached_game_stale_at_or_after_ttl() {
+        let c = cached(1_000);
+        assert!(!c.is_fresh(1_000 + CachedGame::TTL_SECS));
+        assert!(!c.is_fresh(1_000 + CachedGame::TTL_SECS + 10_000));
+    }
+
+    #[test]
+    fn cached_game_zero_timestamp_is_always_stale() {
+        assert!(!CachedGame::default().is_fresh(u64::MAX));
+    }
+
+    #[test]
+    fn cached_game_deserializes_from_empty_object() {
+        let c: CachedGame = serde_json::from_str("{}").unwrap();
+        assert!(c.path.is_none());
+        assert!(c.storefront.is_none());
+        assert!(!c.detected_but_unavailable);
+        assert_eq!(c.detected_at_unix, 0);
+    }
+
+    #[test]
+    fn old_config_without_cached_game_still_loads() {
+        // Pre-existing config.json has no `cached_game` key.
+        let cfg: LauncherConfig = serde_json::from_str(r#"{"username":"crew"}"#).unwrap();
+        assert!(cfg.cached_game.is_none());
+        assert_eq!(cfg.username, "crew");
     }
 }

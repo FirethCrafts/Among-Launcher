@@ -8,11 +8,13 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
+import { StatTile } from "@/components/ui/stat-tile";
+import { EmptyState } from "@/components/ui/empty-state";
 import { showToast } from "@/components/Toast";
 import { ConfirmModal } from "@/components/Modal";
 import { LibraryPickerModal } from "@/components/LibraryPickerModal";
 import { useLauncher, type LauncherConfig } from "@/state/LauncherContext";
-import { Play, Square, Gamepad2, FolderOpen, Package, Folder, Copy, Trash2, Archive, Library } from "lucide-react";
+import { Play, Square, Gamepad2, FolderOpen, Package, Folder, Copy, Trash2, Archive, Library, Store, Cpu, RefreshCw } from "lucide-react";
 
 interface GameSearchResult {
   path?: string | null;
@@ -59,6 +61,8 @@ export default function HomeView() {
   const [mods, setMods] = useState<ModEntry[]>([]);
   const [installProgress, setInstallProgress] = useState<InstallProgress | null>(null);
   const [loading, setLoading] = useState(true);
+  const [redetecting, setRedetecting] = useState(false);
+  const [modsLoading, setModsLoading] = useState(false);
   const [libraryPickerOpen, setLibraryPickerOpen] = useState(false);
   const [removeTarget, setRemoveTarget] = useState<ModEntry | null>(null);
   const [confirmStop, setConfirmStop] = useState(false);
@@ -115,6 +119,21 @@ export default function HomeView() {
     }
   }, [gamePath]);
 
+  async function redetect() {
+    // Explicit user action — force past the cache (incl. cached negatives) so
+    // a game installed after the mount scan is found. Feeds the same
+    // `detected` state the mount call sets.
+    setRedetecting(true);
+    try {
+      const result = await invoke<GameSearchResult>("detect_game", { force: true });
+      setDetected(result);
+    } catch {
+      showToast("Failed to detect game", "error");
+    } finally {
+      setRedetecting(false);
+    }
+  }
+
   async function checkInstallStatus() {
     if (!gamePath) return;
     try {
@@ -128,11 +147,14 @@ export default function HomeView() {
 
   async function loadMods() {
     if (!gamePath) return;
+    setModsLoading(true);
     try {
       const installedMods = await invoke<ModEntry[]>("get_mod_list", { gamePath });
       setMods(installedMods);
     } catch {
       showToast("Failed to get mods", "error");
+    } finally {
+      setModsLoading(false);
     }
   }
 
@@ -235,11 +257,11 @@ export default function HomeView() {
 
   return (
     <div className="min-h-full p-6 space-y-6">
-      <h1 className="text-3xl font-bold tracking-tight">Home</h1>
+      <h1 className="text-display font-bold tracking-tight">Home</h1>
 
       {loading ? (
         <div className="grid gap-6 md:grid-cols-2">
-          <Card>
+          <Card className="shadow-card">
             <CardHeader>
               <Skeleton className="h-5 w-32" />
             </CardHeader>
@@ -250,7 +272,7 @@ export default function HomeView() {
               <Skeleton className="h-9 w-full mt-4" />
             </CardContent>
           </Card>
-          <Card>
+          <Card className="shadow-card">
             <CardHeader>
               <Skeleton className="h-5 w-32" />
             </CardHeader>
@@ -264,253 +286,284 @@ export default function HomeView() {
       ) : (
         <>
           {installProgress && (
-            <Card>
-          <CardContent className="pt-6">
-            <div className="space-y-2">
-              <div className="flex items-center justify-between text-sm">
-                <span className="font-medium capitalize">
-                  {installProgress.stage === "complete" ? "Install Complete" : installProgress.stage}
-                </span>
-                <span className="text-muted-foreground">
-                  {installProgress.total > 0
-                    ? `${Math.round((installProgress.progress / installProgress.total) * 100)}%`
-                    : "Preparing..."}
-                </span>
-              </div>
-              <div className="h-2 w-full overflow-hidden rounded-full bg-secondary">
-                <div
-                  className="h-full bg-primary transition-all duration-300"
-                  style={{
-                    width:
-                      installProgress.total > 0
-                        ? `${(installProgress.progress / installProgress.total) * 100}%`
-                        : "100%",
-                  }}
-                />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
+            <Card className="shadow-card">
+              <CardContent className="pt-6">
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-13">
+                    <span className="font-medium capitalize">
+                      {installProgress.stage === "complete" ? "Install Complete" : installProgress.stage}
+                    </span>
+                    <span className="text-muted-foreground tabular-nums">
+                      {installProgress.total > 0
+                        ? `${Math.round((installProgress.progress / installProgress.total) * 100)}%`
+                        : "Preparing..."}
+                    </span>
+                  </div>
+                  <div className="h-2 w-full overflow-hidden rounded-pill bg-surface-2">
+                    <div
+                      className="h-full bg-primary transition-all duration-300"
+                      style={{
+                        width:
+                          installProgress.total > 0
+                            ? `${(installProgress.progress / installProgress.total) * 100}%`
+                            : "100%",
+                      }}
+                    />
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
-      <Card className="glass-shadow">
-        <CardContent className="p-8">
-          <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
-            <div className="space-y-2">
-              <div className="flex items-center gap-3">
-                <h2 className="text-3xl font-bold tracking-tight">
-                  {isReady ? "Game Ready" : "Setup Needed"}
-                </h2>
-                {isReady ? (
-                  <Badge variant="neutral" showDot dotColor="emerald">
-                    Ready
-                  </Badge>
+          <Card className="shadow-card">
+            <CardContent className="p-8">
+              <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
+                <div className="space-y-2">
+                  <div className="flex items-center gap-3">
+                    <h2 className="text-display font-bold tracking-tight">
+                      {isReady ? "Game Ready" : "Setup Needed"}
+                    </h2>
+                    {isReady ? (
+                      <Badge variant="success" showDot dotColor="success">
+                        Ready
+                      </Badge>
+                    ) : (
+                      <Badge variant="warning" showDot dotColor="warning">
+                        Incomplete
+                      </Badge>
+                    )}
+                  </div>
+                  <p className="text-13 text-muted-foreground">
+                    {isReady
+                      ? "Everything is set up. Jump into a lobby."
+                      : "Finish installing Among Us + BepInEx to play."}
+                  </p>
+                </div>
+                <div>
+                  {isReady ? (
+                    isRunning ? (
+                      <Button onClick={() => setConfirmStop(true)} variant="destructive" size="lg">
+                        <Square className="h-5 w-5" />
+                        Stop
+                      </Button>
+                    ) : (
+                      <Button onClick={() => void launchGame()} variant="primary" size="lg">
+                        <Play className="h-5 w-5" />
+                        Play
+                      </Button>
+                    )
+                  ) : (
+                    <Button onClick={() => navigate("/setup")} variant="outline" size="lg">
+                      <Gamepad2 className="h-5 w-5" />
+                      Set Up Game
+                    </Button>
+                  )}
+                </div>
+              </div>
+
+              <div className="mt-6 flex flex-wrap items-center gap-3 border-t border-border pt-6">
+                {gamePath ? (
+                  <div className="flex min-w-0 items-center gap-1">
+                    <span className="max-w-[320px] truncate font-mono text-2xs text-muted-foreground">
+                      {gamePath}
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => void copyPath()}
+                      aria-label="Copy game path"
+                      title="Copy game path"
+                    >
+                      <Copy className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
                 ) : (
-                  <Badge variant="muted" showDot dotColor="red">
-                    Incomplete
-                  </Badge>
+                  <span className="text-2xs text-muted-foreground">No game path detected</span>
                 )}
-              </div>
-              <p className="text-sm text-muted-foreground">
-                {isReady
-                  ? "Everything is set up. Jump into a lobby."
-                  : "Finish installing Among Us + BepInEx to play."}
-              </p>
-            </div>
-            <div>
-              {isReady ? (
-                isRunning ? (
-                  <Button onClick={() => setConfirmStop(true)} variant="destructive" size="lg">
-                    <Square className="h-5 w-5" />
-                    Stop
-                  </Button>
-                ) : (
-                  <Button onClick={() => void launchGame()} size="lg">
-                    <Play className="h-5 w-5" />
-                    Launch
-                  </Button>
-                )
-              ) : (
-                <Button onClick={() => navigate("/setup")} variant="outline" size="lg">
-                  <Gamepad2 className="h-5 w-5" />
-                  Set Up Game
-                </Button>
-              )}
-            </div>
-          </div>
-
-          <div className="mt-6 flex flex-wrap items-center gap-3 border-t pt-6">
-            {storefront && (
-              <Badge variant="muted" className="capitalize">
-                {storefront.replace("_", " ")}
-              </Badge>
-            )}
-            {gamePath ? (
-              <div className="flex min-w-0 items-center gap-1">
-                <span className="text-xs font-mono text-muted-foreground truncate max-w-[320px]">
-                  {gamePath}
-                </span>
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => void copyPath()}
-                  aria-label="Copy game path"
-                  title="Copy game path"
+                  className="ml-auto"
+                  onClick={() => void redetect()}
+                  disabled={redetecting}
+                  title="Re-scan for Among Us installations"
+                  aria-label="Re-detect game"
                 >
-                  <Copy className="h-3 w-3" />
+                  <RefreshCw className={`h-3.5 w-3.5${redetecting ? " animate-spin" : ""}`} />
+                  Re-detect
                 </Button>
               </div>
-            ) : (
-              <span className="text-xs text-muted-foreground">No game path detected</span>
-            )}
-            <div className="flex items-center gap-2">
-              <Badge variant={bepinexInstalled ? "neutral" : "muted"}>
-                BepInEx {bepinexInstalled ? "installed" : "missing"}
-              </Badge>
-              <Badge variant={amongApiInstalled ? "neutral" : "muted"}>
-                AmongApi {amongApiInstalled ? "installed" : "missing"}
-              </Badge>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+            </CardContent>
+          </Card>
 
-      <div className="grid gap-6 md:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Package className="h-5 w-5" />
-              Installed Mods
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {mods.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                No mods installed yet — use Import Mod or From Library below.
-              </p>
-            ) : (
-              <ul className="space-y-1">
-                {mods.map((mod) => (
-                  <li
-                    key={mod.filename}
-                    className="flex items-center justify-between rounded-xl px-3 py-2 transition-colors hover:bg-white/5"
-                  >
-                    <div className="min-w-0">
-                      <span className="text-sm font-medium">{mod.name}</span>
-                      {mod.version && (
-                        <span className="ml-2 text-xs text-muted-foreground">
-                          v{mod.version}
-                        </span>
-                      )}
-                      <span className="ml-2 text-xs text-muted-foreground">
-                        {formatBytes(mod.size)}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => void copyModToLibrary(mod)}
-                        aria-label={`Save ${mod.name} to library`}
-                        title="Save to library"
-                      >
-                        <Archive className="h-3 w-3" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => void browseFiles(mod.path)}
-                        aria-label={`Open ${mod.name} folder`}
-                        title="Open folder"
-                      >
-                        <Folder className="h-3 w-3" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setRemoveTarget(mod)}
-                        aria-label={`Remove ${mod.name}`}
-                        title="Remove mod"
-                      >
-                        <Trash2 className="h-3 w-3" />
-                      </Button>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-            <div className="flex gap-2 mt-4">
-              <Button onClick={() => void handleImportMod()} variant="outline" className="flex-1">
-                <FolderOpen className="h-4 w-4 mr-2" />
-                Import Mod
-              </Button>
-              <Button
-                onClick={() => setLibraryPickerOpen(true)}
-                variant="outline"
-                className="flex-1"
-                disabled={libraryCount === 0}
-                title={libraryCount === 0 ? "Library is empty" : "Install a mod from your library"}
-              >
-                <Library className="h-4 w-4 mr-2" />
-                From Library
-              </Button>
-            </div>
-            <LibraryPickerModal
-              isOpen={libraryPickerOpen}
-              onClose={() => setLibraryPickerOpen(false)}
-              gamePath={gamePath}
-              onInstalled={loadMods}
+          <div className="grid gap-4 sm:grid-cols-3">
+            <StatTile
+              label="Storefront"
+              value={storefront ? storefront.replace("_", " ") : "Not detected"}
+              hint={storefront ? "Source install" : "Browse to locate the game"}
+              icon={<Store className="h-4 w-4" />}
+              className="capitalize"
             />
-          </CardContent>
-        </Card>
+            <StatTile
+              label="BepInEx"
+              value={bepinexInstalled ? "Installed" : "Missing"}
+              hint={bepinexInstalled ? "Mod loader ready" : "Run setup to install"}
+              tone={bepinexInstalled ? "success" : "danger"}
+              icon={<Package className="h-4 w-4" />}
+            />
+            <StatTile
+              label="AmongApi"
+              value={amongApiInstalled ? "Installed" : "Missing"}
+              hint={amongApiInstalled ? "Mod up to date" : "Run setup to install"}
+              tone={amongApiInstalled ? "success" : "danger"}
+              icon={<Cpu className="h-4 w-4" />}
+            />
+          </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Options</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-medium">Auto-post game data</span>
-                <Switch
-                  checked={config?.auto_post_lobby ?? false}
-                  disabled={!config}
-                  onCheckedChange={() => void handleToggle("auto_post_lobby")}
+          <div className="grid gap-6 md:grid-cols-2">
+            <Card className="shadow-card">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Package className="h-5 w-5 text-muted-foreground" />
+                  Installed Mods
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {modsLoading ? (
+                  <div className="space-y-2">
+                    <Skeleton className="h-12 w-full" />
+                    <Skeleton className="h-12 w-full" />
+                    <Skeleton className="h-12 w-full" />
+                  </div>
+                ) : mods.length === 0 ? (
+                  <EmptyState
+                    icon={<Package className="h-5 w-5" />}
+                    title="No mods installed"
+                    description="Import a .dll or install one from your library to get started."
+                  />
+                ) : (
+                  <ul className="space-y-1">
+                    {mods.map((mod) => (
+                      <li
+                        key={mod.filename}
+                        className="flex items-center justify-between rounded-control px-3 py-2 transition-colors hover:bg-surface-2"
+                      >
+                        <div className="min-w-0">
+                          <span className="text-sm font-medium">{mod.name}</span>
+                          {mod.version && (
+                            <span className="ml-2 text-2xs text-muted-foreground">
+                              v{mod.version}
+                            </span>
+                          )}
+                          <span className="ml-2 text-2xs text-muted-foreground">
+                            {formatBytes(mod.size)}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => void copyModToLibrary(mod)}
+                            aria-label={`Save ${mod.name} to library`}
+                            title="Save to library"
+                          >
+                            <Archive className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => void browseFiles(mod.path)}
+                            aria-label={`Open ${mod.name} folder`}
+                            title="Open folder"
+                          >
+                            <Folder className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => setRemoveTarget(mod)}
+                            aria-label={`Remove ${mod.name}`}
+                            title="Remove mod"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <div className="mt-4 flex gap-2">
+                  <Button onClick={() => void handleImportMod()} variant="outline" className="flex-1">
+                    <FolderOpen className="h-4 w-4" />
+                    Import Mod
+                  </Button>
+                  <Button
+                    onClick={() => setLibraryPickerOpen(true)}
+                    variant="outline"
+                    className="flex-1"
+                    disabled={libraryCount === 0}
+                    title={libraryCount === 0 ? "Library is empty" : "Install a mod from your library"}
+                  >
+                    <Library className="h-4 w-4" />
+                    From Library
+                  </Button>
+                </div>
+                <LibraryPickerModal
+                  isOpen={libraryPickerOpen}
+                  onClose={() => setLibraryPickerOpen(false)}
+                  gamePath={gamePath}
+                  onInstalled={loadMods}
                 />
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-medium">Debug mode</span>
-                <Switch
-                  checked={config?.debug_mode ?? false}
-                  disabled={!config}
-                  onCheckedChange={() => void handleToggle("debug_mode")}
-                />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+              </CardContent>
+            </Card>
 
-      <ConfirmModal
-        isOpen={removeTarget !== null}
-        onClose={() => setRemoveTarget(null)}
-        onConfirm={() => {
-          const mod = removeTarget;
-          if (mod) void removeMod(mod);
-        }}
-        title="Remove mod?"
-        message={`Remove ${removeTarget?.filename ?? ""} from the modded install? You can add it back later via Import Mod or Library.`}
-        danger
-        confirmText="Remove"
-      />
-      <ConfirmModal
-        isOpen={confirmStop}
-        onClose={() => setConfirmStop(false)}
-        onConfirm={() => void stopGame()}
-        title="Stop the game?"
-        message="Among Us will close immediately. Progress in the current match is lost."
-        confirmText="Stop"
-      />
+            <Card className="shadow-card">
+              <CardHeader>
+                <CardTitle>Options</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium">Auto-post game data</span>
+                    <Switch
+                      checked={config?.auto_post_lobby ?? false}
+                      disabled={!config}
+                      onCheckedChange={() => void handleToggle("auto_post_lobby")}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium">Debug mode</span>
+                    <Switch
+                      checked={config?.debug_mode ?? false}
+                      disabled={!config}
+                      onCheckedChange={() => void handleToggle("debug_mode")}
+                    />
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          <ConfirmModal
+            isOpen={removeTarget !== null}
+            onClose={() => setRemoveTarget(null)}
+            onConfirm={() => {
+              const mod = removeTarget;
+              if (mod) void removeMod(mod);
+            }}
+            title="Remove mod?"
+            message={`Remove ${removeTarget?.filename ?? ""} from the modded install? You can add it back later via Import Mod or Library.`}
+            danger
+            confirmText="Remove"
+          />
+          <ConfirmModal
+            isOpen={confirmStop}
+            onClose={() => setConfirmStop(false)}
+            onConfirm={() => void stopGame()}
+            title="Stop the game?"
+            message="Among Us will close immediately. Progress in the current match is lost."
+            confirmText="Stop"
+          />
         </>
       )}
     </div>

@@ -6,7 +6,7 @@ type CardProps = { className?: string };
 function Card({ className, ...props }: CardProps & React.HTMLAttributes<HTMLDivElement>) {
   return (
     <div
-      className={cn("rounded-2xl border border-white/10 bg-card/70 text-card-foreground shadow-[0_8px_24px_-8px_rgb(0_0_0/0.45),0_2px_8px_-2px_rgb(0_0_0/0.3)] backdrop-blur-md", className)}
+      className={cn("rounded-card border border-border bg-surface text-card-foreground", className)}
       {...props}
     />
   )
@@ -17,7 +17,7 @@ function CardHeader({ className, ...props }: React.HTMLAttributes<HTMLDivElement
 }
 
 function CardTitle({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn("font-semibold leading-none tracking-tight", className)} {...props} />
+  return <div className={cn("text-base font-semibold leading-none tracking-tight text-foreground", className)} {...props} />
 }
 
 function CardDescription({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {

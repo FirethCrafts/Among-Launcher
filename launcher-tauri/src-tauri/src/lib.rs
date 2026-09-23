@@ -23,6 +23,69 @@ use config::{LauncherConfig, SharedConfig};
 use error::LauncherError;
 use lobby::SharedLobbyState;
 
+// ============================================================
+// Startup instrumentation
+// ============================================================
+
+/// Dependency-free startup timing log. Writes `<elapsed_ms> <mark>` lines to
+/// `%LOCALAPPDATA%\Among Launcher\launcher.log` (best effort — every failure
+/// is swallowed so logging can never panic or block startup).
+mod startup {
+    use std::io::Write;
+    use std::path::PathBuf;
+    use std::sync::OnceLock;
+    use std::time::Instant;
+
+    static START: OnceLock<Instant> = OnceLock::new();
+
+    /// Rotate the log once it passes this size so it can never grow unbounded.
+    const MAX_LOG_BYTES: u64 = 256 * 1024;
+
+    /// Anchor the elapsed-time clock. Called once, as early as possible.
+    pub fn init() {
+        let _ = START.set(Instant::now());
+    }
+
+    fn log_path() -> Option<PathBuf> {
+        dirs::data_local_dir().map(|dir| dir.join("Among Launcher").join("launcher.log"))
+    }
+
+    pub fn mark(name: &str) {
+        let start = *START.get_or_init(Instant::now);
+        let line = format!("{} {}\n", start.elapsed().as_millis(), name);
+        let _ = append(&line);
+    }
+
+    fn append(line: &str) -> std::io::Result<()> {
+        let path = match log_path() {
+            Some(path) => path,
+            None => return Ok(()),
+        };
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        if let Ok(meta) = std::fs::metadata(&path) {
+            if meta.len() > MAX_LOG_BYTES {
+                let backup = path.with_extension("log.1");
+                let _ = std::fs::remove_file(&backup);
+                let _ = std::fs::rename(&path, &backup);
+            }
+        }
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)?;
+        file.write_all(line.as_bytes())
+    }
+}
+
+/// Frontend-callable timing mark (registered command). The frontend may call
+/// `invoke("log_mark", { name: "..." })` to add its own startup marks.
+#[tauri::command]
+fn log_mark(name: String) {
+    startup::mark(&name);
+}
+
 static ID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 fn generate_id() -> String {
@@ -39,6 +102,38 @@ fn now_millis() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as i64
+}
+
+fn now_unix_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+/// Convert a live detection result into its persisted form.
+fn result_to_cached(result: &game_detection::GameSearchResult) -> config::CachedGame {
+    config::CachedGame {
+        path: result.path.clone(),
+        storefront: result
+            .storefront
+            .as_ref()
+            .map(|sf| sf.as_str().to_string()),
+        detected_but_unavailable: result.detected_but_unavailable,
+        detected_at_unix: now_unix_secs(),
+    }
+}
+
+/// Rebuild a detection result from the persisted cache.
+fn cached_to_result(cached: &config::CachedGame) -> game_detection::GameSearchResult {
+    game_detection::GameSearchResult {
+        path: cached.path.clone(),
+        storefront: cached
+            .storefront
+            .as_deref()
+            .and_then(game_detection::Storefront::from_api),
+        detected_but_unavailable: cached.detected_but_unavailable,
+    }
 }
 
 // ============================================================
@@ -60,7 +155,28 @@ mod game_detection {
         MicrosoftStore,
     }
 
-    #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+    impl Storefront {
+        /// Stable API/serialized form (matches `rename_all = "snake_case"`).
+        pub fn as_str(&self) -> &'static str {
+            match self {
+                Storefront::Steam => "steam",
+                Storefront::Epic => "epic",
+                Storefront::MicrosoftStore => "microsoft_store",
+            }
+        }
+
+        /// Parse the API form used by the frontend and the persisted cache.
+        pub fn from_api(value: &str) -> Option<Self> {
+            match value {
+                "steam" => Some(Storefront::Steam),
+                "epic" => Some(Storefront::Epic),
+                "microsoft_store" => Some(Storefront::MicrosoftStore),
+                _ => None,
+            }
+        }
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
     pub struct GameSearchResult {
         #[serde(skip_serializing_if = "Option::is_none")]
         pub path: Option<String>,
@@ -117,6 +233,13 @@ mod game_detection {
     // -- Steam --
 
     fn find_steam() -> Option<String> {
+        crate::startup::mark("detect:steam:enter");
+        let result = find_steam_inner();
+        crate::startup::mark("detect:steam:exit");
+        result
+    }
+
+    fn find_steam_inner() -> Option<String> {
         let libraries = find_steam_libraries();
         for library in &libraries {
             let game_path = PathBuf::from(library)
@@ -233,6 +356,13 @@ mod game_detection {
     // -- Epic --
 
     fn find_epic() -> GameSearchResult {
+        crate::startup::mark("detect:epic:enter");
+        let result = find_epic_inner();
+        crate::startup::mark("detect:epic:exit");
+        result
+    }
+
+    fn find_epic_inner() -> GameSearchResult {
         if let Some(program_data) = env::var_os("PROGRAMDATA") {
             let manifests_dir = PathBuf::from(program_data)
                 .join("Epic")
@@ -361,10 +491,36 @@ mod game_detection {
 
     // -- Xbox / MS Store --
 
+    /// True only for local drives worth probing (removable or fixed). An
+    /// absent/empty/network/CD drive is rejected by `GetDriveTypeW` without a
+    /// filesystem access, so it can never block the scan.
+    #[cfg(target_os = "windows")]
+    fn drive_is_probeable(root: &str) -> bool {
+        use windows::core::PCWSTR;
+        use windows::Win32::Storage::FileSystem::GetDriveTypeW;
+        const DRIVE_REMOVABLE: u32 = 2;
+        const DRIVE_FIXED: u32 = 3;
+        let wide: Vec<u16> = root.encode_utf16().chain(std::iter::once(0)).collect();
+        let drive_type = unsafe { GetDriveTypeW(PCWSTR(wide.as_ptr())) };
+        matches!(drive_type, DRIVE_REMOVABLE | DRIVE_FIXED)
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    fn drive_is_probeable(_root: &str) -> bool {
+        true
+    }
+
     fn find_xbox() -> GameSearchResult {
+        crate::startup::mark("detect:xbox:enter");
+        let result = find_xbox_inner();
+        crate::startup::mark("detect:xbox:exit");
+        result
+    }
+
+    fn find_xbox_inner() -> GameSearchResult {
         for drive in ['C', 'D', 'E', 'F', 'G'] {
             let root = format!("{}:\\", drive);
-            if !Path::new(&root).exists() {
+            if !drive_is_probeable(&root) || !Path::new(&root).exists() {
                 continue;
             }
 
@@ -397,6 +553,10 @@ mod game_detection {
         if let Ok(program_files) = env::var("PROGRAMFILES") {
             let windows_apps = Path::new(&program_files).join("WindowsApps");
             if windows_apps.exists() {
+                // Access-denied on WindowsApps surfaces as an immediate
+                // `Err` from `read_dir`, so a denied listing is a cheap
+                // fast-path skip rather than a slow probe.
+                crate::startup::mark("detect:xbox:windows_apps:enter");
                 if let Ok(entries) = fs::read_dir(&windows_apps) {
                     let mut innersloth_dirs: Vec<_> = entries
                         .flatten()
@@ -428,12 +588,14 @@ mod game_detection {
                         }
                     }
                 }
+                crate::startup::mark("detect:xbox:windows_apps:exit");
             }
         }
 
         if let Some(local_app_data) = dirs::data_local_dir() {
             let packages_dir = local_app_data.join("Packages");
             if packages_dir.exists() {
+                crate::startup::mark("detect:xbox:packages:enter");
                 if let Ok(entries) = fs::read_dir(&packages_dir) {
                     let mut inner_sloth_pkgs: Vec<_> = entries
                         .flatten()
@@ -471,6 +633,7 @@ mod game_detection {
                         }
                     }
                 }
+                crate::startup::mark("detect:xbox:packages:exit");
             }
         }
 
@@ -734,6 +897,39 @@ mod ipc {
 // App State & Tauri Commands
 // ============================================================
 
+/// Shared, in-memory game-detection cache plus a scan lock. Concurrent or
+/// rapid `detect_game` calls share a single scan: the first caller scans, the
+/// rest wait on `scan_lock` and then hit `result`.
+pub struct DetectCache {
+    result: std::sync::Mutex<Option<(game_detection::GameSearchResult, std::time::Instant)>>,
+    scan_lock: tokio::sync::Mutex<()>,
+}
+
+impl DetectCache {
+    fn new() -> Self {
+        Self {
+            result: std::sync::Mutex::new(None),
+            scan_lock: tokio::sync::Mutex::new(()),
+        }
+    }
+
+    fn get_fresh(&self, ttl: std::time::Duration) -> Option<game_detection::GameSearchResult> {
+        let guard = self.result.lock().ok()?;
+        let (result, at) = guard.as_ref()?;
+        if at.elapsed() < ttl {
+            Some(result.clone())
+        } else {
+            None
+        }
+    }
+
+    fn store(&self, result: game_detection::GameSearchResult) {
+        if let Ok(mut guard) = self.result.lock() {
+            *guard = Some((result, std::time::Instant::now()));
+        }
+    }
+}
+
 pub struct AppState {
     pub config: SharedConfig,
     pub lobby_state: SharedLobbyState,
@@ -744,20 +940,100 @@ pub struct AppState {
     /// Tauri does not queue events). Taken + cleared by
     /// `get_pending_deep_link`. Private field: `DeepLink` is not `pub`.
     pending_deep_link: std::sync::Mutex<Option<DeepLink>>,
+    pub detect_cache: Arc<DetectCache>,
 }
+
+impl AppState {
+    /// In-memory cache first (fastest), then the persisted config cache, if
+    /// either is still within the 24 h TTL.
+    async fn cached_detect(&self) -> Option<game_detection::GameSearchResult> {
+        let ttl = std::time::Duration::from_secs(config::CachedGame::TTL_SECS);
+        if let Some(result) = self.detect_cache.get_fresh(ttl) {
+            return Some(result);
+        }
+        let config = self.config.read().await;
+        config.cached_game.as_ref().and_then(|cached| {
+            if cached.is_fresh(now_unix_secs()) {
+                Some(cached_to_result(cached))
+            } else {
+                None
+            }
+        })
+    }
+}
+
+/// Upper bound on a single detection scan. The scan runs on a blocking thread
+/// so this only bounds how long the caller (and the UI) waits; a pathological
+/// filesystem can never hang the launcher indefinitely.
+const DETECT_SCAN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
 #[tauri::command]
 async fn detect_game(
-    _state: State<'_, AppState>,
+    state: State<'_, AppState>,
+    config_debouncer: State<'_, config::ConfigDebouncer>,
     storefront: Option<String>,
+    force: Option<bool>,
 ) -> Result<game_detection::GameSearchResult, LauncherError> {
-    let sf = storefront.as_deref().and_then(|s| match s {
-        "steam" => Some(game_detection::Storefront::Steam),
-        "epic" => Some(game_detection::Storefront::Epic),
-        "microsoft_store" => Some(game_detection::Storefront::MicrosoftStore),
-        _ => None,
+    let sf = storefront
+        .as_deref()
+        .and_then(game_detection::Storefront::from_api);
+    // Only the unfiltered full scan is cached (persisted + in-memory); the
+    // persisted `cached_game` has no room to record a storefront filter.
+    let cacheable = sf.is_none();
+    let force = force.unwrap_or(false);
+
+    if cacheable && !force {
+        if let Some(cached) = state.cached_detect().await {
+            startup::mark("detect_game:cache_hit");
+            return Ok(cached);
+        }
+    }
+
+    // Serialize scans so rapid/concurrent mounts share one scan.
+    let _scan_guard = if cacheable {
+        Some(state.detect_cache.scan_lock.lock().await)
+    } else {
+        None
+    };
+
+    // Another caller may have finished the scan while we waited.
+    if cacheable && !force {
+        if let Some(cached) = state.cached_detect().await {
+            startup::mark("detect_game:cache_hit_after_wait");
+            return Ok(cached);
+        }
+    }
+
+    startup::mark("detect_game:enter");
+    let scan = tokio::task::spawn_blocking(move || {
+        startup::mark("detect_game:scan_start");
+        let result = game_detection::find_for_storefront(sf.as_ref());
+        startup::mark("detect_game:scan_done");
+        result
     });
-    Ok(game_detection::find_for_storefront(sf.as_ref()))
+
+    let result = match tokio::time::timeout(DETECT_SCAN_TIMEOUT, scan).await {
+        Ok(joined) => {
+            joined.map_err(|e| LauncherError::Ipc(format!("detect task join error: {}", e)))?
+        }
+        Err(_) => {
+            startup::mark("detect_game:timeout");
+            return Ok(game_detection::GameSearchResult::default());
+        }
+    };
+    startup::mark("detect_game:exit");
+
+    if cacheable {
+        state.detect_cache.store(result.clone());
+        {
+            let mut config = state.config.write().await;
+            config.cached_game = Some(result_to_cached(&result));
+        }
+        config_debouncer.request_save().await;
+        startup::mark("detect_game:cached");
+    }
+
+    Ok(result)
 }
 
 #[tauri::command]
@@ -2090,9 +2366,66 @@ fn get_pending_deep_link(state: State<'_, AppState>) -> Option<DeepLinkPayload> 
 // Entry Point
 // ============================================================
 
+/// Whether `HKCU\Software\Classes\amonglauncher\shell\open\command` already
+/// invokes this exact executable. Returns `false` on any read failure, in
+/// which case the caller re-registers (the write is idempotent).
+#[cfg(target_os = "windows")]
+fn protocol_registration_matches(exe_path: &str) -> bool {
+    use windows::core::PCWSTR;
+    use windows::Win32::Foundation::ERROR_SUCCESS;
+    use windows::Win32::System::Registry::{
+        RegGetValueW, HKEY_CURRENT_USER, REG_VALUE_TYPE, RRF_RT_REG_SZ,
+    };
+
+    const SUBKEY: &str = "Software\\Classes\\amonglauncher\\shell\\open\\command";
+    let subkey: Vec<u16> = SUBKEY.encode_utf16().chain(std::iter::once(0)).collect();
+    let subkey = PCWSTR(subkey.as_ptr());
+
+    // First call sizes the value (bytes, including the terminating NUL).
+    let mut size: u32 = 0;
+    let mut value_type = REG_VALUE_TYPE(0);
+    let status = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            subkey,
+            PCWSTR::null(),
+            RRF_RT_REG_SZ,
+            Some(&mut value_type),
+            None,
+            Some(&mut size),
+        )
+    };
+    if status != ERROR_SUCCESS || size == 0 {
+        return false;
+    }
+
+    let mut buffer: Vec<u16> = vec![0; size as usize / 2 + 1];
+    let status = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            subkey,
+            PCWSTR::null(),
+            RRF_RT_REG_SZ,
+            None,
+            Some(buffer.as_mut_ptr() as *mut core::ffi::c_void),
+            Some(&mut size),
+        )
+    };
+    if status != ERROR_SUCCESS {
+        return false;
+    }
+
+    let len = buffer.iter().position(|&c| c == 0).unwrap_or(buffer.len());
+    let value = String::from_utf16_lossy(&buffer[..len]);
+    value.eq_ignore_ascii_case(&format!("\"{}\" \"%1\"", exe_path))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    startup::init();
+    startup::mark("process_start");
     let shared_config = config::new_shared_config();
+    startup::mark("config_loaded");
     let debouncer = config::ConfigDebouncer::new(shared_config.clone());
     let pipe_handle = ipc::PipeServerHandle::new();
     let lobby_state = lobby::LobbyState::new();
@@ -2103,6 +2436,7 @@ pub fn run() {
         pipe_handle: Arc::new(tokio::sync::Mutex::new(Some(pipe_handle.clone()))),
         oauth_code: std::sync::Mutex::new(None),
         pending_deep_link: std::sync::Mutex::new(None),
+        detect_cache: Arc::new(DetectCache::new()),
     };
 
     tauri::Builder::default()
@@ -2146,6 +2480,7 @@ pub fn run() {
         .manage(debouncer)
         .invoke_handler(tauri::generate_handler![
             detect_game,
+            log_mark,
             install_game,
             launch_game,
             stop_game,
@@ -2185,33 +2520,54 @@ pub fn run() {
             version_checker::check_for_among_api_update,
         ])
         .setup(move |app| {
+            startup::mark("setup:start");
             let app_handle = app.handle().clone();
 
-            // Register amonglauncher:// protocol (Windows)
+            // Register amonglauncher:// protocol (Windows). Check the registry
+            // first: when it already points at this exe there is nothing to do,
+            // so the two `reg add` process spawns are skipped entirely. When a
+            // write is needed it happens on a background thread so startup never
+            // blocks on `reg.exe`.
             #[cfg(target_os = "windows")]
             {
-                use std::process::Command;
+                startup::mark("protocol:check_start");
                 let exe_path = std::env::current_exe().unwrap_or_default();
-                let _ = Command::new("reg")
-                    .args([
-                        "add",
-                        "HKCU\\Software\\Classes\\amonglauncher",
-                        "/ve",
-                        "/d",
-                        "URL:Among Launcher Protocol",
-                        "/f",
-                    ])
-                    .output();
-                let _ = Command::new("reg")
-                    .args([
-                        "add",
-                        "HKCU\\Software\\Classes\\amonglauncher\\shell\\open\\command",
-                        "/ve",
-                        "/d",
-                        &format!("\"{}\" \"%1\"", exe_path.display()),
-                        "/f",
-                    ])
-                    .output();
+                let exe_display = exe_path.display().to_string();
+                let already_registered = protocol_registration_matches(&exe_display);
+                startup::mark("protocol:check_end");
+                if already_registered {
+                    startup::mark("protocol:already_registered");
+                } else {
+                    std::thread::spawn(move || {
+                        use std::process::Command;
+                        startup::mark("protocol:register_start");
+                        startup::mark("protocol:reg_add_1_start");
+                        let _ = Command::new("reg")
+                            .args([
+                                "add",
+                                "HKCU\\Software\\Classes\\amonglauncher",
+                                "/ve",
+                                "/d",
+                                "URL:Among Launcher Protocol",
+                                "/f",
+                            ])
+                            .output();
+                        startup::mark("protocol:reg_add_1_end");
+                        startup::mark("protocol:reg_add_2_start");
+                        let _ = Command::new("reg")
+                            .args([
+                                "add",
+                                "HKCU\\Software\\Classes\\amonglauncher\\shell\\open\\command",
+                                "/ve",
+                                "/d",
+                                &format!("\"{}\" \"%1\"", exe_display),
+                                "/f",
+                            ])
+                            .output();
+                        startup::mark("protocol:reg_add_2_end");
+                        startup::mark("protocol:register_end");
+                    });
+                }
             }
 
             // Check command line args for deep link URLs
@@ -2303,6 +2659,7 @@ pub fn run() {
                 ipc::start_pipe_server(app_handle, pipe_handle).await;
             });
 
+            startup::mark("setup:end");
             Ok(())
         })
         .run(tauri::generate_context!())
@@ -2543,5 +2900,62 @@ mod post_lobby_tests {
         assert_eq!(payload["region"], "NA");
         assert_eq!(payload["regionIp"], "");
         assert_eq!(payload["regionPort"], 0);
+    }
+}
+
+#[cfg(test)]
+mod detect_cache_tests {
+    use super::*;
+
+    fn sample() -> game_detection::GameSearchResult {
+        game_detection::GameSearchResult {
+            path: Some(r"C:\Games\Among Us".into()),
+            storefront: Some(game_detection::Storefront::Steam),
+            detected_but_unavailable: false,
+        }
+    }
+
+    #[test]
+    fn cached_round_trip_preserves_fields() {
+        let result = sample();
+        let cached = result_to_cached(&result);
+        assert_eq!(cached.storefront.as_deref(), Some("steam"));
+        assert!(cached.detected_at_unix > 0);
+        assert_eq!(cached_to_result(&cached), result);
+    }
+
+    #[test]
+    fn cached_round_trip_microsoft_store_unavailable() {
+        let result = game_detection::GameSearchResult {
+            path: None,
+            storefront: Some(game_detection::Storefront::MicrosoftStore),
+            detected_but_unavailable: true,
+        };
+        let cached = result_to_cached(&result);
+        assert_eq!(cached.storefront.as_deref(), Some("microsoft_store"));
+        assert!(cached.detected_but_unavailable);
+        assert_eq!(cached_to_result(&cached), result);
+    }
+
+    #[test]
+    fn storefront_from_api_matches_serialized_form() {
+        assert_eq!(
+            game_detection::Storefront::from_api("epic"),
+            Some(game_detection::Storefront::Epic)
+        );
+        assert_eq!(
+            game_detection::Storefront::from_api("microsoft_store"),
+            Some(game_detection::Storefront::MicrosoftStore)
+        );
+        assert_eq!(game_detection::Storefront::from_api("gog"), None);
+    }
+
+    #[test]
+    fn detect_cache_is_empty_until_stored_then_hits() {
+        let cache = DetectCache::new();
+        let ttl = std::time::Duration::from_secs(60);
+        assert!(cache.get_fresh(ttl).is_none());
+        cache.store(sample());
+        assert_eq!(cache.get_fresh(ttl), Some(sample()));
     }
 }

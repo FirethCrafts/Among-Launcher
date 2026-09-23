@@ -87,7 +87,7 @@ export function LauncherUpdateModal({
           </span>
         </div>
 
-        <div className="rounded-lg bg-secondary/50 p-3 max-h-40 overflow-y-auto">
+        <div className="max-h-40 overflow-y-auto rounded-control bg-surface-2 p-3">
           <p className="text-xs font-medium mb-2 text-muted-foreground">
             Release notes
           </p>
@@ -104,7 +104,7 @@ export function LauncherUpdateModal({
               Opening download page…
             </p>
             {/* Indeterminate bar: the actual download happens in the browser. */}
-            <div className="h-1.5 w-full overflow-hidden rounded-full bg-secondary">
+            <div className="h-1.5 w-full overflow-hidden rounded-pill bg-surface-2">
               <div className="h-full w-full animate-pulse rounded-full bg-primary" />
             </div>
           </div>

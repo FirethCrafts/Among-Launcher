@@ -4,9 +4,61 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Among Launcher</title>
+    <!--
+      Static splash. Parsed before any JS/module loads, so it paints
+      essentially instantly and hides the blank/white webview while the
+      ~387 KB React bundle boots. Literal theme values (index.html cannot
+      read the CSS tokens defined in src/index.css): bg #0a0a0c,
+      muted text #9a9aa5, primary #ededf0. React's first commit into
+      #root replaces this markup automatically — no cleanup code needed.
+    -->
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background-color: #0a0a0c;
+      }
+      #root {
+        height: 100%;
+      }
+      .splash {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 14px;
+        background-color: #0a0a0c;
+        color: #9a9aa5;
+        font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+        font-size: 13px;
+        letter-spacing: 0.02em;
+        user-select: none;
+      }
+      .splash__spinner {
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        border: 3px solid #26262e;
+        border-top-color: #ededf0;
+        animation: splash-spin 0.8s linear infinite;
+      }
+      @keyframes splash-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div class="splash" role="status" aria-live="polite">
+        <div class="splash__spinner" aria-hidden="true"></div>
+        <div>Loading</div>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

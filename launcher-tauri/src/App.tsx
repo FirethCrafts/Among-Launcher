@@ -24,6 +24,7 @@ import {
   type LauncherUpdateInfo,
 } from "./components/LauncherUpdateModal";
 import { ToastHost, showToast, formatError } from "./components/Toast";
+import { Skeleton } from "./components/ui/skeleton";
 import {
   LauncherProvider,
   useLauncher,
@@ -392,8 +393,15 @@ function AppShell() {
     content = (
       <div className="h-screen flex flex-col bg-background">
         <Titlebar />
-        <div className="flex-1 min-h-0 overflow-hidden flex items-center justify-center">
-          <div className="text-muted-foreground text-sm">Loading...</div>
+        <div className="flex-1 min-h-0 overflow-hidden p-6">
+          <div className="mx-auto w-full max-w-3xl space-y-6">
+            <Skeleton className="h-7 w-40" />
+            <Skeleton className="h-40 w-full rounded-card" />
+            <div className="grid gap-6 md:grid-cols-2">
+              <Skeleton className="h-56 w-full rounded-card" />
+              <Skeleton className="h-56 w-full rounded-card" />
+            </div>
+          </div>
         </div>
         {/* ToastHost so the at-mount launcher update check can surface a
             failure even before login finishes rendering. */}

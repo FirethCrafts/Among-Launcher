@@ -46,7 +46,7 @@ export class ErrorBoundary extends Component<Props, State> {
                 An unexpected error occurred. You can try reloading this view.
               </p>
               {this.state.error && (
-                <div className="rounded-lg bg-secondary/50 p-3">
+                <div className="rounded-control bg-surface-2 p-3">
                   <code className="text-xs text-destructive break-all">
                     {this.state.error.message}
                   </code>

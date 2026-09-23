@@ -5,8 +5,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { EmptyState } from "@/components/ui/empty-state";
+import { PlayerRow } from "@/components/ui/player-row";
+import { Skeleton } from "@/components/ui/skeleton";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { showToast, formatError } from "@/components/Toast";
-import { ConfirmModal } from "@/components/Modal";
 import { Users, Gamepad2, Hash } from "lucide-react";
 
 interface Player {
@@ -236,10 +239,14 @@ export default function InGameView({
   }
 
   return (
-    <div className="min-h-full p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold">In Game</h1>
-        <Badge variant={connected ? "neutral" : "muted"} showDot dotColor={connected ? "emerald" : "red"}>
+    <div className="min-h-full space-y-6 p-6">
+      <div className="flex items-center justify-between gap-4">
+        <h1 className="text-display font-bold tracking-tight">In Game</h1>
+        <Badge
+          variant={connected ? "success" : "danger"}
+          showDot
+          dotColor={connected ? "success" : "danger"}
+        >
           {connected ? "Game Connected" : "Game Disconnected"}
         </Badge>
       </div>
@@ -248,15 +255,15 @@ export default function InGameView({
         <Card className="w-full">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <Hash className="h-5 w-5" />
+              <Hash className="h-5 w-5 text-muted-foreground" />
               {activeLobbyCode ? "Lobby" : "Join Lobby"}
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             {activeLobbyCode ? (
               <div className="space-y-3">
-                <div className="flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 transition-colors hover:bg-white/[0.07]">
-                  <span className="text-sm text-muted-foreground">Current Code</span>
+                <div className="flex items-center justify-between rounded-control border border-border bg-surface-2 px-3 py-2">
+                  <span className="text-13 text-muted-foreground">Current Code</span>
                   <span className="font-mono text-lg font-bold tracking-widest text-primary">
                     {activeLobbyCode}
                   </span>
@@ -276,6 +283,7 @@ export default function InGameView({
                   onKeyDown={(e) => e.key === "Enter" && joinLobby()}
                 />
                 <Button
+                  variant="primary"
                   onClick={() => void joinLobby()}
                   disabled={!lobbyCode.trim() || joining || !connected}
                   title={connected ? "Join lobby" : "Connect to the game first"}
@@ -290,31 +298,34 @@ export default function InGameView({
         <Card className="w-full">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <Users className="h-5 w-5" />
+              <Users className="h-5 w-5 text-muted-foreground" />
               Players ({players.length})
             </CardTitle>
           </CardHeader>
           <CardContent>
             {!connected ? (
-              <p className="text-sm text-muted-foreground">Connect to game first.</p>
+              <EmptyState
+                icon={<Users className="h-5 w-5" />}
+                title="Game not connected"
+                description="Connect to the game first to see the lobby roster."
+              />
+            ) : joining && players.length === 0 ? (
+              // Pending join: roster is still settling, show placeholders
+              // instead of a misleading "no players" empty state.
+              <div className="space-y-2">
+                <Skeleton className="h-10 w-full" />
+                <Skeleton className="h-10 w-full" />
+              </div>
             ) : players.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No players detected.</p>
+              <EmptyState
+                icon={<Users className="h-5 w-5" />}
+                title="No players detected"
+                description="Players will appear here once they join the lobby."
+              />
             ) : (
               <ul className="space-y-2">
                 {players.map((player) => (
-                  <li
-                    key={player.name}
-                    className="flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 transition-colors hover:bg-white/[0.07]"
-                  >
-                    <span className="flex items-center gap-2 text-sm font-medium">
-                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                      {player.name}
-                    </span>
-                    <div
-                      className="h-4 w-4 rounded-full border border-border"
-                      style={{ backgroundColor: player.color }}
-                    />
-                  </li>
+                  <PlayerRow key={player.name} name={player.name} color={player.color} />
                 ))}
               </ul>
             )}
@@ -325,26 +336,28 @@ export default function InGameView({
       <Card className="w-full">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Gamepad2 className="h-5 w-5" />
+            <Gamepad2 className="h-5 w-5 text-muted-foreground" />
             Active Mods
           </CardTitle>
         </CardHeader>
         <CardContent>
           {mods.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No mods installed.</p>
+            <EmptyState
+              icon={<Gamepad2 className="h-5 w-5" />}
+              title="No mods installed"
+              description="Installed mods will be listed here."
+            />
           ) : (
             <ul className="space-y-2">
               {mods.map((mod) => (
                 <li
                   key={mod.name}
-                  className="flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 transition-colors hover:bg-white/[0.07]"
+                  className="flex items-center justify-between rounded-control border border-border bg-surface-2 px-3 py-2"
                 >
-                  <div>
-                    <span className="text-sm font-medium">{mod.name}</span>
-                    {mod.version && (
-                      <span className="ml-2 text-xs text-muted-foreground">v{mod.version}</span>
-                    )}
-                  </div>
+                  <span className="text-sm font-medium text-foreground">{mod.name}</span>
+                  {mod.version && (
+                    <span className="text-2xs text-muted-foreground">v{mod.version}</span>
+                  )}
                 </li>
               ))}
             </ul>
@@ -355,7 +368,7 @@ export default function InGameView({
       {/* Guard rail: joining while already in a lobby kicks you from the
           current one, so make the consequence explicit before proceeding.
           Non-danger styling — this is a warning, not a destructive action. */}
-      <ConfirmModal
+      <ConfirmDialog
         isOpen={confirmJoinCode !== null}
         onClose={() => setConfirmJoinCode(null)}
         onConfirm={() => {

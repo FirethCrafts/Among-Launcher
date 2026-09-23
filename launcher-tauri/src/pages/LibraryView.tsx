@@ -3,10 +3,12 @@ import { invoke } from "@tauri-apps/api/core";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
+import { EmptyState } from "@/components/ui/empty-state";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { showToast, formatError } from "@/components/Toast";
-import { ConfirmModal } from "@/components/Modal";
 import { useLauncher } from "@/state/LauncherContext";
-import { Archive, Download, Trash2 } from "lucide-react";
+import { Archive, Download, RefreshCw, Trash2 } from "lucide-react";
 
 interface LibraryEntry {
   path: string;
@@ -74,9 +76,11 @@ export default function LibraryView() {
   }
 
   return (
-    <div className="min-h-full p-6 space-y-6">
+    <div className="min-h-full space-y-6 p-6">
       <div className="flex items-center gap-3">
-        <h1 className="text-3xl font-bold tracking-tight">Library</h1>
+        <h1 className="text-display font-bold tracking-tight text-foreground">
+          Library
+        </h1>
         {!loading && (
           <Badge variant="muted">
             {entries.length} {entries.length === 1 ? "mod" : "mods"}
@@ -87,24 +91,53 @@ export default function LibraryView() {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Archive className="h-5 w-5" />
+            <Archive className="h-5 w-5" aria-hidden="true" />
             Saved Mods
           </CardTitle>
         </CardHeader>
         <CardContent>
           {loading ? (
-            <p className="text-sm text-muted-foreground">Loading library...</p>
-          ) : entries.length === 0 ? (
-            <div className="space-y-1">
-              <p className="text-sm text-muted-foreground">
-                Your library is empty — nothing saved yet.
-              </p>
-              <p className="text-sm text-muted-foreground">
-                On Home, hover an installed mod and press the Archive
-                (&quot;Save to library&quot;) button to stash it here, then
-                reinstall it with one click from this page.
-              </p>
+            <div className="space-y-2" aria-busy="true" aria-label="Loading library">
+              {[0, 1, 2].map((i) => (
+                <div
+                  key={i}
+                  className="flex items-center justify-between gap-3 rounded-control border border-border bg-surface-2 px-3 py-2.5"
+                >
+                  <div className="min-w-0 flex-1 space-y-2">
+                    <Skeleton className="h-3.5 w-40" />
+                    <Skeleton className="h-3 w-64 max-w-full" />
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    <Skeleton className="h-8 w-24" />
+                    <Skeleton className="h-8 w-24" />
+                  </div>
+                </div>
+              ))}
             </div>
+          ) : entries.length === 0 ? (
+            <EmptyState
+              icon={<Archive className="h-5 w-5" aria-hidden="true" />}
+              title="Your library is empty"
+              description={
+                <>
+                  Nothing saved yet. On Home, hover an installed mod and press
+                  the Archive (&quot;Save to library&quot;) button to stash it
+                  here, then reinstall it with one click from this page.
+                </>
+              }
+              action={
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void load()}
+                  title="Refresh library"
+                  aria-label="Refresh library"
+                >
+                  <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+                  Refresh
+                </Button>
+              }
+            />
           ) : (
             <ul className="space-y-2">
               {entries.map((entry) => {
@@ -112,32 +145,43 @@ export default function LibraryView() {
                 return (
                   <li
                     key={entry.path}
-                    className="flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 transition-colors hover:bg-white/[0.07]"
+                    className="flex items-center justify-between gap-3 rounded-control border border-border bg-surface-2 px-3 py-2.5 transition-colors hover:border-border hover:bg-surface"
                   >
-                    <div className="min-w-0">
-                      <span className="text-sm font-medium">{filename}</span>
-                      <div className="truncate font-mono text-xs text-muted-foreground">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="truncate text-13 font-medium text-foreground">
+                          {filename}
+                        </span>
+                        {entry.storefront && (
+                          <Badge variant="neutral" className="shrink-0 capitalize">
+                            {entry.storefront}
+                          </Badge>
+                        )}
+                      </div>
+                      <div className="truncate font-mono text-2xs text-muted-foreground">
                         {entry.path}
                       </div>
                     </div>
-                    <div className="flex shrink-0 items-center gap-1">
+                    <div className="flex shrink-0 items-center gap-1.5">
                       <Button
-                        variant="ghost"
+                        variant="outline"
                         size="sm"
                         onClick={() => void handleInstall(filename)}
                         aria-label={`Install ${filename}`}
                         title="Install into modded game"
                       >
-                        <Download className="h-3 w-3" />
+                        <Download className="h-3.5 w-3.5" aria-hidden="true" />
+                        Install
                       </Button>
                       <Button
-                        variant="ghost"
+                        variant="danger"
                         size="sm"
                         onClick={() => setRemoveTarget(filename)}
                         aria-label={`Remove ${filename}`}
                         title="Remove from library"
                       >
-                        <Trash2 className="h-3 w-3" />
+                        <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                        Remove
                       </Button>
                     </div>
                   </li>
@@ -148,7 +192,7 @@ export default function LibraryView() {
         </CardContent>
       </Card>
 
-      <ConfirmModal
+      <ConfirmDialog
         isOpen={removeTarget !== null}
         onClose={() => setRemoveTarget(null)}
         onConfirm={() => {

@@ -64,7 +64,9 @@ export default function SetupView({ onComplete }: SetupViewProps) {
 
     (async () => {
       try {
-        const result = await invoke<GameSearchResult>("detect_game", {});
+        // Setup is an explicit user flow — force a real scan past the cache
+        // (incl. cached negatives) so the user isn't stuck on a stale miss.
+        const result = await invoke<GameSearchResult>("detect_game", { force: true });
         if (cancelled) return;
         setStorefront(result.storefront || "");
         if (result.path) {
@@ -198,14 +200,14 @@ export default function SetupView({ onComplete }: SetupViewProps) {
   }
 
   return (
-    <div className="h-full flex items-center justify-center bg-background">
-      <Card className="w-full max-w-md">
+    <div className="h-full flex items-center justify-center bg-background p-6">
+      <Card className="w-full max-w-md shadow-card">
         <CardContent className="flex flex-col items-center gap-4 p-8 text-center">
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary">
+          <div className="flex h-12 w-12 items-center justify-center rounded-card bg-primary">
             <Gamepad2 className="h-6 w-6 text-primary-foreground" />
           </div>
-          <h1 className="text-3xl font-bold">Set up your game</h1>
-          <p className="text-muted-foreground text-sm">
+          <h1 className="text-display font-bold tracking-tight">Set up your game</h1>
+          <p className="text-13 text-muted-foreground">
             The launcher copies your Among Us installation into a modded folder and installs
             BepInEx so you can play modded.
           </p>
@@ -218,7 +220,7 @@ export default function SetupView({ onComplete }: SetupViewProps) {
           ) : (
             <div className="w-full space-y-4 text-left">
               {!detected && (
-                <p className="text-sm text-muted-foreground">
+                <p className="text-13 text-muted-foreground">
                   We couldn't find Among Us — click Browse to locate it manually.
                 </p>
               )}
@@ -238,17 +240,21 @@ export default function SetupView({ onComplete }: SetupViewProps) {
                   </Button>
                 </div>
                 {storefront && (
-                  <div className="flex items-center justify-between text-sm">
+                  <div className="flex items-center justify-between text-13">
                     <span className="text-muted-foreground">Storefront</span>
                     <span className="font-medium capitalize">{storefront.replace("_", " ")}</span>
                   </div>
                 )}
                 {gamePath && (
-                  <div className="flex items-center justify-between text-sm">
+                  <div className="flex items-center justify-between text-13">
                     <span className="text-muted-foreground">Status</span>
                     <div className="flex items-center gap-2">
-                      <Badge variant={bepinexInstalled ? "neutral" : "muted"}>BepInEx</Badge>
-                      <Badge variant={amongApiInstalled ? "neutral" : "muted"}>AmongApi</Badge>
+                      <Badge variant={bepinexInstalled ? "success" : "muted"} showDot={bepinexInstalled}>
+                        BepInEx
+                      </Badge>
+                      <Badge variant={amongApiInstalled ? "success" : "muted"} showDot={amongApiInstalled}>
+                        AmongApi
+                      </Badge>
                     </div>
                   </div>
                 )}
@@ -256,19 +262,19 @@ export default function SetupView({ onComplete }: SetupViewProps) {
 
               {installProgress && !success && (
                 <div className="space-y-2">
-                  <div className="flex items-center justify-between text-sm">
+                  <div className="flex items-center justify-between text-13">
                     <span className="font-medium capitalize">
                       {installProgress.stage === "complete"
                         ? "Install Complete"
                         : installProgress.stage}
                     </span>
-                    <span className="text-muted-foreground">
+                    <span className="text-muted-foreground tabular-nums">
                       {installProgress.total > 0
                         ? `${Math.round((installProgress.progress / installProgress.total) * 100)}%`
                         : "Preparing..."}
                     </span>
                   </div>
-                  <div className="h-2 w-full overflow-hidden rounded-full bg-secondary">
+                  <div className="h-2 w-full overflow-hidden rounded-pill bg-surface-2">
                     <div
                       className="h-full bg-primary transition-all duration-300"
                       style={{
@@ -284,17 +290,18 @@ export default function SetupView({ onComplete }: SetupViewProps) {
 
               {success ? (
                 <div className="space-y-2">
-                  <p className="flex items-center justify-center gap-2 text-sm font-medium text-emerald-600">
+                  <p className="flex items-center justify-center gap-2 text-13 font-medium text-success">
                     <Check className="h-4 w-4" />
                     Your game is set up and ready to play.
                   </p>
-                  <Button onClick={onComplete} size="lg" className="w-full">
+                  <Button onClick={onComplete} variant="primary" size="lg" className="w-full">
                     Continue
                   </Button>
                 </div>
               ) : (
                 <Button
                   onClick={() => void handleInstall()}
+                  variant="primary"
                   disabled={!gamePath || installing}
                   size="lg"
                   className="w-full"

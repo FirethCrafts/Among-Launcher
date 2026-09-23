@@ -69,7 +69,7 @@ export function LibraryPickerModal({ isOpen, onClose, gamePath, onInstalled }: L
             return (
               <li
                 key={entry.path}
-                className="flex items-center justify-between rounded-xl px-3 py-2 transition-colors hover:bg-white/5"
+                className="flex items-center justify-between rounded-control px-3 py-2 transition-colors hover:bg-surface-2"
               >
                 <div className="flex min-w-0 items-center gap-2">
                   <Package className="h-4 w-4 shrink-0 text-muted-foreground" />
