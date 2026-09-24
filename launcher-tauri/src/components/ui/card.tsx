@@ -6,7 +6,7 @@ type CardProps = { className?: string };
 function Card({ className, ...props }: CardProps & React.HTMLAttributes<HTMLDivElement>) {
   return (
     <div
-      className={cn("rounded-card border border-border bg-surface text-card-foreground", className)}
+      className={cn("rounded-card border border-border bg-surface text-card-foreground shadow-card transition-colors dur-fast hover:border-border/70", className)}
       {...props}
     />
   )

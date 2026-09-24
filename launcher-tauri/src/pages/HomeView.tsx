@@ -17,7 +17,9 @@ import { ConfirmModal } from "@/components/Modal";
 import { LibraryPickerModal } from "@/components/LibraryPickerModal";
 import { useLauncher } from "@/state/LauncherContext";
 import type { ModStatus } from "@/App";
-import { Play, Square, Gamepad2, FolderOpen, Package, Folder, Trash2, Archive, Library, RefreshCw } from "lucide-react";
+import { CrewmateMark } from "@/assets/crewmate";
+import { cn } from "@/lib/utils";
+import { Play, Square, Gamepad2, FolderOpen, Package, Folder, Trash2, Archive, Library, RefreshCw, Store, Box, Puzzle } from "lucide-react";
 
 interface GameSearchResult {
   path?: string | null;
@@ -58,6 +60,23 @@ const TONE_DOT: Record<"neutral" | "success" | "warning" | "danger", BadgeDotCol
   warning: "warning",
   danger: "danger",
 };
+
+/**
+ * Per-row mount delays for the mods list (`animate-list-in`). Static utility
+ * strings so Tailwind emits them; the index is capped at 8 rows so a long mod
+ * list doesn't crawl in one row at a time.
+ */
+const MODS_STAGGER = [
+  "[animation-delay:0ms]",
+  "[animation-delay:30ms]",
+  "[animation-delay:60ms]",
+  "[animation-delay:90ms]",
+  "[animation-delay:120ms]",
+  "[animation-delay:150ms]",
+  "[animation-delay:180ms]",
+  "[animation-delay:210ms]",
+  "[animation-delay:240ms]",
+];
 
 function formatBytes(bytes: number): string {
   if (bytes === 0) return "0 B";
@@ -320,60 +339,72 @@ export default function HomeView({
         </div>
       ) : (
         <>
-          {/* HERO — no card chrome; Play is the dominant primary action. */}
-          <section className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <div className="space-y-1">
-              <h2 className="text-display font-bold tracking-tight">
-                {canPlay
-                  ? "Game Ready"
-                  : isReady
-                    ? "Update Required"
-                    : "Setup Needed"}
-              </h2>
-              <p className="text-13 text-muted-foreground">
-                {canPlay
-                  ? "Everything is set up. Jump into a lobby."
-                  : isReady
-                    ? "AmongApi needs updating before you can play."
-                    : "Finish installing Among Us + BepInEx to play."}
-              </p>
-            </div>
-            <div className="shrink-0">
-              {!isReady ? (
-                <Button onClick={() => navigate("/setup")} variant="primary" size="lg">
-                  <Gamepad2 className="h-5 w-5" />
-                  Set Up Game
-                </Button>
-              ) : isRunning ? (
-                <Button onClick={() => setConfirmStop(true)} variant="destructive" size="lg">
-                  <Square className="h-5 w-5" />
-                  Stop
-                </Button>
-              ) : !modReady ? (
-                <div className="flex flex-col items-stretch gap-2 sm:items-end">
-                  <Tooltip content="AmongApi needs updating">
-                    <span className="inline-flex">
-                      <Button variant="primary" size="lg" disabled>
-                        <Play className="h-5 w-5" />
-                        Play
-                      </Button>
-                    </span>
-                  </Tooltip>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => onRequireModUpdate?.()}
-                  >
-                    <RefreshCw className="h-3.5 w-3.5" />
-                    Update AmongApi
-                  </Button>
+          {/* HERO — subtle card with a contained glow; Play is the dominant action. */}
+          <section className="relative overflow-hidden rounded-card border border-border bg-surface shadow-card">
+            {/* Hero-local radial glow — contained to this card, never page-wide. */}
+            <div
+              aria-hidden
+              className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgb(56_254_220/0.06),transparent_60%)]"
+            />
+            <div className="relative flex flex-col gap-5 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
+              <div className="flex min-w-0 items-center gap-4">
+                <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-card border border-border bg-surface-2">
+                  <CrewmateMark className="h-12 w-12" />
                 </div>
-              ) : (
-                <Button onClick={() => void launchGame()} variant="primary" size="lg">
-                  <Play className="h-5 w-5" />
-                  Play
-                </Button>
-              )}
+                <div className="min-w-0 space-y-1">
+                  <h2 className="text-xl font-bold tracking-tight">
+                    {canPlay
+                      ? "Game Ready"
+                      : isReady
+                        ? "Update Required"
+                        : "Setup Needed"}
+                  </h2>
+                  <p className="text-13 text-muted-foreground">
+                    {canPlay
+                      ? "Everything is set up. Jump into a lobby."
+                      : isReady
+                        ? "AmongApi needs updating before you can play."
+                        : "Finish installing Among Us + BepInEx to play."}
+                  </p>
+                </div>
+              </div>
+              <div className="shrink-0">
+                {!isReady ? (
+                  <Button onClick={() => navigate("/setup")} variant="primary" size="xl">
+                    <Gamepad2 className="h-5 w-5" />
+                    Set Up Game
+                  </Button>
+                ) : isRunning ? (
+                  <Button onClick={() => setConfirmStop(true)} variant="destructive" size="xl">
+                    <Square className="h-5 w-5" />
+                    Stop
+                  </Button>
+                ) : !modReady ? (
+                  <div className="flex flex-col items-stretch gap-2 sm:items-end">
+                    <Tooltip content="AmongApi needs updating">
+                      <span className="inline-flex">
+                        <Button variant="primary" size="xl" disabled>
+                          <Play className="h-5 w-5" />
+                          Play
+                        </Button>
+                      </span>
+                    </Tooltip>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => onRequireModUpdate?.()}
+                    >
+                      <RefreshCw className="h-3.5 w-3.5" />
+                      Update AmongApi
+                    </Button>
+                  </div>
+                ) : (
+                  <Button onClick={() => void launchGame()} variant="primary" size="xl">
+                    <Play className="h-5 w-5" />
+                    Play
+                  </Button>
+                )}
+              </div>
             </div>
           </section>
 
@@ -386,6 +417,7 @@ export default function HomeView({
               className="capitalize"
               title={storefront ? "Source install" : "Browse to locate the game"}
             >
+              <Store className="h-3 w-3" aria-hidden />
               {storefront ? storefront.replace("_", " ") : "No storefront"}
             </Badge>
             <Badge
@@ -394,6 +426,7 @@ export default function HomeView({
               dotColor={bepinexInstalled ? "success" : "danger"}
               title={bepinexInstalled ? "Mod loader ready" : "Run setup to install"}
             >
+              <Box className="h-3 w-3" aria-hidden />
               BepInEx {bepinexInstalled ? "✓" : "Missing"}
             </Badge>
             <Badge
@@ -402,6 +435,7 @@ export default function HomeView({
               dotColor={TONE_DOT[amongApiTone]}
               title={amongApiHint}
             >
+              <Puzzle className="h-3 w-3" aria-hidden />
               AmongApi {amongApiValue}
             </Badge>
           </section>
@@ -445,9 +479,10 @@ export default function HomeView({
               />
             ) : (
               <ul className="space-y-1">
-                {mods.map((mod) => (
+                {mods.map((mod, i) => (
                   <ListRow
                     key={mod.filename}
+                    className={cn("animate-list-in", MODS_STAGGER[Math.min(i, 8)])}
                     leading={<Package className="h-4 w-4" />}
                     title={mod.name}
                     meta={`${mod.version ? `v${mod.version} · ` : ""}${formatBytes(mod.size)}`}
@@ -495,7 +530,7 @@ export default function HomeView({
           </section>
 
           {installProgress && (
-            <Card className="shadow-card">
+            <Card className="animate-pop-in shadow-card">
               <CardContent className="pt-6">
                 <div className="space-y-2">
                   <div className="flex items-center justify-between text-13">
@@ -508,9 +543,12 @@ export default function HomeView({
                         : "Preparing..."}
                     </span>
                   </div>
-                  <div className="h-2 w-full overflow-hidden rounded-pill bg-surface-2">
+                  <div className="relative h-2 w-full overflow-hidden rounded-pill bg-surface-2">
                     <div
-                      className="h-full bg-primary transition-all duration-300"
+                      className={cn(
+                        "h-full bg-primary transition-[width] duration-300 ease-out",
+                        installProgress.total <= 0 && "bg-primary/20"
+                      )}
                       style={{
                         width:
                           installProgress.total > 0
@@ -518,6 +556,14 @@ export default function HomeView({
                             : "100%",
                       }}
                     />
+                    {installProgress.total <= 0 && (
+                      <div
+                        aria-hidden
+                        className="pointer-events-none absolute inset-0 overflow-hidden rounded-pill"
+                      >
+                        <div className="h-full w-1/2 -translate-x-full animate-shimmer bg-gradient-to-r from-transparent via-foreground/20 to-transparent" />
+                      </div>
+                    )}
                   </div>
                 </div>
               </CardContent>

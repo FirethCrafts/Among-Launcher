@@ -68,6 +68,30 @@
   --text-13--line-height: 1.125rem;
   --text-display: 1.75rem; /* 28 */
   --text-display--line-height: 2rem;
+
+  /* ---- Motion foundation (M1): durations, easings, entrance animations ----
+   * Tailwind v4 has --ease-* and --animate-* namespaces but NO --duration-*
+   * namespace, so durations are exposed as plain theme variables consumed by
+   * the `.dur-*` utilities in @layer utilities below.
+   * NOTE: --ease-out / --ease-in are Tailwind built-ins and intentionally NOT
+   * overridden here (other builders rely on them). */
+  --duration-instant: 80ms;
+  --duration-fast: 120ms;
+  --duration-base: 180ms;
+  --duration-slow: 240ms;
+  --duration-slower: 320ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --animate-shimmer: shimmer 1.4s linear infinite;
+  --animate-page-in: pageIn var(--duration-base) ease-out both;
+  --animate-modal-in: modalIn 200ms ease-out both;
+  --animate-modal-out: modalOut 150ms ease-in both;
+  --animate-overlay-in: overlayIn var(--duration-base) ease-out both;
+  --animate-overlay-out: overlayOut 150ms ease-in both;
+  --animate-toast-in: toastIn var(--duration-base) ease-out both;
+  --animate-toast-out: toastOut 150ms ease-in both;
+  --animate-list-in: listIn var(--duration-base) ease-out both;
+  --animate-pop-in: popIn 260ms var(--ease-spring) both;
 }
 
 @layer base {
@@ -92,14 +116,29 @@
   }
 }
 
-@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-@keyframes zoomIn95 { from { transform: scale(0.95); opacity: 0; } to { transform: scale(1); opacity: 1; } }
-@keyframes slideInFromBottom { from { transform: translateY(16px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+/* ---- Motion foundation (M1) keyframes ----
+ * Transform/opacity only. `shimmer` is a transform sweep (not
+ * background-position): consumers wrap a `w-1/2 -translate-x-full` bar in an
+ * `overflow-hidden` track and let this sweep it across. */
+@keyframes shimmer { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+@keyframes pageIn { from { opacity: 0; transform: translateY(4px); } }
+@keyframes modalIn { from { opacity: 0; transform: scale(0.96); } }
+@keyframes modalOut { to { opacity: 0; transform: scale(0.98); } }
+@keyframes overlayIn { from { opacity: 0; } }
+@keyframes overlayOut { to { opacity: 0; } }
+@keyframes toastIn { from { opacity: 0; transform: translateX(12px); } }
+@keyframes toastOut { to { opacity: 0; transform: translateX(12px); } }
+@keyframes listIn { from { opacity: 0; transform: translateY(4px); } }
+@keyframes popIn { from { opacity: 0; transform: scale(0.9); } }
 
-.animate-in { animation-duration: 200ms; animation-fill-mode: both; }
-.fade-in { animation-name: fadeIn; }
-.zoom-in-95 { animation-name: zoomIn95; }
-.slide-in-from-bottom-4 { animation-name: slideInFromBottom; }
+@layer utilities {
+  /* Durations (no Tailwind v4 --duration-* namespace). */
+  .dur-instant { transition-duration: var(--duration-instant); }
+  .dur-fast { transition-duration: var(--duration-fast); }
+  .dur-base { transition-duration: var(--duration-base); }
+  .dur-slow { transition-duration: var(--duration-slow); }
+  .dur-slower { transition-duration: var(--duration-slower); }
+}
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {

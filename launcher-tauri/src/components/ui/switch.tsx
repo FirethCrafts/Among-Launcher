@@ -21,7 +21,7 @@ export function Switch({ checked, onCheckedChange, disabled }: SwitchProps) {
       )}
     >
       <span className={cn(
-        "block h-5 w-5 rounded-pill transition-transform",
+        "block h-5 w-5 rounded-pill transition-transform duration-200 ease-spring",
         checked ? "translate-x-5 bg-background" : "translate-x-0.5 bg-muted-foreground"
       )} />
     </button>

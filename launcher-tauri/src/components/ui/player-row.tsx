@@ -47,7 +47,7 @@ export function PlayerRow({ name, color, level, ping, isHost, actions, className
   return (
     <li
       className={cn(
-        "flex items-center justify-between gap-3 rounded-control border border-border bg-surface-2 px-3 py-2 transition-colors hover:bg-border",
+        "animate-list-in flex items-center justify-between gap-3 rounded-control border border-border bg-surface-2 px-3 py-2 transition-[color,background-color,transform,translate,scale] dur-fast active:scale-[0.995] hover:bg-border",
         className
       )}
     >

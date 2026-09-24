@@ -79,7 +79,12 @@ function TabsContent({ value, className, children, ...props }: TabsContentProps)
   const { value: active } = useTabs();
   if (active !== value) return null;
   return (
-    <div role="tabpanel" className={cn("mt-4", className)} {...props}>
+    <div
+      key={active}
+      role="tabpanel"
+      className={cn("mt-4 animate-page-in", className)}
+      {...props}
+    >
       {children}
     </div>
   );

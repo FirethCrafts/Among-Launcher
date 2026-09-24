@@ -5,11 +5,11 @@ import { cn } from "@/lib/utils"
 type ButtonProps = {
   /** `primary` is an alias of `default`; `danger` is an alias of `destructive`. */
   variant?: 'default' | 'primary' | 'outline' | 'secondary' | 'ghost' | 'destructive' | 'danger';
-  size?: 'sm' | 'md' | 'lg' | 'icon';
+  size?: 'sm' | 'md' | 'lg' | 'xl' | 'icon';
 };
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-control text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50",
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-control text-sm font-medium transition-[color,background-color,border-color,transform,translate,scale] dur-instant active:scale-[0.98] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50",
   {
     variants: {
       variant: {
@@ -25,6 +25,7 @@ const buttonVariants = cva(
         sm: "h-8 rounded-control px-3 text-xs",
         md: "h-9 px-4 py-2",
         lg: "h-10 rounded-control px-6",
+        xl: "h-12 px-8 text-base",
         icon: "h-9 w-9",
       },
     },

@@ -50,6 +50,11 @@
           transform: rotate(360deg);
         }
       }
+      @media (prefers-reduced-motion: reduce) {
+        .splash__spinner {
+          animation: none;
+        }
+      }
     </style>
   </head>
   <body>

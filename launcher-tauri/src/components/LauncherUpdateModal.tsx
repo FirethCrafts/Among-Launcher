@@ -39,10 +39,9 @@ export function LauncherUpdateModal({
   // Current version for the prompt; stays "Unknown" if get_version rejects
   // (e.g. backend command not available yet).
   useEffect(() => {
-    if (!isOpen) {
-      setStatus("idle");
-      return;
-    }
+    if (!isOpen) return;
+    // Reset on open (not on close) so the content never resets mid-exit.
+    setStatus("idle");
     let cancelled = false;
     invoke<string>("get_version")
       .then((v) => {
@@ -59,10 +58,9 @@ export function LauncherUpdateModal({
   // Progress events from `install_launcher_update`, same shape as the mod
   // updater's `update-progress`. Subscribed only while the modal is open.
   useEffect(() => {
-    if (!isOpen) {
-      setProgressText("");
-      return;
-    }
+    if (!isOpen) return;
+    // Reset on open (not on close) so the content never resets mid-exit.
+    setProgressText("");
     const unlisten = listen<UpdateProgress>("launcher-update-progress", (event) => {
       const { stage, progress, total } = event.payload;
       if (stage === "downloading") {

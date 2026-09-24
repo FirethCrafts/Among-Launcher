@@ -18,7 +18,7 @@ export function ListRow({ leading, title, subtitle, meta, actions, className }: 
   return (
     <li
       className={cn(
-        "flex items-center gap-3 rounded-control px-3 py-2 transition-colors hover:bg-surface-2",
+        "animate-list-in flex items-center gap-3 rounded-control px-3 py-2 transition-[color,background-color,transform,translate,scale] dur-fast active:scale-[0.995] hover:bg-surface-2",
         className
       )}
     >

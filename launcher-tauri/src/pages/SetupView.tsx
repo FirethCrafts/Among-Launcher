@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { showToast, formatError } from "@/components/Toast";
 import { useLauncher } from "@/state/LauncherContext";
+import { cn } from "@/lib/utils";
 import { Gamepad2, FolderOpen, Play, Check, Loader2 } from "lucide-react";
 
 interface GameSearchResult {
@@ -201,7 +202,7 @@ export default function SetupView({ onComplete }: SetupViewProps) {
 
   return (
     <div className="h-full flex items-center justify-center bg-background p-6">
-      <Card className="w-full max-w-md shadow-card">
+      <Card className="w-full max-w-md">
         <CardContent className="flex flex-col items-center gap-4 p-8 text-center">
           <div className="flex h-12 w-12 items-center justify-center rounded-card bg-primary">
             <Gamepad2 className="h-6 w-6 text-primary-foreground" />
@@ -274,9 +275,12 @@ export default function SetupView({ onComplete }: SetupViewProps) {
                         : "Preparing..."}
                     </span>
                   </div>
-                  <div className="h-2 w-full overflow-hidden rounded-pill bg-surface-2">
+                  <div className="relative h-2 w-full overflow-hidden rounded-pill bg-surface-2">
                     <div
-                      className="h-full bg-primary transition-all duration-300"
+                      className={cn(
+                        "h-full bg-primary transition-[width] duration-300 ease-out",
+                        installProgress.total <= 0 && "bg-primary/20"
+                      )}
                       style={{
                         width:
                           installProgress.total > 0
@@ -284,13 +288,21 @@ export default function SetupView({ onComplete }: SetupViewProps) {
                             : "100%",
                       }}
                     />
+                    {installProgress.total <= 0 && (
+                      <div
+                        aria-hidden="true"
+                        className="pointer-events-none absolute inset-0 overflow-hidden rounded-pill"
+                      >
+                        <div className="h-full w-1/2 -translate-x-full animate-shimmer bg-gradient-to-r from-transparent via-foreground/20 to-transparent" />
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
 
               {success ? (
                 <div className="space-y-2">
-                  <p className="flex items-center justify-center gap-2 text-13 font-medium text-success">
+                  <p className="animate-pop-in flex items-center justify-center gap-2 text-13 font-medium text-success">
                     <Check className="h-4 w-4" />
                     Your game is set up and ready to play.
                   </p>

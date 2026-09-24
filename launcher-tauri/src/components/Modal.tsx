@@ -1,6 +1,8 @@
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { usePresence } from '@/lib/usePresence';
 
 export interface ModalProps {
   isOpen: boolean;
@@ -11,7 +13,8 @@ export interface ModalProps {
 }
 
 export function Modal({ isOpen, onClose, title, children, allowDismiss = true }: ModalProps) {
-  const overlayRef = useRef<HTMLDivElement>(null);
+  // Stay mounted through the exit animation; `state` drives enter vs exit.
+  const { mounted, state } = usePresence(isOpen, 150);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -22,18 +25,28 @@ export function Modal({ isOpen, onClose, title, children, allowDismiss = true }:
     return () => window.removeEventListener('keydown', handleEsc);
   }, [isOpen, allowDismiss, onClose]);
 
-  if (!isOpen) return null;
+  if (!mounted) return null;
 
-  return (
-    <div ref={overlayRef}
+  // Portal to <body>: an ancestor with a `transform` (e.g. `animate-page-in`
+  // on the routed content wrapper) makes `position: fixed` resolve against
+  // that ancestor, which would centre the dialog inside the content pane
+  // instead of the window.
+  return createPortal(
+    <div
+      data-state={state}
       onClick={allowDismiss ? onClose : undefined}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 animate-in fade-in">
+      className={`fixed inset-0 z-50 flex items-center justify-center bg-black/60 ${
+        state === 'enter' ? 'animate-overlay-in' : 'pointer-events-none animate-overlay-out'
+      }`}>
       <div
         role="dialog"
         aria-modal="true"
         aria-label={title}
+        data-state={state}
         onClick={e => e.stopPropagation()}
-        className="w-full max-w-md mx-4 rounded-card border border-border bg-surface shadow-card animate-in zoom-in-95 slide-in-from-bottom-4">
+        className={`w-full max-w-md mx-4 rounded-card border border-border bg-surface shadow-card ${
+          state === 'enter' ? 'animate-modal-in' : 'animate-modal-out'
+        }`}>
         <div className="flex items-center justify-between gap-4 border-b border-border px-6 py-4">
           <h2 className="text-base font-semibold text-foreground">{title}</h2>
           {allowDismiss && (
@@ -49,7 +62,8 @@ export function Modal({ isOpen, onClose, title, children, allowDismiss = true }:
         </div>
         <div className="px-6 py-4">{children}</div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 

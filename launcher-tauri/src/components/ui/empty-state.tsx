@@ -3,13 +3,15 @@ import { cn } from "@/lib/utils"
 
 interface EmptyStateProps {
   icon?: React.ReactNode;
+  /** Optional richer graphic rendered above the icon (e.g. an illustration). */
+  illustration?: React.ReactNode;
   title: string;
   description?: React.ReactNode;
   action?: React.ReactNode;
   className?: string;
 }
 
-export function EmptyState({ icon, title, description, action, className }: EmptyStateProps) {
+export function EmptyState({ icon, illustration, title, description, action, className }: EmptyStateProps) {
   return (
     <div
       className={cn(
@@ -17,8 +19,9 @@ export function EmptyState({ icon, title, description, action, className }: Empt
         className
       )}
     >
+      {illustration && <div className="mb-2">{illustration}</div>}
       {icon && (
-        <div className="mb-1 flex h-10 w-10 items-center justify-center rounded-control bg-surface-2 text-muted-foreground">
+        <div className="mb-1 flex h-14 w-14 items-center justify-center rounded-control bg-surface-2 text-muted-foreground ring-1 ring-border [&_svg]:h-6 [&_svg]:w-6">
           {icon}
         </div>
       )}

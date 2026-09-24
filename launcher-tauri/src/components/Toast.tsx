@@ -29,6 +29,10 @@ const TONE_DURATION_MS: Record<ToastTone, number> = {
   neutral: 3000,
 };
 
+// Matches the `--animate-toast-out` duration (150ms). The toast is marked
+// `leaving`, animates out, then is removed after this delay.
+const TOAST_EXIT_MS = 150;
+
 // Tone is meaning: a flat surface with a semantic border + dot.
 const TONE_CLASS: Record<ToastTone, string> = {
   error: "border-danger/50 bg-danger/10 text-foreground",
@@ -46,21 +50,36 @@ export function showToast(message: string, tone: ToastTone = "neutral") {
   window.dispatchEvent(new CustomEvent('app-toast', { detail: { message, tone } }));
 }
 export function ToastHost() {
-  const [items, setItems] = React.useState<{ id: number; message: string; tone: ToastTone }[]>([]);
+  const [items, setItems] = React.useState<{ id: number; message: string; tone: ToastTone; leaving: boolean }[]>([]);
   React.useEffect(() => {
+    // Each toast schedules two nested timers (tone duration, then the exit
+    // removal). Track them so unmount clears any still pending instead of
+    // firing setState on a dead tree.
+    const timers = new Set<number>();
     const handler = (e: Event) => {
       const { message, tone } = (e as CustomEvent).detail;
       const id = Date.now() + Math.random();
       const safeMessage = typeof message === "string" ? message : formatError(message);
       const safeTone: ToastTone = tone === "success" || tone === "error" ? tone : "neutral";
-      setItems((prev) => [...prev, { id, message: safeMessage, tone: safeTone }]);
-      setTimeout(
-        () => setItems((prev) => prev.filter((t) => t.id !== id)),
-        TONE_DURATION_MS[safeTone]
-      );
+      setItems((prev) => [...prev, { id, message: safeMessage, tone: safeTone, leaving: false }]);
+      const toneTimer = window.setTimeout(() => {
+        timers.delete(toneTimer);
+        // Mark as leaving so it animates out, then remove after the exit.
+        setItems((prev) => prev.map((t) => (t.id === id ? { ...t, leaving: true } : t)));
+        const exitTimer = window.setTimeout(() => {
+          timers.delete(exitTimer);
+          setItems((prev) => prev.filter((t) => t.id !== id));
+        }, TOAST_EXIT_MS);
+        timers.add(exitTimer);
+      }, TONE_DURATION_MS[safeTone]);
+      timers.add(toneTimer);
     };
     window.addEventListener('app-toast', handler);
-    return () => window.removeEventListener('app-toast', handler);
+    return () => {
+      window.removeEventListener('app-toast', handler);
+      timers.forEach((t) => window.clearTimeout(t));
+      timers.clear();
+    };
   }, []);
   return (
     <div className="fixed bottom-6 right-6 z-50 flex flex-col gap-2">
@@ -69,7 +88,10 @@ export function ToastHost() {
           key={t.id}
           role="status"
           aria-live="polite"
-          className={`flex items-center gap-2 rounded-control border px-4 py-2 text-sm shadow-card ${TONE_CLASS[t.tone]}`}
+          data-state={t.leaving ? "exit" : "enter"}
+          className={`flex items-center gap-2 rounded-control border px-4 py-2 text-sm shadow-card ${TONE_CLASS[t.tone]} ${
+            t.leaving ? "animate-toast-out" : "animate-toast-in"
+          }`}
         >
           <span className={`h-1.5 w-1.5 shrink-0 rounded-pill ${TONE_DOT[t.tone]}`} aria-hidden="true" />
           {t.message}

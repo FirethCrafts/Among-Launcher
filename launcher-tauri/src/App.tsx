@@ -531,7 +531,7 @@ function AppShell() {
     content = (
       <div className="h-screen flex flex-col bg-background">
         <Titlebar />
-        <div className="flex-1 min-h-0 overflow-hidden p-6">
+        <div className="flex-1 min-h-0 overflow-hidden p-6 animate-page-in">
           <div className="mx-auto w-full max-w-3xl space-y-6">
             <Skeleton className="h-7 w-40" />
             <Skeleton className="h-40 w-full rounded-card" />
@@ -550,7 +550,7 @@ function AppShell() {
     content = (
       <div className="h-screen flex flex-col">
         <Titlebar />
-        <div className="flex-1 min-h-0 overflow-hidden">
+        <div className="flex-1 min-h-0 overflow-hidden animate-page-in">
           <WelcomeView onLogin={handleLogin} />
         </div>
         <ToastHost />
@@ -560,7 +560,7 @@ function AppShell() {
     content = (
       <div className="h-screen flex flex-col bg-background text-foreground">
         <Titlebar />
-        <div className="flex-1 min-h-0 overflow-hidden">
+        <div className="flex-1 min-h-0 overflow-hidden animate-page-in">
           <SetupView onComplete={() => setNeedsSetup(false)} />
         </div>
         <ToastHost />
@@ -570,7 +570,7 @@ function AppShell() {
     content = (
       <div className="h-screen flex flex-col bg-background text-foreground">
         <Titlebar />
-        <div className="flex-1 min-h-0 flex overflow-hidden">
+        <div className="flex-1 min-h-0 flex overflow-hidden animate-page-in">
           <Sidebar
             gameConnected={gameConnected}
             username={username}
@@ -598,7 +598,11 @@ function AppShell() {
               </div>
             )}
             <div className="flex-1 min-h-0 overflow-y-auto">
-              <Routes>
+              {/* Enter-only page transition: keyed by pathname so a route
+                  change replays the fade/rise. No exit animation (keeps nav
+                  snappy and never delays a route swap). */}
+              <div key={location.pathname} className="h-full animate-page-in">
+                <Routes>
                 <Route
                   path="/"
                   element={
@@ -641,7 +645,8 @@ function AppShell() {
                 {/* Gated routes that don't exist for the current state (e.g.
                     /ingame while disconnected) fall through to home. */}
                 <Route path="*" element={<Navigate to="/" replace />} />
-              </Routes>
+                </Routes>
+              </div>
             </div>
           </main>
         </div>

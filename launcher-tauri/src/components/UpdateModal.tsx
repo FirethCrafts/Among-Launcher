@@ -52,12 +52,11 @@ export function UpdateModal({
   const [error, setError] = useState("");
 
   useEffect(() => {
-    if (!isOpen) {
-      setStatus("idle");
-      setProgressText("");
-      setError("");
-      return;
-    }
+    if (!isOpen) return;
+    // Reset on open (not on close) so the content never resets mid-exit.
+    setStatus("idle");
+    setProgressText("");
+    setError("");
     const unlisten = listen<UpdateProgress>("update-progress", (event) => {
       const { stage, progress, total } = event.payload;
       if (stage === "downloading") {

@@ -46,7 +46,7 @@ export function Sidebar({
   return (
     <nav
       className={cn(
-        'flex flex-col gap-2 border-r border-border bg-surface py-4',
+        'flex flex-col gap-2 overflow-hidden border-r border-border bg-surface py-4 transition-[width] duration-200 ease-out',
         collapsed ? 'w-16 items-center' : 'w-[200px] px-3'
       )}
       aria-label="Main navigation"
@@ -127,11 +127,16 @@ export function Sidebar({
             {collapsed ? (
               <ChevronsRight className="h-4 w-4 shrink-0" />
             ) : (
-              <>
-                <ChevronsLeft className="h-4 w-4 shrink-0" />
-                <span className="text-13">Collapse</span>
-              </>
+              <ChevronsLeft className="h-4 w-4 shrink-0" />
             )}
+            <span
+              className={cn(
+                'text-13 transition-opacity dur-fast',
+                collapsed ? 'w-0 overflow-hidden opacity-0' : 'opacity-100'
+              )}
+            >
+              Collapse
+            </span>
           </button>
         )}
       </div>

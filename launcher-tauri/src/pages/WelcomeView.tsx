@@ -35,7 +35,7 @@ export default function WelcomeView({ onLogin }: WelcomeViewProps) {
 
   return (
     <div className="h-full flex items-center justify-center bg-background p-6">
-      <Card className="w-full max-w-md shadow-card">
+      <Card className="w-full max-w-md animate-pop-in">
         <CardContent className="flex flex-col items-center gap-6 p-8 text-center">
           <div className="flex h-14 w-14 items-center justify-center rounded-card bg-primary">
             <Gamepad2 className="h-8 w-8 text-primary-foreground" />
