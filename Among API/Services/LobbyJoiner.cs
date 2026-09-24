@@ -435,38 +435,49 @@ public class LobbyJoiner : IDisposable
         {
             await Task.Delay(500, ct);
 
-            var client = GameAssembly.AmongUsClient();
-            if (client == null) continue;
-
-            try
+            // Every IL2CPP read below runs on the Unity main-thread pump. The
+            // loop itself only ever handles the managed bool result, so no
+            // GameAssembly member is touched from this (thread-pool) thread.
+            var ready = await MainThreadDispatcher.EnqueueAsync(() =>
             {
-                var gameStateEnum = GameAssembly.Type("InnerNet.InnerNetClient")?.GetNestedType("GameStates");
-                if (gameStateEnum == null) continue;
+                var client = GameAssembly.AmongUsClient();
+                if (client == null) return false;
 
-                var state = GameAssembly.GetInstanceProp(client, "GameState");
-                if (state == null) continue;
-
-                var notJoined = GameAssembly.EnumValue(gameStateEnum, "NotJoined");
-                var joined = GameAssembly.EnumValue(gameStateEnum, "Joined");
-
-                if (GameAssembly.EnumEquals(state, joined) && GameAssembly.InLobby())
+                try
                 {
-                    FileLogger.Info("[LobbyJoiner] Game ready: already in lobby");
-                    return true;
+                    var gameStateEnum = GameAssembly.Type("InnerNet.InnerNetClient")?.GetNestedType("GameStates");
+                    if (gameStateEnum == null) return false;
+
+                    var state = GameAssembly.GetInstanceProp(client, "GameState");
+                    if (state == null) return false;
+
+                    var notJoined = GameAssembly.EnumValue(gameStateEnum, "NotJoined");
+                    var joined = GameAssembly.EnumValue(gameStateEnum, "Joined");
+
+                    if (GameAssembly.EnumEquals(state, joined) && GameAssembly.InLobby())
+                    {
+                        FileLogger.Info("[LobbyJoiner] Game ready: already in lobby");
+                        return true;
+                    }
+
+                    if (GameAssembly.EnumEquals(state, notJoined))
+                    {
+                        FileLogger.Info("[LobbyJoiner] Game ready: at main menu (NotJoined)");
+                        return true;
+                    }
+
+                    FileLogger.Info($"[LobbyJoiner] Game state: {state}, waiting...");
+                }
+                catch (Exception ex)
+                {
+                    FileLogger.Warn($"[LobbyJoiner] State check failed: {ex.Message}");
                 }
 
-                if (GameAssembly.EnumEquals(state, notJoined))
-                {
-                    FileLogger.Info("[LobbyJoiner] Game ready: at main menu (NotJoined)");
-                    return true;
-                }
+                return false;
+            });
 
-                FileLogger.Info($"[LobbyJoiner] Game state: {state}, waiting...");
-            }
-            catch (Exception ex)
-            {
-                FileLogger.Warn($"[LobbyJoiner] State check failed: {ex.Message}");
-            }
+            if (ready)
+                return true;
         }
 
         FileLogger.Warn("[LobbyJoiner] Game ready wait timed out, proceeding anyway");

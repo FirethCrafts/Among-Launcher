@@ -33,8 +33,11 @@ public class Plugin : BasePlugin
         FileLogger.Info($"Plugin v{MyPluginInfo.PLUGIN_VERSION} loading...");
         Log.LogInfo($"[{MyPluginInfo.PLUGIN_NAME}] Loading...");
 
-        // Capture context immediately on main thread during plugin load
-        MainThreadDispatcher.CaptureContext();
+        // Install the real Unity main-thread pump. Load() runs on the Unity main
+        // thread via the BepInEx chainloader, but Unity's SynchronizationContext is
+        // not available yet (SynchronizationContext.Current is null), so the pump's
+        // MonoBehaviour.Update() is the only reliable way back onto the main thread.
+        MainThreadDispatcher.Initialize();
 
         ParseLaunchArgs();
 
@@ -98,11 +101,11 @@ public class Plugin : BasePlugin
                 FileLogger.Warn("Game did not reach ready state; proceeding anyway.");
             }
 
-            // Re-capture SynchronizationContext now that Unity is fully initialized.
-            // The initial capture in Load() fails because Unity's context isn't set up
-            // during BepInEx chainloader init. This ensures MainThreadDispatcher.Enqueue
-            // actually posts to the Unity main thread instead of falling back to Task.Run.
-            MainThreadDispatcher.CaptureContext();
+            // Main-thread identity is established by the pump's first Update()
+            // (MainThreadDispatcher.Initialize() in Load). Do NOT re-capture a
+            // SynchronizationContext here: this continuation runs on a thread-pool
+            // thread, so capturing it would mislabel a pool thread as the main
+            // thread and reintroduce off-thread game calls.
 
             pipe.RegisterHandler("set_server_url", element =>
             {
@@ -662,9 +665,13 @@ public class Plugin : BasePlugin
         const int MinWaitMs = 8_000;          // minimum time from plugin load
         const int TimeoutMs = 30_000;
 
-        // Resolve the type + nested enum ONCE before the loop (not per-tick).
-        var gameStateEnum = GameAssembly.Type("InnerNet.InnerNetClient")?.GetNestedType("GameStates");
-        var notJoined = gameStateEnum != null ? GameAssembly.EnumValue(gameStateEnum, "NotJoined") : null;
+        // Resolve the type + nested enum ONCE before the loop (not per-tick), on
+        // the main-thread pump so no IL2CPP access happens off-thread.
+        var gameStateEnum = await MainThreadDispatcher.EnqueueAsync(
+            () => GameAssembly.Type("InnerNet.InnerNetClient")?.GetNestedType("GameStates"));
+        var notJoined = gameStateEnum != null
+            ? await MainThreadDispatcher.EnqueueAsync(() => GameAssembly.EnumValue(gameStateEnum, "NotJoined"))
+            : null;
 
         var startTime = DateTime.UtcNow;
         int stableTicks = 0;
@@ -677,14 +684,25 @@ public class Plugin : BasePlugin
             if (elapsedMs < MinWaitMs)
                 continue;  // still within the minimum wait floor
 
-            var client = GameAssembly.AmongUsClient();
-            if (client == null) continue;
+            // All IL2CPP reads run on the pump thread. null means "skip this
+            // tick" (client or enum unavailable), preserving the original
+            // `continue` behavior that leaves stableTicks untouched; true/false
+            // is the NotJoined-ness of the current state.
+            bool? isNotJoined = await MainThreadDispatcher.EnqueueAsync<bool?>(() =>
+            {
+                if (notJoined == null) return null;
 
-            if (notJoined == null) continue; // type not found — skip this tick
+                var client = GameAssembly.AmongUsClient();
+                if (client == null) return null;
 
-            var state = GameAssembly.GetInstanceProp(client, "GameState");
+                var state = GameAssembly.GetInstanceProp(client, "GameState");
+                return GameAssembly.EnumEquals(state, notJoined);
+            });
 
-            if (GameAssembly.EnumEquals(state, notJoined))
+            if (isNotJoined == null)
+                continue;
+
+            if (isNotJoined.Value)
             {
                 stableTicks++;
                 if (stableTicks >= MinReadyTicks)

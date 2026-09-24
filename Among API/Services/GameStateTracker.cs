@@ -395,16 +395,25 @@ public class GameStateTracker : IDisposable
     {
         try
         {
-            // Verified path: GameOptionsManager.Instance.CurrentGameOptions.MaxPlayers
-            // (GameOptionsManager is the modern holder; GameHostOptions is the fallback
-            // property on it). AmongUsClient has no GameHostOpts and GameData has no
-            // MaxPlayers, which is why the old paths always fell through to 15.
             var gomType = GameAssembly.Type("GameOptionsManager");
-            var gom = GameAssembly.GetStaticMember(gomType, "Instance");
-            var opts = GameAssembly.GetInstanceMember(gom, "CurrentGameOptions")
-                       ?? GameAssembly.GetInstanceMember(gom, "GameHostOptions");
-            var max = GameAssembly.ToInt(GameAssembly.GetInstanceMember(opts, "MaxPlayers"));
-            if (max > 0) return max;
+            if (gomType == null) return 15;
+
+            // 1) Singleton via its backing field (avoids even the trivial get_Instance invoke).
+            var gom = GameAssembly.GetStaticMember(gomType, "_Instance_k__BackingField")
+                   ?? GameAssembly.GetStaticMember(gomType, "Instance");
+            if (gom == null) return 15;
+
+            // 2) Concrete options object (IGameOptions is an interface proxy with no backing field,
+            //    so use the concrete Normal/HideNSeek options fields).
+            var opts = GameAssembly.GetInstanceMember(gom, "currentNormalGameOptions")
+                    ?? GameAssembly.GetInstanceMember(gom, "normalGameHostOptions")
+                    ?? GameAssembly.GetInstanceMember(gom, "currentHideNSeekGameOptions")
+                    ?? GameAssembly.GetInstanceMember(gom, "hideNSeekGameHostOptions");
+            if (opts == null) return 15;
+
+            // 3) MaxPlayers' auto-property backing field (a plain int memory read).
+            var max = GameAssembly.ToInt(GameAssembly.GetInstanceMember(opts, "_MaxPlayers_k__BackingField"));
+            if (max > 0 && max <= 15) return max;   // Among Us caps at 15
         }
         catch (Exception ex)
         {
