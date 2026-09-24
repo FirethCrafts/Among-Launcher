@@ -175,9 +175,32 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
-git push origin master
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "Error: Failed to push version bump - release would tag the wrong commit" -ForegroundColor Red
+# Rebase onto the remote and retry: the CI workflow also bumps and pushes
+# master, so a concurrent run can reject our plain push as non-fast-forward.
+# A rejected push here would mean the release tags the wrong commit, so we
+# must not give up until the bump is actually on the remote.
+$pushed = $false
+for ($i = 1; $i -le 5; $i++) {
+    git pull --rebase origin master
+    if ($LASTEXITCODE -ne 0) {
+        # A failed rebase can leave the repo mid-rebase; abort it so we fail
+        # with a clear message instead of looping forever on a conflict.
+        if ((Test-Path ".git\rebase-merge") -or (Test-Path ".git\rebase-apply")) {
+            Write-Host "Error: Rebase conflict while pulling the version bump - aborting rebase" -ForegroundColor Red
+            git rebase --abort
+            exit 1
+        }
+        Write-Host "Push attempt $i failed (pull failed); retrying in 5s..." -ForegroundColor Yellow
+        Start-Sleep -Seconds 5
+        continue
+    }
+    git push origin master
+    if ($LASTEXITCODE -eq 0) { $pushed = $true; break }
+    Write-Host "Push attempt $i failed (remote moved); retrying in 5s..." -ForegroundColor Yellow
+    Start-Sleep -Seconds 5
+}
+if (-not $pushed) {
+    Write-Host "Error: Failed to push version bump after 5 attempts - release would tag the wrong commit" -ForegroundColor Red
     exit 1
 }
 
