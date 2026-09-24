@@ -11,6 +11,7 @@ public record LobbyInfo(
     List<string>? PlayerNames = null,
     List<int>? PlayerLevels = null,
     List<int>? PlayerPings = null,
+    List<string>? PlayerColors = null,
     string GameVersion = "",
     string MapName = "",
     string Language = "",
@@ -29,14 +30,15 @@ public record LobbyClosedInfo(bool IsHost, string Reason = "");
 /// <summary>
 /// A player-list change. <see cref="PlayerName"/> is the specific player that
 /// joined/left and <see cref="PlayerNames"/> is the full current snapshot
-/// (index-aligned with <see cref="PlayerLevels"/>/<see cref="PlayerPings"/>).
+/// (index-aligned with <see cref="PlayerLevels"/>/<see cref="PlayerPings"/>/<see cref="PlayerColors"/>).
 /// </summary>
 public record PlayerInfo(
     string PlayerName,
     int PlayerCount,
     List<string>? PlayerNames = null,
     List<int>? PlayerLevels = null,
-    List<int>? PlayerPings = null
+    List<int>? PlayerPings = null,
+    List<string>? PlayerColors = null
 );
 
 /// <summary>
@@ -173,12 +175,14 @@ public class GameStateTracker : IDisposable
                         List<string>? playerNames = null;
                         List<int>? playerLevels = null;
                         List<int>? playerPings = null;
+                        List<string>? playerColors = null;
                         try { region = GameAssembly.CurrentRegionName(); } catch { }
                         try { host = isHost ? GameAssembly.LocalPlayerName() : GameAssembly.HostPlayerName(); } catch { }
                         try { maxPlayers = MaxPlayers(); } catch { }
                         try { playerNames = GameAssembly.GetAllPlayerNames(); } catch { }
                         try { playerLevels = GetAllPlayerLevels(); } catch { }
                         try { playerPings = GetAllPlayerPings(); } catch { }
+                        try { playerColors = GetAllPlayerColors(); } catch { }
 
                         var gameVersion = "";
                         var mapName = "";
@@ -192,8 +196,13 @@ public class GameStateTracker : IDisposable
                         var (regionIp, regionPort) = CurrentServerEndpoint();
 
                         _log.LogInfo($"[GameStateTracker] Lobby created (code {code}, region {region}, regionEndpoint {regionIp}:{regionPort}, host {host}, isHost {isHost}, players {count}, maxPlayers {maxPlayers}).");
-                        _lastPlayerNames = playerNames != null ? new List<string>(playerNames) : new List<string>();
-                        try { LobbyCreated?.Invoke(this, new LobbyInfo(code, region, regionIp, regionPort, host, count, maxPlayers, playerNames, playerLevels, playerPings, gameVersion, mapName, language, chatType, isHost)); } catch { }
+                        // Diff against the non-empty names only: GetAllPlayerNames
+                        // now emits "" placeholders to stay index-aligned with the
+                        // level/ping/color arrays, and placeholders are not players.
+                        _lastPlayerNames = playerNames != null
+                            ? playerNames.Where(n => !string.IsNullOrEmpty(n)).ToList()
+                            : new List<string>();
+                        try { LobbyCreated?.Invoke(this, new LobbyInfo(code, region, regionIp, regionPort, host, count, maxPlayers, playerNames, playerLevels, playerPings, playerColors, gameVersion, mapName, language, chatType, isHost)); } catch { }
                     }
                     else if (!inLobby && _wasInLobby)
                     {
@@ -324,35 +333,42 @@ public class GameStateTracker : IDisposable
             return;
         }
 
+        // names is raw-index aligned with AllPlayers and may contain ""
+        // placeholders; diff only the real names so placeholders never look
+        // like a player joining/leaving.
+        var currentNames = names.Where(n => !string.IsNullOrEmpty(n)).ToList();
+
         // A transient empty read (scene transition) must not look like every
         // player leaving; keep the last known set and wait for a real read.
-        if (names.Count == 0)
+        if (currentNames.Count == 0)
             return;
 
-        var added = names.Where(n => !_lastPlayerNames.Contains(n)).ToList();
-        var removed = _lastPlayerNames.Where(n => !names.Contains(n)).ToList();
+        var added = currentNames.Where(n => !_lastPlayerNames.Contains(n)).ToList();
+        var removed = _lastPlayerNames.Where(n => !currentNames.Contains(n)).ToList();
         if (added.Count == 0 && removed.Count == 0)
             return;
 
         List<int>? levels = null;
         List<int>? pings = null;
+        List<string>? colors = null;
         try { levels = GetAllPlayerLevels(); } catch { }
         try { pings = GetAllPlayerPings(); } catch { }
+        try { colors = GetAllPlayerColors(); } catch { }
 
-        var effectiveCount = count >= 0 ? count : names.Count;
+        var effectiveCount = count >= 0 ? count : currentNames.Count;
 
         if (added.Count > 0)
         {
             _log.LogInfo($"[GameStateTracker] Player joined: {added[0]} (count {effectiveCount}).");
-            try { PlayerJoined?.Invoke(this, new PlayerInfo(added[0], effectiveCount, names, levels, pings)); } catch { }
+            try { PlayerJoined?.Invoke(this, new PlayerInfo(added[0], effectiveCount, names, levels, pings, colors)); } catch { }
         }
         if (removed.Count > 0)
         {
             _log.LogInfo($"[GameStateTracker] Player left: {removed[0]} (count {effectiveCount}).");
-            try { PlayerLeft?.Invoke(this, new PlayerInfo(removed[0], effectiveCount, names, levels, pings)); } catch { }
+            try { PlayerLeft?.Invoke(this, new PlayerInfo(removed[0], effectiveCount, names, levels, pings, colors)); } catch { }
         }
 
-        _lastPlayerNames = names;
+        _lastPlayerNames = currentNames;
     }
 
     private static string LobbyCode()
@@ -377,24 +393,22 @@ public class GameStateTracker : IDisposable
 
     private static int MaxPlayers()
     {
-        var client = GameAssembly.AmongUsClient();
-        if (client == null) return 15;
-
-        // Path 1: AmongUsClient.GameHostOpts.MaxPlayers (modern Among Us)
-        var gameHostOpts = GameAssembly.GetInstanceMember(client, "GameHostOpts");
-        if (gameHostOpts != null)
+        try
         {
-            var max = GameAssembly.ToInt(GameAssembly.GetInstanceMember(gameHostOpts, "MaxPlayers"));
+            // Verified path: GameOptionsManager.Instance.CurrentGameOptions.MaxPlayers
+            // (GameOptionsManager is the modern holder; GameHostOptions is the fallback
+            // property on it). AmongUsClient has no GameHostOpts and GameData has no
+            // MaxPlayers, which is why the old paths always fell through to 15.
+            var gomType = GameAssembly.Type("GameOptionsManager");
+            var gom = GameAssembly.GetStaticMember(gomType, "Instance");
+            var opts = GameAssembly.GetInstanceMember(gom, "CurrentGameOptions")
+                       ?? GameAssembly.GetInstanceMember(gom, "GameHostOptions");
+            var max = GameAssembly.ToInt(GameAssembly.GetInstanceMember(opts, "MaxPlayers"));
             if (max > 0) return max;
         }
-
-        // Path 2: GameData.Instance.MaxPlayers (fallback for older versions)
-        var gameDataType = GameAssembly.Type("GameData");
-        var instance = gameDataType != null ? GameAssembly.GetStaticProp(gameDataType, "Instance") : null;
-        if (instance != null)
+        catch (Exception ex)
         {
-            var max = GameAssembly.ToInt(GameAssembly.GetInstanceMember(instance, "MaxPlayers"));
-            if (max > 0) return max;
+            FileLogger.Warn($"[GameStateTracker] MaxPlayers failed: {ex.Message}");
         }
 
         return 15; // default
@@ -520,12 +534,14 @@ public class GameStateTracker : IDisposable
                 try
                 {
                     var playerInfo = GameAssembly.CallInstanceMethod(allPlayers, "get_Item", new object[] { i }, new[] { typeof(int) });
-                    if (playerInfo == null) { pings.Add(0); continue; }
-                    pings.Add(GameAssembly.GetPlayerPing(playerInfo));
+                    if (playerInfo == null) { pings.Add(-1); continue; }
+                    // Among Us has no per-player ping: the local player's row gets
+                    // the real client ping, every other row is -1 ("unknown").
+                    pings.Add(GameAssembly.IsLocalPlayer(playerInfo) ? GameAssembly.GetLocalPing() : -1);
                 }
                 catch
                 {
-                    pings.Add(0);
+                    pings.Add(-1);
                 }
             }
         }
@@ -534,5 +550,41 @@ public class GameStateTracker : IDisposable
             FileLogger.Error($"[GameStateTracker] GetAllPlayerPings failed: {ex.Message}");
         }
         return pings;
+    }
+
+    private static List<string> GetAllPlayerColors()
+    {
+        var colors = new List<string>();
+        try
+        {
+            var gameDataType = GameAssembly.Type("GameData");
+            var gameDataInstance = gameDataType != null ? GameAssembly.GetStaticProp(gameDataType, "Instance") : null;
+            if (gameDataInstance == null) return colors;
+
+            var allPlayers = GameAssembly.GetInstanceProp(gameDataInstance, "AllPlayers");
+            if (allPlayers == null) return colors;
+
+            var count = GameAssembly.ToInt(GameAssembly.GetInstanceProp(allPlayers, "Count"));
+            if (count <= 0 || count > 15) return colors;
+
+            for (int i = 0; i < count; i++)
+            {
+                try
+                {
+                    var playerInfo = GameAssembly.CallInstanceMethod(allPlayers, "get_Item", new object[] { i }, new[] { typeof(int) });
+                    if (playerInfo == null) { colors.Add(""); continue; }
+                    colors.Add(GameAssembly.GetPlayerColor(playerInfo));
+                }
+                catch
+                {
+                    colors.Add("");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            FileLogger.Error($"[GameStateTracker] GetAllPlayerColors failed: {ex.Message}");
+        }
+        return colors;
     }
 }

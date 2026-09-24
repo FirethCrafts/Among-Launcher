@@ -11,8 +11,13 @@ public class Plugin : BasePlugin
     /// Launcher↔mod IPC contract version. Bump this whenever a message shape or
     /// semantic changes in a way that requires both sides to be updated together.
     /// The launcher rejects a mod whose protocol version it does not expect.
+    ///
+    /// v3: pings now use <c>-1</c> as the "unknown" sentinel for non-local
+    /// players (previously a clamped <c>0</c>), and per-player <c>color</c>
+    /// fields were added to <c>player_joined</c>/<c>players_list</c> plus
+    /// <c>playerColors</c> to <c>lobby_created</c>.
     /// </summary>
-    public const int ProtocolVersion = 2;
+    public const int ProtocolVersion = 3;
 
     internal static new ManualLogSource Log = null!;
     private LobbyInfo? _lastLobby;
@@ -149,6 +154,7 @@ public class Plugin : BasePlugin
                 FileLogger.Info($"Lobby created: {info.Code} (region {info.Region}, host {info.Host}, players: [{string.Join(", ", info.PlayerNames ?? new())}], levels: [{string.Join(", ", info.PlayerLevels ?? new())}], pings: [{string.Join(", ", info.PlayerPings ?? new())}])");
                 var activeMods = GetInstalledMods();
                 var modType = activeMods.Count > 0 ? "modded" : "vanilla";
+                var roster = BuildRoster(info);
                 _ = pipe.SendMessageAsync("lobby_created",
                     new
                     {
@@ -159,9 +165,10 @@ public class Plugin : BasePlugin
                         host = info.Host,
                         playerCount = info.PlayerCount,
                         maxPlayers = info.MaxPlayers,
-                        playerNames = info.PlayerNames ?? new List<string>(),
-                        playerLevels = info.PlayerLevels ?? new List<int>(),
-                        playerPings = info.PlayerPings ?? new List<int>(),
+                        playerNames = roster.Names,
+                        playerLevels = roster.Levels,
+                        playerPings = roster.Pings,
+                        playerColors = roster.Colors,
                         mod_type = modType,
                         status = "lobby",
                         mods = activeMods,
@@ -215,8 +222,11 @@ public class Plugin : BasePlugin
                     playerCount = p.PlayerCount,
                     playerLevel = ClampedSnapshotValue(p.PlayerLevels, p.PlayerNames, p.PlayerName),
                     level = ClampedSnapshotValue(p.PlayerLevels, p.PlayerNames, p.PlayerName),
-                    playerPing = ClampedSnapshotValue(p.PlayerPings, p.PlayerNames, p.PlayerName),
-                    ping = ClampedSnapshotValue(p.PlayerPings, p.PlayerNames, p.PlayerName),
+                    // Pings are NOT clamped: -1 is the "unknown" sentinel the
+                    // launcher maps to None (only the local player has a real ping).
+                    playerPing = SnapshotValue(p.PlayerPings, p.PlayerNames, p.PlayerName),
+                    ping = SnapshotValue(p.PlayerPings, p.PlayerNames, p.PlayerName),
+                    color = SnapshotColor(p.PlayerColors, p.PlayerNames, p.PlayerName),
                     is_host = ResolveIsHost(p.PlayerName)
                 });
                 SendPlayersList(pipe, p);
@@ -347,16 +357,55 @@ public class Plugin : BasePlugin
         for (int i = 0; i < names.Count; i++)
         {
             var name = names[i];
+            // names is raw-index aligned with AllPlayers and may hold ""
+            // placeholders for empty slots; skip them, but keep `i` indexing the
+            // side arrays so the emitted rows stay correctly aligned.
+            if (string.IsNullOrEmpty(name))
+                continue;
+            var color = i < (p.PlayerColors?.Count ?? 0) ? p.PlayerColors![i] : null;
+            if (string.IsNullOrEmpty(color)) color = null;
             entries.Add(new
             {
                 name,
                 level = i < (p.PlayerLevels?.Count ?? 0) ? Math.Max(0, p.PlayerLevels![i]) : (int?)null,
-                ping = i < (p.PlayerPings?.Count ?? 0) ? Math.Max(0, p.PlayerPings![i]) : (int?)null,
+                // Pings are NOT clamped: -1 is the "unknown" sentinel (only the
+                // local player's row carries a real ping).
+                ping = i < (p.PlayerPings?.Count ?? 0) ? p.PlayerPings![i] : (int?)null,
+                color,
                 is_host = ResolveIsHost(name)
             });
         }
 
         _ = pipe.SendMessageAsync("players_list", entries);
+    }
+
+    /// <summary>
+    /// Builds the `lobby_created` roster payload from the raw, AllPlayers-index-
+    /// aligned snapshot arrays, dropping the mod's <c>""</c> placeholder rows so
+    /// the launcher never seeds an empty-named player. All four arrays are
+    /// filtered together so they stay index-aligned for the launcher's zip.
+    /// </summary>
+    private static (List<string> Names, List<int> Levels, List<int> Pings, List<string> Colors) BuildRoster(LobbyInfo info)
+    {
+        var names = info.PlayerNames ?? new List<string>();
+        var levels = info.PlayerLevels ?? new List<int>();
+        var pings = info.PlayerPings ?? new List<int>();
+        var colors = info.PlayerColors ?? new List<string>();
+
+        var outNames = new List<string>(names.Count);
+        var outLevels = new List<int>(names.Count);
+        var outPings = new List<int>(names.Count);
+        var outColors = new List<string>(names.Count);
+        for (int i = 0; i < names.Count; i++)
+        {
+            if (string.IsNullOrEmpty(names[i]))
+                continue;
+            outNames.Add(names[i]);
+            outLevels.Add(i < levels.Count ? levels[i] : 0);
+            outPings.Add(i < pings.Count ? pings[i] : -1);
+            outColors.Add(i < colors.Count ? colors[i] : "");
+        }
+        return (outNames, outLevels, outPings, outColors);
     }
 
     /// <summary>
@@ -375,13 +424,31 @@ public class Plugin : BasePlugin
 
     /// <summary>
     /// Same as <see cref="SnapshotValue"/> but clamps negative values to 0.
-    /// The launcher parses `level`/`ping` as `Option<u32>`, and a negative
-    /// value would fail that parse and drop the whole message.
+    /// Used for levels only: the launcher parses `level` as `Option<u32>`, and a
+    /// negative value would fail that parse and drop the whole message. Pings are
+    /// deliberately NOT clamped (see <see cref="SnapshotValue"/>) so the -1
+    /// "unknown" sentinel survives.
     /// </summary>
     private static int? ClampedSnapshotValue(List<int>? values, List<string>? names, string name)
     {
         var value = SnapshotValue(values, names, name);
         return value.HasValue ? Math.Max(0, value.Value) : (int?)null;
+    }
+
+    /// <summary>
+    /// Reads the colour aligned to <paramref name="name"/> from a snapshot list
+    /// (index-aligned with the names by GameData.AllPlayers order). Returns null
+    /// when the colour is unknown/empty.
+    /// </summary>
+    private static string? SnapshotColor(List<string>? colors, List<string>? names, string name)
+    {
+        if (colors == null || names == null)
+            return null;
+        var index = names.IndexOf(name);
+        if (index < 0 || index >= colors.Count)
+            return null;
+        var color = colors[index];
+        return string.IsNullOrEmpty(color) ? null : color;
     }
 
     /// <summary>

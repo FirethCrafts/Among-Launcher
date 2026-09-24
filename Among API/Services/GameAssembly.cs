@@ -405,42 +405,137 @@ public static class GameAssembly
         return 0;
     }
 
-    public static int GetPlayerPing(object? playerInfo)
+    /// <summary>
+    /// The LOCAL client's ping, read from <c>AmongUsClient.Instance.Ping</c>
+    /// (the inherited <c>InnerNetClient.Ping</c> int). Among Us exposes no
+    /// per-player ping, so this is the only real ping value available. Returns
+    /// <c>-1</c> when it cannot be resolved — the same "unknown" sentinel used
+    /// for every non-local player — so an unreadable ping is never mistaken for
+    /// a genuine <c>0</c>.
+    /// </summary>
+    public static int GetLocalPing()
     {
-        if (playerInfo == null) return 0;
         try
         {
-            foreach (var name in new[] { "Ping", "PlayerPing", "ping", "playerPing" })
-            {
-                try
-                {
-                    var prop = ResolveProperty(playerInfo.GetType(), name, isStatic: false);
-                    if (prop != null)
-                    {
-                        var val = prop.GetValue(playerInfo);
-                        if (val != null) return ToInt(val);
-                    }
-                }
-                catch { }
+            var client = AmongUsClient();
+            if (client == null) return -1;
+            var ping = GetInstanceMember(client, "Ping");
+            if (ping == null) return -1;
+            return ToInt(ping);
+        }
+        catch (Exception ex)
+        {
+            FileLogger.Warn($"[GameAssembly] GetLocalPing failed: {ex.Message}");
+            return -1;
+        }
+    }
 
-                try
+    /// <summary>
+    /// True when <paramref name="playerInfo"/> is the local client's own
+    /// <c>NetworkedPlayerInfo</c>. Joined on <c>PlayerId</c>
+    /// (<c>PlayerControl.LocalPlayer.Data.PlayerId</c> vs the entry's) with a
+    /// fallback to <c>ClientId</c> vs <c>InnerNetClient.CurrentClient</c>.
+    /// </summary>
+    public static bool IsLocalPlayer(object? playerInfo)
+    {
+        if (playerInfo == null) return false;
+        try
+        {
+            var playerControlType = Type("PlayerControl");
+            var localPlayer = playerControlType != null ? GetStaticMember(playerControlType, "LocalPlayer") : null;
+            if (localPlayer != null)
+            {
+                var localData = GetInstanceProp(localPlayer, "Data");
+                if (localData != null)
                 {
-                    var field = ResolveField(playerInfo.GetType(), name, isStatic: false);
-                    if (field != null)
+                    // Guard the raw members before ToInt: ToInt(null) is 0, so an
+                    // unresolved PlayerId on either side must not compare equal.
+                    var localIdRaw = GetInstanceMember(localData, "PlayerId");
+                    var thisIdRaw = GetInstanceMember(playerInfo, "PlayerId");
+                    if (localIdRaw != null && thisIdRaw != null)
                     {
-                        var val = field.GetValue(playerInfo);
-                        if (val != null) return ToInt(val);
+                        var localId = ToInt(localIdRaw);
+                        var thisId = ToInt(thisIdRaw);
+                        if (localId >= 0 && localId == thisId)
+                            return true;
                     }
                 }
-                catch { }
+            }
+
+            var innerNetClientType = Type("InnerNet.InnerNetClient");
+            if (innerNetClientType != null)
+            {
+                // Same guard on the fallback: an unresolved CurrentClient would
+                // otherwise read as 0 and match the host's ClientId == 0.
+                var currentClientRaw = GetStaticMember(innerNetClientType, "CurrentClient");
+                if (currentClientRaw == null) return false;
+                var clientIdRaw = GetInstanceMember(playerInfo, "ClientId");
+                if (clientIdRaw == null) return false;
+                var currentClient = ToInt(currentClientRaw);
+                var clientId = ToInt(clientIdRaw);
+                if (currentClient >= 0 && clientId == currentClient)
+                    return true;
             }
         }
         catch (Exception ex)
         {
-            Log?.LogWarning($"[GameAssembly] GetPlayerPing failed: {ex.Message}");
+            FileLogger.Warn($"[GameAssembly] IsLocalPlayer failed: {ex.Message}");
         }
-        return 0;
+        return false;
     }
+
+    /// <summary>
+    /// Best-effort ping for a specific <c>NetworkedPlayerInfo</c>. Among Us has
+    /// no per-player ping, so only the local player's row carries a real value;
+    /// every other player returns <c>-1</c> (a sentinel the launcher maps to
+    /// "unknown" and hides).
+    /// </summary>
+    public static int GetPlayerPing(object? playerInfo)
+    {
+        if (playerInfo == null) return -1;
+        try
+        {
+            if (!IsLocalPlayer(playerInfo)) return -1;
+            return GetLocalPing();
+        }
+        catch (Exception ex)
+        {
+            FileLogger.Warn($"[GameAssembly] GetPlayerPing failed: {ex.Message}");
+            return -1;
+        }
+    }
+
+    /// <summary>
+    /// Player outfit colour name (lowercase) for a <c>NetworkedPlayerInfo</c>,
+    /// read from <c>DefaultOutfit.ColorId</c>. Returns "" when unavailable.
+    /// </summary>
+    public static string GetPlayerColor(object? playerInfo)
+    {
+        if (playerInfo == null) return "";
+        try
+        {
+            var outfit = GetInstanceMember(playerInfo, "DefaultOutfit");
+            if (outfit == null) return "";
+
+            var colorId = ToInt(GetInstanceMember(outfit, "ColorId"));
+            if (colorId < 0 || colorId >= ColorNames.Length) return "";
+            return ColorNames[colorId];
+        }
+        catch (Exception ex)
+        {
+            FileLogger.Warn($"[GameAssembly] GetPlayerColor failed: {ex.Message}");
+            return "";
+        }
+    }
+
+    /// <summary>
+    /// Index-aligned with <c>PlayerOutfit.ColorId</c> in Assembly-CSharp.
+    /// </summary>
+    private static readonly string[] ColorNames =
+    {
+        "red", "blue", "green", "pink", "orange", "yellow",
+        "black", "white", "purple", "brown", "cyan", "lime"
+    };
 
     public static bool InLobby()
     {
@@ -684,6 +779,14 @@ public static string LocalPlayerName()
     /// Pass <paramref name="log"/> = false for high-frequency polls so the
     /// reflection tracing does not flood the log.
     /// </summary>
+    /// <remarks>
+    /// The returned list is <b>raw-index aligned</b> with <c>AllPlayers</c>:
+    /// a null/empty slot contributes an <c>""</c> placeholder instead of being
+    /// skipped, so <c>names[i]</c> matches the same player as
+    /// <c>GetAllPlayerLevels()[i]</c> / <c>GetAllPlayerPings()[i]</c> /
+    /// <c>GetAllPlayerColors()[i]</c>. Consumers skip empty names when building
+    /// per-player payloads.
+    /// </remarks>
     public static List<string> GetAllPlayerNames(bool log = true)
     {
         var names = new List<string>();
@@ -715,6 +818,11 @@ public static string LocalPlayerName()
             var count = ToInt(countObj);
             if (log) FileLogger.Info($"[GameAssembly] GetAllPlayerNames: AllPlayers.Count={count}");
 
+            // Match the level/ping/color readers: a lobby is never larger than
+            // 15 players, so a count outside that range is a stale/garbage read.
+            if (count <= 0 || count > 15)
+                return names;
+
             for (int i = 0; i < count; i++)
             {
                 try
@@ -723,18 +831,19 @@ public static string LocalPlayerName()
                     if (playerInfo == null)
                     {
                         if (log) FileLogger.Warn($"[GameAssembly] GetAllPlayerNames: player[{i}] is null");
+                        names.Add("");
                         continue;
                     }
 
-                    var playerName = ToStr(GetInstanceProp(playerInfo, "PlayerName"));
-                    if (!string.IsNullOrEmpty(playerName))
-                    {
-                        names.Add(playerName);
-                    }
+                    // Emit a "" placeholder rather than skipping empty entries so
+                    // names[i] stays aligned with AllPlayers[i] (and therefore with
+                    // the level/ping/color arrays, which index the same raw list).
+                    names.Add(ToStr(GetInstanceProp(playerInfo, "PlayerName")));
                 }
                 catch (Exception ex)
                 {
                     if (log) FileLogger.Warn($"[GameAssembly] GetAllPlayerNames: player[{i}] failed: {ex.Message}");
+                    names.Add("");
                 }
             }
 

@@ -2275,7 +2275,7 @@ fn require_host(host: Option<&str>) -> Result<String, LauncherError> {
 
 #[tauri::command]
 async fn post_lobby(app: AppHandle, state: State<'_, AppState>) -> Result<(), LauncherError> {
-    let (code, region, host, max_players, region_ip, region_port, map_name, token) = {
+    let (code, region, host, max_players, region_ip, region_port, map_name, players, token) = {
         let config = state.config.read().await;
         let lobby = state.lobby_state.read().await;
         let code = lobby
@@ -2291,6 +2291,10 @@ async fn post_lobby(app: AppHandle, state: State<'_, AppState>) -> Result<(), La
         if token.is_empty() {
             return Err(LauncherError::Auth("Not logged in".into()));
         }
+        // Snapshot the roster while the lock is held (inside this block) so
+        // the HTTP call below runs lock-free and never holds the state lock
+        // across an await.
+        let players = lobby.players.clone();
         (
             code,
             lobby.region.clone().unwrap_or_else(|| "NA".into()),
@@ -2299,6 +2303,7 @@ async fn post_lobby(app: AppHandle, state: State<'_, AppState>) -> Result<(), La
             lobby.region_ip.clone(),
             lobby.region_port,
             lobby.map.clone(),
+            players,
             token,
         )
     };
@@ -2319,6 +2324,7 @@ async fn post_lobby(app: AppHandle, state: State<'_, AppState>) -> Result<(), La
             lobby_backend::MOD_TYPE_MODDED,
             lobby_backend::STATUS_LOBBY,
             map_name.as_deref(),
+            &players,
         )
         .await?;
 
@@ -2440,22 +2446,34 @@ async fn kick_player(
     state: State<'_, AppState>,
     player_name: String,
 ) -> Result<(), LauncherError> {
-    let (code, token) = {
+    let (code, player_id, token) = {
         let config = state.config.read().await;
         let lobby = state.lobby_state.read().await;
         let code = lobby
             .code
             .clone()
             .ok_or_else(|| LauncherError::Lobby("No lobby".into()))?;
+        // The backend's `KickRequest` addresses a player by `player_id`, not
+        // by name. Resolve the synthesized id (the SAME scheme the `players`
+        // array uses when posting) from the cached roster by name. If the
+        // player is no longer in the roster we fall back to the name-derived
+        // id so the backend still gets a well-formed request (and reports any
+        // real error) rather than the launcher inventing a local failure.
+        let player_id = lobby
+            .players
+            .iter()
+            .find(|p| p.name == player_name)
+            .map(|p| lobby_backend::player_id(&p.name))
+            .unwrap_or_else(|| lobby_backend::player_id(&player_name));
         let token = config.discord_access_token.clone();
         if token.is_empty() {
             return Err(LauncherError::Auth("Not logged in".into()));
         }
-        (code, token)
+        (code, player_id, token)
     };
 
     let client = lobby_backend::LobbyBackendClient::new(token);
-    client.kick(&code, &player_name).await?;
+    client.kick(&code, &player_id).await?;
     Ok(())
 }
 

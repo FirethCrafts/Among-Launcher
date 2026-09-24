@@ -4,9 +4,9 @@ use tauri::{AppHandle, Emitter, Manager};
 use crate::ipc::IpcEnvelope;
 
 /// Launcher↔mod IPC protocol version this launcher expects. Must match
-/// `Plugin.ProtocolVersion` in `Among API/Plugin.cs` (bumped to 2 alongside
-/// the `game_ready` payload).
-pub(crate) const EXPECTED_MOD_PROTOCOL: u32 = 2;
+/// `Plugin.ProtocolVersion` in `Among API/Plugin.cs` (bumped to 3 for the
+/// `-1` ping sentinel and the per-player color fields).
+pub(crate) const EXPECTED_MOD_PROTOCOL: u32 = 3;
 
 /// A player as reported by the game over IPC (used for both
 /// `player_joined` single events and `players_list` snapshots).
@@ -19,8 +19,15 @@ pub struct PlayerEntry {
     pub name: String,
     #[serde(default)]
     pub level: Option<u32>,
+    /// The mod reports a per-player ping, but Among Us has no such value:
+    /// non-local players are sent as `-1` (the mod's "unknown" sentinel).
+    /// This is therefore `i32`, not `u32` — deserializing `-1` into
+    /// `Option<u32>` hard-errors and, via `From<IpcEnvelope>`, silently
+    /// drops the whole message. Every use site normalizes negatives to
+    /// `None` with [`normalize_ping`] so the rest of the system keeps
+    /// `Option<u32>` semantics.
     #[serde(default)]
-    pub ping: Option<u32>,
+    pub ping: Option<i32>,
     #[serde(default)]
     pub color: Option<String>,
     /// Accepts `is_host` or `isHost` from the game message.
@@ -33,7 +40,7 @@ pub struct PlayerEntry {
 pub enum IpcMessage {
     #[serde(rename = "game_ready")]
     GameReady {
-        /// Protocol version reported by the mod (`{ "protocol": 2 }`).
+        /// Protocol version reported by the mod (`{ "protocol": 3 }`).
         /// Absent on mod builds that predate the field — treated as
         /// incompatible (an old mod predates the whole IPC contract).
         #[serde(default, alias = "protocol")]
@@ -71,6 +78,10 @@ pub enum IpcMessage {
         player_levels: Vec<i32>,
         #[serde(default, alias = "playerPings")]
         player_pings: Vec<i32>,
+        // Index-aligned with `playerNames`; lowercase color names, `""` for
+        // unknown. Same camelCase alias style as the other roster arrays.
+        #[serde(default, alias = "playerColors")]
+        player_colors: Vec<String>,
     },
     #[serde(rename = "lobby_closed")]
     LobbyClosed {
@@ -156,18 +167,87 @@ fn host_is_known(host: &str) -> bool {
     !host.is_empty() && !host.eq_ignore_ascii_case("UNKNOWN")
 }
 
+/// Normalize a raw mod ping into the launcher's `Option<u32>` semantics:
+/// negative values (the mod's `-1` "unknown" sentinel for non-local players)
+/// map to `None`; real pings pass through. Used at every `PlayerEntry` use
+/// site so `-1` never reaches `lobby_state` or an emitted payload.
+fn normalize_ping(p: Option<i32>) -> Option<u32> {
+    p.filter(|v| *v >= 0).map(|v| v as u32)
+}
+
+/// Merge a `player_joined` entry into the cached roster, or insert it when
+/// the player is new. Non-destructive: a field the entry omits (`None`)
+/// never wipes a known value — in particular a normalized `ping` of `None`
+/// (the mod's `-1` "unknown" sentinel) must not clobber a previously known
+/// ping, mirroring the `color` guard. `ping` is passed in pre-normalized so
+/// the stored value always has `Option<u32>` semantics.
+fn upsert_player(
+    players: &mut Vec<crate::lobby::PlayerInfo>,
+    entry: &PlayerEntry,
+    ping: Option<u32>,
+    is_host: bool,
+) {
+    match players.iter_mut().find(|p| p.name == entry.name) {
+        Some(existing) => {
+            if entry.level.is_some() {
+                existing.level = entry.level;
+            }
+            if ping.is_some() {
+                existing.ping = ping;
+            }
+            if entry.color.is_some() {
+                existing.color = entry.color.clone();
+            }
+            // Store the SAME computed value the event emits — not a sticky
+            // `= true` — so the stored snapshot and the `player-joined`
+            // payload can never disagree when a prior `players_list` flagged
+            // this player as host but the fresh resolution computes false.
+            existing.is_host = is_host;
+        }
+        None => {
+            players.push(crate::lobby::PlayerInfo {
+                name: entry.name.clone(),
+                level: entry.level,
+                ping,
+                color: entry.color.clone(),
+                is_host,
+            });
+        }
+    }
+}
+
+/// Convert a `players_list` snapshot entry into stored `PlayerInfo`,
+/// normalizing the raw ping (`-1` → `None`) and resolving the host flag
+/// against the known lobby host. Shared so the full-replace snapshot path
+/// and the `player_joined` path cannot drift on either concern.
+fn player_info_from_entry(
+    entry: PlayerEntry,
+    lobby_host: Option<&str>,
+) -> crate::lobby::PlayerInfo {
+    let is_host = resolve_is_host(entry.is_host, lobby_host, &entry.name);
+    crate::lobby::PlayerInfo {
+        name: entry.name,
+        level: entry.level,
+        ping: normalize_ping(entry.ping),
+        color: entry.color,
+        is_host,
+    }
+}
+
 /// Build the player list the mod snapshotted at lobby creation by zipping
-/// `playerNames` with `playerLevels`/`playerPings` **by index**. Both
-/// side-arrays may be shorter than (or absent from) the names list, so every
-/// access is bounds-checked and a missing value maps to `None` — never a
+/// `playerNames` with `playerLevels`/`playerPings`/`playerColors` **by index**.
+/// Every side-array may be shorter than (or absent from) the names list, so
+/// every access is bounds-checked and a missing value maps to `None` — never a
 /// panic. Negative levels/pings (the mod's "unknown" sentinel) also map to
-/// `None` rather than wrapping into a bogus `u32`. Each player's host flag is
-/// resolved against the lobby host name exactly like the `player_joined` /
-/// `players_list` paths so stored state and emitted events cannot disagree.
+/// `None` rather than wrapping into a bogus `u32`; an empty color string maps
+/// to `None`. Each player's host flag is resolved against the lobby host name
+/// exactly like the `player_joined` / `players_list` paths so stored state and
+/// emitted events cannot disagree.
 fn seed_players_from_roster(
     names: &[String],
     levels: &[i32],
     pings: &[i32],
+    colors: &[String],
     lobby_host: Option<&str>,
 ) -> Vec<crate::lobby::PlayerInfo> {
     names
@@ -176,8 +256,8 @@ fn seed_players_from_roster(
         .map(|(i, name)| crate::lobby::PlayerInfo {
             name: name.clone(),
             level: levels.get(i).copied().and_then(|v| u32::try_from(v).ok()),
-            ping: pings.get(i).copied().and_then(|v| u32::try_from(v).ok()),
-            color: None,
+            ping: normalize_ping(pings.get(i).copied()),
+            color: colors.get(i).cloned().filter(|c| !c.is_empty()),
             is_host: resolve_is_host(None, lobby_host, name),
         })
         .collect()
@@ -278,6 +358,7 @@ pub async fn handle_ipc_message(app: &AppHandle, msg: IpcMessage) {
             player_names,
             player_levels,
             player_pings,
+            player_colors,
         } => {
             // Populate AppState.lobby_state so post_lobby/disband_lobby/
             // kick_player can find the lobby the game just created. The mod
@@ -303,6 +384,7 @@ pub async fn handle_ipc_message(app: &AppHandle, msg: IpcMessage) {
                     &player_names,
                     &player_levels,
                     &player_pings,
+                    &player_colors,
                     lobby.host.as_deref(),
                 );
                 lobby.players = if seeded.is_empty() {
@@ -361,39 +443,14 @@ pub async fn handle_ipc_message(app: &AppHandle, msg: IpcMessage) {
             let _ = app.emit("lobby-closed", lobby_closed_payload(is_host));
         }
         IpcMessage::PlayerJoined(entry) => {
+            // Normalize once: a `-1` sentinel (non-local player) becomes
+            // `None` and must never reach stored state or the emitted payload.
+            let ping = normalize_ping(entry.ping);
             let is_host = {
                 let state = app.state::<crate::AppState>();
                 let mut lobby = state.lobby_state.write().await;
                 let is_host = resolve_is_host(entry.is_host, lobby.host.as_deref(), &entry.name);
-                match lobby.players.iter_mut().find(|p| p.name == entry.name) {
-                    Some(existing) => {
-                        if entry.level.is_some() {
-                            existing.level = entry.level;
-                        }
-                        if entry.ping.is_some() {
-                            existing.ping = entry.ping;
-                        }
-                        if entry.color.is_some() {
-                            existing.color = entry.color.clone();
-                        }
-                        // Store the SAME computed value the event emits —
-                        // not a sticky `= true` — so the stored snapshot
-                        // and the `player-joined` payload can never
-                        // disagree when a prior `players_list` flagged
-                        // this player as host but the fresh resolution
-                        // computes false.
-                        existing.is_host = is_host;
-                    }
-                    None => {
-                        lobby.players.push(crate::lobby::PlayerInfo {
-                            name: entry.name.clone(),
-                            level: entry.level,
-                            ping: entry.ping,
-                            color: entry.color.clone(),
-                            is_host,
-                        });
-                    }
-                }
+                upsert_player(&mut lobby.players, &entry, ping, is_host);
                 is_host
             };
             let _ = app.emit(
@@ -401,7 +458,7 @@ pub async fn handle_ipc_message(app: &AppHandle, msg: IpcMessage) {
                 serde_json::json!({
                     "name": entry.name,
                     "level": entry.level,
-                    "ping": entry.ping,
+                    "ping": ping,
                     "color": entry.color,
                     // Same computed value stored in lobby_state (resolves
                     // against lobby.host) — raw entry.is_host can be null
@@ -419,22 +476,15 @@ pub async fn handle_ipc_message(app: &AppHandle, msg: IpcMessage) {
             let _ = app.emit("player-left", serde_json::json!({ "name": name }));
         }
         IpcMessage::PlayersList(entries) => {
-            // Full snapshot: replace the cached player list.
+            // Full snapshot: replace the cached player list. Raw `-1` pings
+            // (non-local players) are normalized to `None` on the way in so
+            // the sentinel never reaches stored state or the emitted event.
             let state = app.state::<crate::AppState>();
             let mut lobby = state.lobby_state.write().await;
             let host = lobby.host.clone();
             lobby.players = entries
                 .into_iter()
-                .map(|entry| {
-                    let is_host = resolve_is_host(entry.is_host, host.as_deref(), &entry.name);
-                    crate::lobby::PlayerInfo {
-                        name: entry.name,
-                        level: entry.level,
-                        ping: entry.ping,
-                        color: entry.color,
-                        is_host,
-                    }
-                })
+                .map(|entry| player_info_from_entry(entry, host.as_deref()))
                 .collect();
             // Forward the snapshot so the frontend sees the full roster with
             // real names (the `player_joined`/`player_left` events carry the
@@ -486,9 +536,9 @@ mod tests {
     #[test]
     fn test_parse_game_ready_with_protocol() {
         // Exact shape the mod sends (`Among API/Plugin.cs`).
-        let json = r#"{"type": "game_ready", "payload": {"protocol": 2}}"#;
+        let json = r#"{"type": "game_ready", "payload": {"protocol": 3}}"#;
         let msg: IpcMessage = serde_json::from_str(json).unwrap();
-        assert!(matches!(msg, IpcMessage::GameReady { protocol: Some(2) }));
+        assert!(matches!(msg, IpcMessage::GameReady { protocol: Some(3) }));
     }
 
     #[test]
@@ -612,6 +662,125 @@ mod tests {
         }
     }
 
+    // ---- negative ping sentinel (`-1` = unknown, non-local players) ----
+
+    #[test]
+    fn player_joined_negative_ping_parses_and_normalizes_to_none() {
+        // The mod sends `ping: -1` for non-local players. Deserializing `-1`
+        // into `Option<u32>` hard-errors and `From<IpcEnvelope>` swallows the
+        // error into `Unknown`, dropping the whole message. It must parse, and
+        // the sentinel must normalize to `None`.
+        let json = r#"{"type": "player_joined", "payload": {"name": "x", "ping": -1}}"#;
+        let msg: IpcMessage = serde_json::from_str(json).unwrap();
+        match msg {
+            IpcMessage::PlayerJoined(entry) => {
+                assert_eq!(entry.name, "x");
+                assert_eq!(entry.ping, Some(-1)); // sentinel accepted, not an error
+                assert_eq!(normalize_ping(entry.ping), None); // normalized
+            }
+            other => panic!("Expected PlayerJoined, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn player_joined_negative_ping_via_envelope_is_not_unknown() {
+        // The real failure mode was the envelope → IpcMessage conversion
+        // degrading to `Unknown`; exercise that exact path.
+        let envelope = IpcEnvelope {
+            msg_type: "player_joined".to_string(),
+            id: "test-id".to_string(),
+            timestamp: 1234567890,
+            payload: Some(serde_json::json!({"name": "x", "ping": -1})),
+        };
+        let msg: IpcMessage = envelope.into();
+        match msg {
+            IpcMessage::PlayerJoined(entry) => {
+                assert_eq!(normalize_ping(entry.ping), None);
+            }
+            other => panic!("Expected PlayerJoined, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn players_list_negative_ping_parses_and_normalizes_to_none() {
+        let json = r#"{"type": "players_list", "payload": [{"name": "Alice", "ping": -1}, {"name": "Bob", "ping": 40}]}"#;
+        let msg: IpcMessage = serde_json::from_str(json).unwrap();
+        match msg {
+            IpcMessage::PlayersList(entries) => {
+                assert_eq!(entries.len(), 2);
+                assert_eq!(entries[0].ping, Some(-1));
+                assert_eq!(normalize_ping(entries[0].ping), None);
+                assert_eq!(normalize_ping(entries[1].ping), Some(40));
+            }
+            other => panic!("Expected PlayersList, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn player_info_from_entry_normalizes_negative_ping() {
+        // The `players_list` full-replace path stores normalized pings.
+        let entry = PlayerEntry {
+            name: "Alice".to_string(),
+            level: Some(5),
+            ping: Some(-1),
+            color: None,
+            is_host: None,
+        };
+        let info = player_info_from_entry(entry, Some("Host"));
+        assert_eq!(info.ping, None);
+        assert_eq!(info.level, Some(5));
+        assert!(!info.is_host);
+    }
+
+    #[test]
+    fn negative_ping_does_not_overwrite_known_ping() {
+        // Non-destructive merge: a `-1`/unknown ping must not wipe a known
+        // one, while a real ping still updates it.
+        let mut players = vec![crate::lobby::PlayerInfo {
+            name: "Alice".to_string(),
+            level: Some(5),
+            ping: Some(30),
+            color: Some("red".to_string()),
+            is_host: false,
+        }];
+        let unknown = PlayerEntry {
+            name: "Alice".to_string(),
+            level: Some(6),
+            ping: Some(-1),
+            color: None,
+            is_host: None,
+        };
+        upsert_player(&mut players, &unknown, normalize_ping(unknown.ping), false);
+        assert_eq!(players[0].ping, Some(30)); // known ping preserved
+        assert_eq!(players[0].level, Some(6)); // known level still updated
+        assert_eq!(players[0].color, Some("red".to_string())); // preserved
+
+        let known = PlayerEntry {
+            name: "Alice".to_string(),
+            level: None,
+            ping: Some(50),
+            color: None,
+            is_host: None,
+        };
+        upsert_player(&mut players, &known, normalize_ping(known.ping), false);
+        assert_eq!(players[0].ping, Some(50)); // real ping updates
+    }
+
+    #[test]
+    fn players_list_payload_negative_ping_emits_null() {
+        // End-to-end: a raw `-1` entry becomes `None` in stored state and
+        // `null` in the emitted `players_list` payload — never `-1`.
+        let entry = PlayerEntry {
+            name: "Alice".to_string(),
+            level: None,
+            ping: Some(-1),
+            color: None,
+            is_host: None,
+        };
+        let payload = players_list_payload(&[player_info_from_entry(entry, None)]);
+        assert_eq!(payload[0]["ping"], serde_json::Value::Null);
+    }
+
     #[test]
     fn test_parse_player_left() {
         let json = r#"{"type": "player_left", "payload": {"name": "Charlie"}}"#;
@@ -648,6 +817,7 @@ mod tests {
                 "playerNames": ["HostPlayer", "Alice", "Bob", "Carol"],
                 "playerLevels": [1, 5, 7, 9],
                 "playerPings": [0, 30, 45, 60],
+                "playerColors": ["red", "blue", "green", "pink"],
                 "mod_type": "vanilla",
                 "status": "lobby",
                 "mods": [],
@@ -672,6 +842,7 @@ mod tests {
                 player_names,
                 player_levels,
                 player_pings,
+                player_colors,
             } => {
                 assert_eq!(code, "ABCDEF");
                 assert_eq!(region, "NA");
@@ -684,6 +855,7 @@ mod tests {
                 assert_eq!(player_names, vec!["HostPlayer", "Alice", "Bob", "Carol"]);
                 assert_eq!(player_levels, vec![1, 5, 7, 9]);
                 assert_eq!(player_pings, vec![0, 30, 45, 60]);
+                assert_eq!(player_colors, vec!["red", "blue", "green", "pink"]);
             }
             other => panic!("Expected LobbyCreated, got {:?}", other),
         }
@@ -760,7 +932,8 @@ mod tests {
                 "isHost": true,
                 "playerNames": ["HostPlayer", "Alice", "Bob"],
                 "playerLevels": [1, 5, 7],
-                "playerPings": [0, 30, 45]
+                "playerPings": [0, 30, 45],
+                "playerColors": ["red", "blue", "green"]
             }
         }"#;
         let msg: IpcMessage = serde_json::from_str(json).unwrap();
@@ -769,26 +942,35 @@ mod tests {
                 player_names,
                 player_levels,
                 player_pings,
+                player_colors,
                 host,
                 ..
             } => {
                 assert_eq!(player_names, vec!["HostPlayer", "Alice", "Bob"]);
                 assert_eq!(player_levels, vec![1, 5, 7]);
                 assert_eq!(player_pings, vec![0, 30, 45]);
+                assert_eq!(player_colors, vec!["red", "blue", "green"]);
 
-                let players =
-                    seed_players_from_roster(&player_names, &player_levels, &player_pings, Some(&host));
+                let players = seed_players_from_roster(
+                    &player_names,
+                    &player_levels,
+                    &player_pings,
+                    &player_colors,
+                    Some(&host),
+                );
                 assert_eq!(players.len(), 3);
                 assert_eq!(players[0].name, "HostPlayer");
                 assert_eq!(players[0].level, Some(1));
                 assert_eq!(players[0].ping, Some(0));
-                assert_eq!(players[0].color, None);
+                assert_eq!(players[0].color, Some("red".to_string()));
                 assert!(players[0].is_host); // name matches lobby host
                 assert_eq!(players[1].name, "Alice");
                 assert_eq!(players[1].level, Some(5));
                 assert_eq!(players[1].ping, Some(30));
+                assert_eq!(players[1].color, Some("blue".to_string()));
                 assert!(!players[1].is_host);
                 assert_eq!(players[2].name, "Bob");
+                assert_eq!(players[2].color, Some("green".to_string()));
                 assert!(!players[2].is_host);
             }
             other => panic!("Expected LobbyCreated, got {:?}", other),
@@ -805,11 +987,13 @@ mod tests {
                 player_names,
                 player_levels,
                 player_pings,
+                player_colors,
                 ..
             } => {
                 assert!(player_names.is_empty());
                 assert!(player_levels.is_empty());
                 assert!(player_pings.is_empty());
+                assert!(player_colors.is_empty());
             }
             other => panic!("Expected LobbyCreated, got {:?}", other),
         }
@@ -817,18 +1001,34 @@ mod tests {
 
     #[test]
     fn seed_players_from_roster_short_arrays_do_not_panic() {
-        // levels/pings shorter than names (or absent) → None, never a panic.
+        // levels/pings/colors shorter than names (or absent) → None, never a
+        // panic.
         let names = vec!["Host".to_string(), "Alice".to_string(), "Bob".to_string()];
-        let players = seed_players_from_roster(&names, &[3], &[], Some("Host"));
+        let players =
+            seed_players_from_roster(&names, &[3], &[], &["red".to_string()], Some("Host"));
         assert_eq!(players.len(), 3);
         assert_eq!(players[0].level, Some(3));
         assert_eq!(players[0].ping, None);
+        assert_eq!(players[0].color, Some("red".to_string()));
         assert_eq!(players[1].level, None);
         assert_eq!(players[1].ping, None);
+        assert_eq!(players[1].color, None); // colors shorter → None
         assert_eq!(players[2].level, None);
         assert_eq!(players[2].ping, None);
+        assert_eq!(players[2].color, None);
         assert!(players[0].is_host);
         assert!(!players[1].is_host);
+    }
+
+    #[test]
+    fn seed_players_from_roster_empty_color_becomes_none() {
+        // The mod sends `""` for an unknown color (index-aligned) — that must
+        // map to None, not an empty-string color.
+        let names = vec!["Alice".to_string(), "Bob".to_string()];
+        let colors = vec!["".to_string(), "blue".to_string()];
+        let players = seed_players_from_roster(&names, &[], &[], &colors, None);
+        assert_eq!(players[0].color, None);
+        assert_eq!(players[1].color, Some("blue".to_string()));
     }
 
     #[test]
@@ -836,14 +1036,15 @@ mod tests {
         // The mod uses negative sentinels for unknown level/ping; they must
         // not wrap into a bogus u32.
         let names = vec!["Alice".to_string()];
-        let players = seed_players_from_roster(&names, &[-1], &[-1], None);
+        let players = seed_players_from_roster(&names, &[-1], &[-1], &[], None);
         assert_eq!(players[0].level, None);
         assert_eq!(players[0].ping, None);
+        assert_eq!(players[0].color, None);
     }
 
     #[test]
     fn seed_players_from_roster_empty_names_is_empty() {
-        let players = seed_players_from_roster(&[], &[1, 2], &[3, 4], Some("Host"));
+        let players = seed_players_from_roster(&[], &[1, 2], &[3, 4], &["red".to_string()], Some("Host"));
         assert!(players.is_empty());
     }
 
@@ -1009,9 +1210,9 @@ mod tests {
     fn protocol_reason_flags_other_versions() {
         let reason = protocol_mismatch_reason(Some(1)).expect("v1 must mismatch");
         assert!(reason.contains("v1"), "reason: {}", reason);
-        assert!(reason.contains("v2"), "reason: {}", reason);
+        assert!(reason.contains("v3"), "reason: {}", reason);
         // A future protocol is rejected too (forward incompatibility).
-        assert!(protocol_mismatch_reason(Some(3)).is_some());
+        assert!(protocol_mismatch_reason(Some(4)).is_some());
     }
 
     #[test]
@@ -1027,8 +1228,8 @@ mod tests {
         // Frontend contract: the `mod-incompatible` event payload is exactly
         // `{ "reason": "<string>" }`.
         assert_eq!(
-            mod_incompatible_payload("AmongApi protocol v1 is not supported (expected v2)"),
-            serde_json::json!({ "reason": "AmongApi protocol v1 is not supported (expected v2)" })
+            mod_incompatible_payload("AmongApi protocol v1 is not supported (expected v3)"),
+            serde_json::json!({ "reason": "AmongApi protocol v1 is not supported (expected v3)" })
         );
     }
 
