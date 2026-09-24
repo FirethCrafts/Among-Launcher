@@ -5,6 +5,7 @@ import { Modal } from "@/components/Modal";
 import { Button } from "@/components/ui/button";
 import { Download } from "lucide-react";
 import { formatError } from "@/components/Toast";
+import { useLauncher } from "@/state/LauncherContext";
 
 interface UpdateInfo {
   current: string;
@@ -50,6 +51,7 @@ export function UpdateModal({
   const [status, setStatus] = useState<Status>("idle");
   const [progressText, setProgressText] = useState("");
   const [error, setError] = useState("");
+  const { bumpRefresh } = useLauncher();
 
   useEffect(() => {
     if (!isOpen) return;
@@ -86,6 +88,9 @@ export function UpdateModal({
       await invoke("update_among_api", {
         downloadUrl: updateInfo.download_url,
       });
+      // The install replaced AmongApi.dll: signal every mounted page to
+      // re-fetch so Home's version row and Play gate aren't stale.
+      bumpRefresh();
       setStatus("done");
       setProgressText("");
     } catch (e) {

@@ -49,6 +49,14 @@ interface LauncherContextValue {
   updateConfig: (partial: Partial<LauncherConfig>) => Promise<void>;
   /** Re-read the backend config (e.g. after backend-side mutations). */
   refreshConfig: () => Promise<LauncherConfig | null>;
+  /**
+   * Monotonic counter bumped whenever backend state changed and mounted pages
+   * should re-fetch. Key effects on this (not on `modStatus`) to avoid fetch
+   * loops from unrelated re-renders.
+   */
+  refreshNonce: number;
+  /** Ask every mounted page to re-fetch its backend-derived data. */
+  bumpRefresh: () => void;
   /** `null` while the initial auth check is still in flight. */
   loggedIn: boolean | null;
   username: string;
@@ -84,6 +92,7 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
   const [loggedIn, setLoggedIn] = useState<boolean | null>(null);
   const [username, setUsername] = useState("");
   const [avatarUrl, setAvatarUrl] = useState("");
+  const [refreshNonce, setRefreshNonce] = useState(0);
   const configRef = useRef<LauncherConfig | null>(null);
   const writeChain = useRef<Promise<void>>(Promise.resolve());
 
@@ -123,6 +132,12 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
       return configRef.current;
     }
   }, [applyConfig]);
+
+  // Shared refresh signal. Consumers key effects on the nonce; bumping it is
+  // cheap and side-effect-free beyond re-running those effects.
+  const bumpRefresh = useCallback(() => {
+    setRefreshNonce((n) => n + 1);
+  }, []);
 
   const updateConfig = useCallback(
     (partial: Partial<LauncherConfig>): Promise<void> => {
@@ -194,6 +209,8 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
     config,
     updateConfig,
     refreshConfig,
+    refreshNonce,
+    bumpRefresh,
     loggedIn,
     username,
     avatarUrl,

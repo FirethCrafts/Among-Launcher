@@ -95,7 +95,8 @@ export default function App() {
 }
 
 function AppShell() {
-  const { config, loggedIn, username, avatarUrl, login } = useLauncher();
+  const { config, loggedIn, username, avatarUrl, login, refreshNonce, bumpRefresh } =
+    useLauncher();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -377,6 +378,35 @@ function AppShell() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Shared refresh signal: any surface that mutated backend state (UpdateModal
+  // finishing an AmongApi update, an install completing) bumps
+  // `refreshNonce`. Re-check the mod status so Home's version row and Play
+  // gate reflect reality without waiting for a modal to close. The ref skips
+  // the initial value so this only fires on an actual bump.
+  const handledRefreshNonce = useRef(0);
+  useEffect(() => {
+    if (refreshNonce === handledRefreshNonce.current) return;
+    handledRefreshNonce.current = refreshNonce;
+    void refreshModStatus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshNonce]);
+
+  // A completed install changes installed mods / config backend-side. Bump the
+  // shared signal so any mounted page re-fetches. `update_among_api` reports on
+  // its own `update-progress` event (UpdateModal bumps on success), so this
+  // deliberately does not duplicate that.
+  useEffect(() => {
+    const unlisten = listen<{ stage?: string } | null>(
+      "install-progress",
+      (event) => {
+        if (event.payload?.stage === "complete") bumpRefresh();
+      }
+    );
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, [bumpRefresh]);
 
   // Launcher self-update check: runs once at mount REGARDLESS of login,
   // fully independent of the mod check above (own ref, own effect, own

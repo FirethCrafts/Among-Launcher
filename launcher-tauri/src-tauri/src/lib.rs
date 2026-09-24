@@ -1259,57 +1259,95 @@ async fn import_mod(game_path: String, mod_paths: Vec<String>) -> Result<(), Lau
     .map_err(|e| LauncherError::InstallFailed(format!("Task join error: {}", e)))?
 }
 
+/// PIDs of every running `Among Us.exe`, probed via `tasklist`.
+///
+/// Shared by `stop_game` (which kills them) and `is_game_running` (which only
+/// reports presence) so both use the exact same probe. A non-Windows target
+/// has no `tasklist`, so it reports no PIDs.
+#[cfg(target_os = "windows")]
+fn among_us_pids() -> Result<Vec<u32>, LauncherError> {
+    use std::process::Command;
+    let output = Command::new("tasklist")
+        .args(["/FI", "IMAGENAME eq Among Us.exe", "/FO", "CSV", "/NH"])
+        .output()
+        .map_err(|e| LauncherError::InstallFailed(format!("Failed to run tasklist: {}", e)))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        eprintln!("[among_us_pids] tasklist failed: {}", stderr);
+        return Err(LauncherError::InstallFailed(format!(
+            "tasklist exited with code {:?}",
+            output.status.code()
+        )));
+    }
+
+    Ok(parse_among_us_pids(&String::from_utf8_lossy(&output.stdout)))
+}
+
+#[cfg(not(target_os = "windows"))]
+fn among_us_pids() -> Result<Vec<u32>, LauncherError> {
+    Ok(Vec::new())
+}
+
+/// Parse `tasklist /FO CSV /NH` output into the PIDs of its `Among Us.exe`
+/// rows. Pure so it can be unit-tested without spawning `tasklist`: rows that
+/// don't name the game (including tasklist's "INFO: No tasks…" text) and rows
+/// whose PID column isn't a valid `u32` are skipped.
+fn parse_among_us_pids(stdout: &str) -> Vec<u32> {
+    stdout
+        .lines()
+        .filter(|line| line.contains("Among Us.exe"))
+        .filter_map(|line| {
+            line.split(',')
+                .nth(1)
+                .and_then(|s| s.trim_matches('"').parse::<u32>().ok())
+        })
+        .collect()
+}
+
+/// Whether `Among Us.exe` is currently running. A probe failure is an error
+/// (so a caller can never mistake "couldn't check" for "not running").
+fn among_us_running() -> Result<bool, LauncherError> {
+    Ok(!among_us_pids()?.is_empty())
+}
+
+/// Whether the game process is currently running. Lets the UI reconcile its
+/// component-local "running" state after a remount instead of assuming the
+/// game was stopped.
+#[tauri::command]
+async fn is_game_running() -> Result<bool, LauncherError> {
+    tokio::task::spawn_blocking(among_us_running)
+        .await
+        .map_err(|e| LauncherError::InstallFailed(format!("Task join error: {}", e)))?
+}
+
 #[tauri::command]
 async fn stop_game(app: AppHandle) -> Result<(), LauncherError> {
     #[cfg(target_os = "windows")]
     {
         tokio::task::spawn_blocking(|| -> Result<(), LauncherError> {
             use std::process::Command;
-            let output = Command::new("tasklist")
-                .args(["/FI", "IMAGENAME eq Among Us.exe", "/FO", "CSV", "/NH"])
-                .output()
-                .map_err(|e| LauncherError::InstallFailed(format!("Failed to run tasklist: {}", e)))?;
-
-            if !output.status.success() {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                eprintln!("[stop_game] tasklist failed: {}", stderr);
-                return Err(LauncherError::InstallFailed(format!(
-                    "tasklist exited with code {:?}",
-                    output.status.code()
-                )));
-            }
-
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            let mut killed = false;
-            for line in stdout.lines() {
-                if line.contains("Among Us.exe") {
-                    let pid = line
-                        .split(',')
-                        .nth(1)
-                        .and_then(|s| s.trim_matches('"').parse::<u32>().ok());
-                    if let Some(pid) = pid {
-                        let kill_output = Command::new("taskkill")
-                            .args(["/PID", &pid.to_string(), "/F"])
-                            .output()
-                            .map_err(|e| LauncherError::InstallFailed(format!("Failed to kill process: {}", e)))?;
-
-                        if !kill_output.status.success() {
-                            let stderr = String::from_utf8_lossy(&kill_output.stderr);
-                            eprintln!(
-                                "[stop_game] taskkill /PID {} failed: {}",
-                                pid, stderr
-                            );
-                            return Err(LauncherError::InstallFailed(format!(
-                                "taskkill failed for PID {}: {}",
-                                pid, stderr
-                            )));
-                        }
-                        killed = true;
-                    }
-                }
-            }
-            if !killed {
+            let pids = among_us_pids()?;
+            if pids.is_empty() {
                 eprintln!("[stop_game] Among Us.exe not found in process list");
+            }
+            for pid in pids {
+                let kill_output = Command::new("taskkill")
+                    .args(["/PID", &pid.to_string(), "/F"])
+                    .output()
+                    .map_err(|e| LauncherError::InstallFailed(format!("Failed to kill process: {}", e)))?;
+
+                if !kill_output.status.success() {
+                    let stderr = String::from_utf8_lossy(&kill_output.stderr);
+                    eprintln!(
+                        "[stop_game] taskkill /PID {} failed: {}",
+                        pid, stderr
+                    );
+                    return Err(LauncherError::InstallFailed(format!(
+                        "taskkill failed for PID {}: {}",
+                        pid, stderr
+                    )));
+                }
             }
             Ok(())
         })
@@ -2222,15 +2260,31 @@ fn post_still_valid(state_code: Option<&str>, posted_code: &str) -> bool {
     state_code == Some(posted_code)
 }
 
+/// Reject a missing/blank host *before* the HTTP call. The backend's
+/// `LobbyCreate` requires `host: str`, so posting without one can only ever
+/// 422 — an empty host means the game has not reported a real host name yet.
+fn require_host(host: Option<&str>) -> Result<String, LauncherError> {
+    let host = host.unwrap_or_default();
+    if host.trim().is_empty() {
+        return Err(LauncherError::Lobby(
+            "No host name available — make sure the game is connected".into(),
+        ));
+    }
+    Ok(host.to_string())
+}
+
 #[tauri::command]
 async fn post_lobby(app: AppHandle, state: State<'_, AppState>) -> Result<(), LauncherError> {
-    let (code, region, max_players, region_ip, region_port, token) = {
+    let (code, region, host, max_players, region_ip, region_port, map_name, token) = {
         let config = state.config.read().await;
         let lobby = state.lobby_state.read().await;
         let code = lobby
             .code
             .clone()
             .ok_or_else(|| LauncherError::Lobby("No lobby to post".into()))?;
+        // Fail fast with an actionable message instead of sending a request
+        // the backend will reject (see `require_host`).
+        let host = require_host(lobby.host.as_deref())?;
         let token = config
             .discord_access_token
             .clone();
@@ -2240,16 +2294,32 @@ async fn post_lobby(app: AppHandle, state: State<'_, AppState>) -> Result<(), La
         (
             code,
             lobby.region.clone().unwrap_or_else(|| "NA".into()),
+            host,
             lobby.max_players.unwrap_or(10),
             lobby.region_ip.clone(),
             lobby.region_port,
+            lobby.map.clone(),
             token,
         )
     };
 
     let client = lobby_backend::LobbyBackendClient::new(token.clone());
+    // `mod_type` is always "modded": this launcher only hosts from its
+    // BepInEx + AmongApi install. `status` is the backend's own default,
+    // sent explicitly for clarity. Both match the backend's patterns
+    // (`^(modded|vanilla)$` / `^(lobby|in_game)$`).
     client
-        .create_lobby(&code, &region, max_players, region_ip.as_deref(), region_port)
+        .create_lobby(
+            &code,
+            &region,
+            &host,
+            max_players,
+            region_ip.as_deref(),
+            region_port,
+            lobby_backend::MOD_TYPE_MODDED,
+            lobby_backend::STATUS_LOBBY,
+            map_name.as_deref(),
+        )
         .await?;
 
     {
@@ -2707,6 +2777,7 @@ pub fn run() {
             install_game,
             launch_game,
             stop_game,
+            is_game_running,
             get_mods,
             get_filesystem_mods,
             import_mod,
@@ -3073,6 +3144,26 @@ mod post_lobby_tests {
     }
 
     #[test]
+    fn require_host_accepts_a_real_host_name() {
+        assert_eq!(require_host(Some("HostPlayer")).unwrap(), "HostPlayer");
+    }
+
+    #[test]
+    fn require_host_rejects_missing_host() {
+        // `lobby_state.host` is None until `lobby_created` reports a name.
+        let err = require_host(None).unwrap_err();
+        assert!(matches!(err, LauncherError::Lobby(_)));
+        assert!(err.to_string().contains("No host name available"));
+    }
+
+    #[test]
+    fn require_host_rejects_blank_host() {
+        // Whitespace-only is as useless to the backend as empty.
+        assert!(require_host(Some("")).is_err());
+        assert!(require_host(Some("   ")).is_err());
+    }
+
+    #[test]
     fn join_payload_uses_camel_case_keys_with_endpoint() {
         let payload = join_payload(
             "AB12CD",
@@ -3339,5 +3430,53 @@ mod launch_gate_tests {
                 reason
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod among_us_tests {
+    use super::*;
+
+    // `tasklist /FO CSV /NH` emits one quoted CSV row per match. The real
+    // probe can't be unit-tested (it spawns a process), so the pure parsing —
+    // the part that decides "not found = false" — is exercised here.
+
+    #[test]
+    fn parses_running_pid_from_csv_row() {
+        let stdout = "\"Among Us.exe\",\"1234\",\"Console\",\"1\",\"123,456 K\"\r\n";
+        assert_eq!(parse_among_us_pids(stdout), vec![1234]);
+    }
+
+    #[test]
+    fn not_found_text_yields_no_pids() {
+        // This is exactly what tasklist prints when nothing matches — the
+        // case `is_game_running` must report as `false`.
+        let stdout =
+            "INFO: No tasks are running which match the specified criteria.\r\n";
+        assert!(parse_among_us_pids(stdout).is_empty());
+        assert!(!among_us_running_from_stdout(stdout));
+    }
+
+    #[test]
+    fn parses_multiple_matching_rows_in_order() {
+        let stdout = concat!(
+            "\"Among Us.exe\",\"111\",\"Console\",\"1\",\"10 K\"\r\n",
+            "\"Among Us.exe\",\"222\",\"Console\",\"1\",\"10 K\"\r\n",
+        );
+        assert_eq!(parse_among_us_pids(stdout), vec![111, 222]);
+    }
+
+    #[test]
+    fn ignores_other_processes_and_malformed_pids() {
+        let stdout = concat!(
+            "\"AmongUsHelper.exe\",\"999\",\"Console\",\"1\",\"10 K\"\r\n",
+            "\"Among Us.exe\",\"not-a-pid\",\"Console\",\"1\",\"10 K\"\r\n",
+        );
+        assert!(parse_among_us_pids(stdout).is_empty());
+    }
+
+    /// The pure predicate `among_us_running` applies to probe output.
+    fn among_us_running_from_stdout(stdout: &str) -> bool {
+        !parse_among_us_pids(stdout).is_empty()
     }
 }

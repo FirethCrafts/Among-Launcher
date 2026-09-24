@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -91,11 +91,15 @@ export default function HomeView({
   onRequireModUpdate,
 }: HomeViewProps) {
   const navigate = useNavigate();
-  const { config } = useLauncher();
+  const { config, refreshConfig, refreshNonce, bumpRefresh } = useLauncher();
   const [gamePath, setGamePath] = useState<string | null>(null);
   const [storefront, setStorefront] = useState<string | null>(null);
   const [detected, setDetected] = useState<GameSearchResult | null>(null);
   const [isRunning, setIsRunning] = useState(false);
+  // Set true as soon as a launch is attempted this mount, so a slow
+  // `is_game_running` probe that resolves afterwards can never clobber the
+  // newer optimistic "running" state.
+  const launchedRef = useRef(false);
   const [bepinexInstalled, setBepinexInstalled] = useState(false);
   const [amongApiInstalled, setAmongApiInstalled] = useState(false);
   const [mods, setMods] = useState<ModEntry[]>([]);
@@ -139,6 +143,26 @@ export default function HomeView({
     };
   }, []);
 
+  // Reconcile the "running" state with the actual process on mount: `isRunning`
+  // is component-local and App remounts this page on every route change, so
+  // returning to Home used to reset it to false and show "Play" while the game
+  // was still running. The probe is best-effort — a failure leaves the local
+  // state alone — and `launchedRef` keeps a slow probe from overwriting a
+  // launch that happened while it was in flight.
+  useEffect(() => {
+    let cancelled = false;
+    invoke<boolean>("is_game_running")
+      .then((running) => {
+        if (!cancelled && !launchedRef.current) setIsRunning(running);
+      })
+      .catch(() => {
+        // Nothing to do: keep the optimistic/local state.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // Derive path + storefront from the shared config (context) plus local
   // detection fallback — no per-page read_config/whole-object write.
   useEffect(() => {
@@ -157,6 +181,18 @@ export default function HomeView({
       loadMods();
     }
   }, [gamePath]);
+
+  // Shared refresh signal: re-pull mods + install status when another surface
+  // (UpdateModal, an install completing, the manual Refresh button) reports
+  // backend state changed. Guarded on `gamePath` so it can't fire before
+  // config resolves. Deliberately NOT keyed on `modStatus` — that changes on
+  // every modal close and would turn this into a fetch loop.
+  useEffect(() => {
+    if (!gamePath) return;
+    void loadMods();
+    void checkInstallStatus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshNonce]);
 
   async function checkInstallStatus() {
     if (!gamePath) return;
@@ -194,6 +230,9 @@ export default function HomeView({
     if (!gamePath) return;
     try {
       await invoke("launch_game", { gamePath });
+      // Remember a successful launch so the mount probe can't later report
+      // "not running" over this newer truth.
+      launchedRef.current = true;
       setIsRunning(true);
     } catch (e) {
       // `launch_game` now rejects when the mod isn't current — surface the
@@ -247,9 +286,19 @@ export default function HomeView({
     try {
       await invoke("add_to_library", { sourcePath: mod.path });
       showToast(`Saved ${mod.filename} to library`, "success");
+      // `add_to_library` mutates config.library backend-side; re-read so the
+      // "From Library" button/count isn't stale.
+      await refreshConfig();
     } catch {
       showToast("Failed to save mod to library", "error");
     }
+  }
+
+  /** Manual Refresh: re-pull config + mods + install status for this page. */
+  function refreshAll() {
+    void refreshConfig();
+    // Also re-run the nonce effect (mods + install status) with fresh state.
+    bumpRefresh();
   }
 
   const isReady = !!gamePath && bepinexInstalled && amongApiInstalled;
@@ -317,7 +366,24 @@ export default function HomeView({
 
   return (
     <div className="min-h-full space-y-6 pb-6">
-      <PageHeader title="Home" actions={statusPill} />
+      <PageHeader
+        title="Home"
+        actions={
+          <>
+            {statusPill}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={refreshAll}
+              title="Refresh"
+              aria-label="Refresh"
+            >
+              <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+              Refresh
+            </Button>
+          </>
+        }
+      />
 
       <div className="space-y-6 px-6">
       {loading ? (
@@ -525,7 +591,12 @@ export default function HomeView({
               isOpen={libraryPickerOpen}
               onClose={() => setLibraryPickerOpen(false)}
               gamePath={gamePath}
-              onInstalled={loadMods}
+              onInstalled={() => {
+                void loadMods();
+                // `install_from_library` mutates config.profiles backend-side;
+                // re-read so other pages don't write stale data back.
+                void refreshConfig();
+              }}
             />
           </section>
 
