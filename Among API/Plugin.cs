@@ -602,6 +602,12 @@ public class Plugin : BasePlugin
 
     private static void LeaveLobby()
     {
+        if (!GameAssembly.InLobby())
+        {
+            FileLogger.Info("[Plugin] Not in a lobby; skipping ExitGame.");
+            return;
+        }
+
         try
         {
             var client = GameAssembly.AmongUsClient();

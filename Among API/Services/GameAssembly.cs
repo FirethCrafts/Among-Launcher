@@ -539,20 +539,25 @@ public static class GameAssembly
 
     public static bool InLobby()
     {
-        var lobbyBehaviour = Type("LobbyBehaviour");
-        if (GetStaticMember(lobbyBehaviour, "Instance") != null)
-            return true;
-
         var client = AmongUsClient();
         if (client == null)
             return false;
 
         var gameStateEnum = Type("InnerNet.InnerNetClient")?.GetNestedType("GameStates");
         var state = GetInstanceProp(client, "GameState");
-        if (!EnumEquals(state, EnumValue(gameStateEnum, "Joined")))
+
+        // At the main menu the client is NotJoined. LobbyBehaviour.Instance is a
+        // static the game never nulls on destroy (and a destroyed Il2Cpp object is
+        // a non-null managed wrapper), so it must never win over GameState.
+        if (EnumEquals(state, EnumValue(gameStateEnum, "NotJoined")))
             return false;
 
-        return ToBool(GetInstanceProp(client, "InOnlineScene"));
+        var lobbyBehaviour = Type("LobbyBehaviour");
+        if (GetStaticMember(lobbyBehaviour, "Instance") != null)
+            return true;
+
+        return EnumEquals(state, EnumValue(gameStateEnum, "Joined"))
+            && ToBool(GetInstanceProp(client, "InOnlineScene"));
     }
 
     public static object? AmongUsClient() => GetStaticMember(Type("AmongUsClient"), "Instance");

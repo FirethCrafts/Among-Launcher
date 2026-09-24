@@ -382,6 +382,7 @@ public class LobbyJoiner : IDisposable
     {
         var start = DateTimeOffset.UtcNow;
         var deadline = start.AddMilliseconds(LeaveWaitTimeoutMs);
+        bool left = false;
 
         while (DateTimeOffset.UtcNow < deadline)
         {
@@ -399,10 +400,21 @@ public class LobbyJoiner : IDisposable
             }
 
             if (!inLobby)
+            {
+                left = true;
                 break;
+            }
 
             try { await Task.Delay(LeavePollIntervalMs, ct); }
             catch (OperationCanceledException) { return false; }
+        }
+
+        // Timed out with the client still reporting in-lobby: the leave was not
+        // verified, so report failure instead of silently proceeding with a join.
+        if (!left)
+        {
+            FileLogger.Warn("[LobbyJoiner] WaitForLeft timed out; client still reports in-lobby.");
+            return false;
         }
 
         var elapsedMs = (int)(DateTimeOffset.UtcNow - start).TotalMilliseconds;
@@ -413,7 +425,7 @@ public class LobbyJoiner : IDisposable
             catch (OperationCanceledException) { return false; }
         }
 
-        return !ct.IsCancellationRequested;
+        return true;
     }
 
     private async Task<bool> WaitForGameReady(CancellationToken ct)
@@ -627,6 +639,12 @@ public class LobbyJoiner : IDisposable
 
     private void LeaveLobby()
     {
+        if (!GameAssembly.InLobby())
+        {
+            FileLogger.Info("[LobbyJoiner] Not in a lobby; skipping ExitGame.");
+            return;
+        }
+
         try
         {
             var client = GameAssembly.AmongUsClient();
