@@ -501,6 +501,14 @@ function AppShell() {
   async function refreshModStatus() {
     const status = (await fetchModStatus()) ?? UNKNOWN_MOD_STATUS;
     setModStatus(status);
+    // A successful update (or an externally fixed install) must never leave a
+    // stale forced prompt covering the UI. Only CLEAR on `current`; this path
+    // never opens the modal, so it cannot loop with the update check.
+    if (status.status === "current") {
+      setShowUpdateModal(false);
+      setModForce(false);
+      setModReason(null);
+    }
   }
 
   // `mod-incompatible` is emitted when the in-game mod reports an unexpected
@@ -699,6 +707,15 @@ function AppShell() {
             updateInfo={updateInfo}
             force={modForce}
             reason={modReason}
+            onUpdated={() => {
+              // The AmongApi update landed: close the (possibly forced) prompt
+              // and clear the force flag immediately, then re-check so Home's
+              // version row / Play gate are correct without a restart.
+              setShowUpdateModal(false);
+              setModForce(false);
+              setModReason(null);
+              void refreshModStatus();
+            }}
           />
         )}
         <ToastHost />

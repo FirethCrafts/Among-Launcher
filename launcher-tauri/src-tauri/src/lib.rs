@@ -1071,6 +1071,9 @@ async fn install_game(
     installer::download_bepinex(&dest, &storefront, &app).await?;
 
     installer::download_among_api(&dest, &app).await?;
+    // The verify-then-install path may have replaced a previously mismarked
+    // DLL; drop any cached verdict for the old file.
+    version_checker::invalidate_mod_status(&state);
 
     if storefront == "steam" {
         let dest_path = dest.clone();
@@ -1857,66 +1860,29 @@ async fn update_among_api(
         let config = state.config.read().await;
         config.effective_modded_path()
     };
-    let plugins_dir = Path::new(&dest_dir).join("BepInEx").join("Plugins");
-    let dest = plugins_dir.join("AmongApi.dll");
+
+    // Resolve the latest `mod/` release, download it, verify it (length →
+    // SHA-256 → PE FileVersion) and only then atomically install it. The
+    // frontend-supplied `download_url` is advisory: the resolved asset URL is
+    // authoritative, and the expected digest/version come from GitHub, never
+    // from the caller. Retries "not ready" (release still publishing) with a
+    // bounded budget; progress is emitted as `update-progress`.
+    installer::install_verified_among_api(
+        &dest_dir,
+        &app,
+        "update-progress",
+        Some(&download_url),
+    )
+    .await?;
+
+    // A previously-cached verdict (e.g. `incompatible`) describes the OLD DLL.
+    // Drop it so the freshly verified install is re-evaluated instead of being
+    // re-flagged by the stale cache (the mismarked-install case).
+    version_checker::invalidate_mod_status(&state);
 
     let _ = app.emit(
         "update-progress",
-        serde_json::json!({ "stage": "downloading", "progress": 0, "total": 0 }),
-    );
-
-    let client = reqwest::Client::builder()
-        .user_agent("among-launcher")
-        .build()
-        .map_err(|e| LauncherError::Network(e.to_string()))?;
-    let resp = client
-        .get(&download_url)
-        .send()
-        .await
-        .map_err(|e| LauncherError::Network(e.to_string()))?
-        .error_for_status()
-        .map_err(|e| LauncherError::Network(e.to_string()))?;
-
-    let total = resp.content_length().unwrap_or(0);
-    let mut downloaded: u64 = 0;
-    let mut bytes = Vec::new();
-    let mut stream = resp.bytes_stream();
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|e| LauncherError::Network(e.to_string()))?;
-        downloaded += chunk.len() as u64;
-        bytes.extend_from_slice(&chunk);
-        let _ = app.emit(
-            "update-progress",
-            serde_json::json!({ "stage": "downloading", "progress": downloaded, "total": total }),
-        );
-    }
-
-    let _ = app.emit(
-        "update-progress",
-        serde_json::json!({ "stage": "installing", "progress": downloaded, "total": total }),
-    );
-
-    if let Some(parent) = dest.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| LauncherError::Filesystem(e.to_string()))?;
-    }
-
-    let tmp_path = dest.with_extension("tmp");
-    if let Err(e) = std::fs::write(&tmp_path, &bytes) {
-        return Err(LauncherError::Filesystem(format!(
-            "Close the game and try again: {}",
-            e
-        )));
-    }
-    if let Err(e) = std::fs::rename(&tmp_path, &dest) {
-        return Err(LauncherError::Filesystem(format!(
-            "Close the game and try again: {}",
-            e
-        )));
-    }
-
-    let _ = app.emit(
-        "update-progress",
-        serde_json::json!({ "stage": "complete", "progress": downloaded, "total": total }),
+        serde_json::json!({ "stage": "complete", "progress": 1, "total": 1 }),
     );
     Ok("Updated".to_string())
 }

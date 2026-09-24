@@ -25,12 +25,22 @@ interface UpdateModalProps {
   force?: boolean;
   /** Extra context (e.g. the mod-incompatible reason) shown above the versions. */
   reason?: string | null;
+  /**
+   * Called after `update_among_api` succeeds. The parent uses this to close the
+   * modal and clear the forced flag, so the prompt disappears and Play is
+   * enabled without an app restart.
+   */
+  onUpdated?: () => void;
 }
 
 interface UpdateProgress {
-  stage: "downloading" | "installing" | "complete";
+  stage: "downloading" | "installing" | "complete" | "waiting";
   progress: number;
   total: number;
+  /** Present on `waiting` events: retry attempt number. */
+  attempt?: number;
+  /** Present on `waiting` events: total number of attempts. */
+  of?: number;
 }
 
 type Status = "idle" | "updating" | "done" | "error";
@@ -47,6 +57,7 @@ export function UpdateModal({
   updateInfo,
   force = false,
   reason = null,
+  onUpdated,
 }: UpdateModalProps) {
   const [status, setStatus] = useState<Status>("idle");
   const [progressText, setProgressText] = useState("");
@@ -60,7 +71,7 @@ export function UpdateModal({
     setProgressText("");
     setError("");
     const unlisten = listen<UpdateProgress>("update-progress", (event) => {
-      const { stage, progress, total } = event.payload;
+      const { stage, progress, total, attempt, of } = event.payload;
       if (stage === "downloading") {
         if (total > 0) {
           const pct = Math.round((progress / total) * 100);
@@ -72,6 +83,15 @@ export function UpdateModal({
         setProgressText("Installing...");
       } else if (stage === "complete") {
         setProgressText("Complete");
+      } else if (stage === "waiting") {
+        // The GitHub release exists but its asset isn't published/correct yet;
+        // the backend retries for a while. Reflect that instead of showing a
+        // generic "Downloading..." message.
+        setProgressText(
+          typeof attempt === "number" && typeof of === "number"
+            ? `Waiting for the release to be published… (attempt ${attempt} of ${of})`
+            : "Waiting for the release to be published…"
+        );
       }
     });
     return () => {
@@ -93,6 +113,10 @@ export function UpdateModal({
       bumpRefresh();
       setStatus("done");
       setProgressText("");
+      // The install replaced AmongApi.dll: tell the parent to close this
+      // (possibly forced) prompt and clear the force flag, so the UI is no
+      // longer covered and Play becomes enabled without an app restart.
+      onUpdated?.();
     } catch (e) {
       setStatus("error");
       setError(formatError(e));
