@@ -11,7 +11,14 @@ pub struct LobbyBackendClient {
 /// returned (flat snake_case) by `GET /api/v1/lobby/{code}/details`.
 /// The launcher forwards these to the game's `join_lobby` IPC handler so
 /// joiners can reach the host's region server directly.
-#[derive(Debug, Clone, serde::Deserialize)]
+///
+/// The first three fields are what the join payload needs. The remaining
+/// three mirror the richer parts of the backend's `LobbyDetailedResponse`
+/// (`status`, `max_players`, `players`) that the joinability pre-check reads.
+/// All are `Option` + `#[serde(default)]`: a response that omits them (or an
+/// older backend) must still parse, and a missing value must never be
+/// mistaken for a "full"/"started" lobby.
+#[derive(Debug, Clone, Default, serde::Deserialize)]
 pub struct LobbyEndpoint {
     #[serde(default)]
     pub region: Option<String>,
@@ -19,6 +26,50 @@ pub struct LobbyEndpoint {
     pub region_ip: Option<String>,
     #[serde(default)]
     pub region_port: Option<u32>,
+    /// Backend `LobbyDetailedResponse.status` — `"lobby"` or `"in_game"`.
+    #[serde(default)]
+    pub status: Option<String>,
+    /// Backend `LobbyDetailedResponse.max_players`.
+    #[serde(default)]
+    pub max_players: Option<u32>,
+    /// Backend `LobbyDetailedResponse.players` roster. Kept as raw JSON
+    /// values (only the count is used for the full check) so the launcher
+    /// does not couple to the exact `PlayerInfo` shape.
+    #[serde(default)]
+    pub players: Option<Vec<serde_json::Value>>,
+}
+
+/// Decide whether a backend-known lobby must be blocked from joining.
+///
+/// Returns `Some(message)` when the join must be refused, `None` when it is
+/// allowed. Pure so the policy (and its exact wording) is unit-tested without
+/// a network round-trip. Callers only invoke this for an endpoint that came
+/// back from the backend (`Ok(Some(ep))`); a 404 (`Ok(None)`) or a network
+/// error is never routed here — those fall through to the join.
+///
+/// Policy:
+/// - **Full** — only when BOTH the roster and `max_players` are present; a
+///   missing either way must not fabricate a "full" verdict.
+/// - **Started** — `status == "in_game"`. This is the user's explicit
+///   request. Note the tradeoff: Among Us itself permits joining in-progress
+///   games, so this deliberately refuses a join the game would accept. It is
+///   a product decision, not a technical limitation.
+pub(crate) fn join_block_reason(ep: &LobbyEndpoint) -> Option<String> {
+    if let (Some(players), Some(max)) = (&ep.players, ep.max_players) {
+        if players.len() >= max as usize {
+            return Some(format!(
+                "That lobby is full ({}/{}) — try another",
+                players.len(),
+                max
+            ));
+        }
+    }
+
+    if ep.status.as_deref() == Some("in_game") {
+        return Some("That lobby has already started — try another".to_string());
+    }
+
+    None
 }
 
 /// `mod_type` this launcher always posts. It only ever hosts from its own
@@ -442,5 +493,105 @@ mod tests {
         assert!(payload.get("chat_type").is_none());
         assert!(payload.get("mods").is_none());
         assert!(payload.get("players").is_some());
+    }
+
+    /// Build an endpoint carrying `n` placeholder players and the given
+    /// `max`/`status`, leaving the region fields at their defaults.
+    fn endpoint_with(
+        players: Option<usize>,
+        max_players: Option<u32>,
+        status: Option<&str>,
+    ) -> LobbyEndpoint {
+        LobbyEndpoint {
+            players: players.map(|n| {
+                (0..n)
+                    .map(|i| serde_json::json!({ "name": format!("P{}", i) }))
+                    .collect()
+            }),
+            max_players,
+            status: status.map(str::to_string),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn join_block_reason_blocks_a_full_lobby() {
+        let ep = endpoint_with(Some(10), Some(10), Some("lobby")); // exactly full
+        let reason = join_block_reason(&ep).expect("full lobby must block");
+        assert!(reason.contains("full"));
+        // The message names the counts so the user can tell why.
+        assert!(reason.contains("(10/10)"), "message was: {}", reason);
+
+        // Over capacity is also full (roster outran a stale max).
+        let over = endpoint_with(Some(11), Some(10), None);
+        assert!(join_block_reason(&over).unwrap().contains("(11/10)"));
+    }
+
+    #[test]
+    fn join_block_reason_allows_a_lobby_with_room() {
+        let ep = endpoint_with(Some(3), Some(10), Some("lobby"));
+        assert_eq!(join_block_reason(&ep), None);
+    }
+
+    #[test]
+    fn join_block_reason_blocks_an_in_game_lobby() {
+        let ep = endpoint_with(Some(3), Some(10), Some("in_game"));
+        let reason = join_block_reason(&ep).expect("started lobby must block");
+        assert!(reason.contains("already started"), "message was: {}", reason);
+    }
+
+    #[test]
+    fn join_block_reason_allows_a_joinable_lobby() {
+        // status "lobby" (not in_game), room to spare → allowed.
+        let ep = endpoint_with(Some(2), Some(10), Some("lobby"));
+        assert_eq!(join_block_reason(&ep), None);
+    }
+
+    #[test]
+    fn join_block_reason_never_blocks_on_missing_counts() {
+        // Missing max_players: cannot decide "full" → allow.
+        assert_eq!(join_block_reason(&endpoint_with(Some(10), None, None)), None);
+        // Missing roster: cannot decide "full" → allow.
+        assert_eq!(join_block_reason(&endpoint_with(None, Some(10), None)), None);
+        // Missing status: cannot decide "started" → allow.
+        assert_eq!(join_block_reason(&endpoint_with(Some(3), Some(10), None)), None);
+        // Nothing at all: still joinable.
+        assert_eq!(join_block_reason(&endpoint_with(None, None, None)), None);
+    }
+
+    #[test]
+    fn join_block_reason_full_takes_precedence_over_started() {
+        // Both apply: the full message is returned (checked first).
+        let ep = endpoint_with(Some(10), Some(10), Some("in_game"));
+        assert!(join_block_reason(&ep).unwrap().contains("full"));
+    }
+
+    #[test]
+    fn lobby_endpoint_deserializes_rich_details_and_defaults_missing() {
+        // Exact (flat) shape of the backend's `LobbyDetailedResponse`.
+        let json = serde_json::json!({
+            "region": "NA",
+            "region_ip": "1.2.3.4",
+            "region_port": 22023,
+            "status": "in_game",
+            "max_players": 10,
+            "players": [{"id": "a", "name": "A"}],
+        });
+        let ep: LobbyEndpoint = serde_json::from_value(json).unwrap();
+        assert_eq!(ep.region.as_deref(), Some("NA"));
+        assert_eq!(ep.status.as_deref(), Some("in_game"));
+        assert_eq!(ep.max_players, Some(10));
+        assert_eq!(ep.players.as_ref().map(|p| p.len()), Some(1));
+
+        // A minimal/older response parses too, with the rich fields `None`
+        // (so it can never be blocked).
+        let minimal: LobbyEndpoint = serde_json::from_value(serde_json::json!({
+            "region": "EU"
+        }))
+        .unwrap();
+        assert_eq!(minimal.status, None);
+        assert_eq!(minimal.max_players, None);
+        assert_eq!(minimal.players, None);
+        assert_eq!(join_block_reason(&minimal), None);
     }
 }

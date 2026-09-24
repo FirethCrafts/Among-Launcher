@@ -309,6 +309,12 @@ export default function HomeView({
     modStatus.status === "current" ||
     modStatus.status === "unknown";
   const canPlay = isReady && modReady;
+  // A definitively non-current mod (`outdated`/`incompatible`) wins the hero
+  // copy — the update is actionable even before setup is fully complete.
+  // `unknown`/null deliberately do NOT count (they stay playable; see
+  // `modReady`), and this must not feed `canPlay`/the Play gate.
+  const needsModUpdate =
+    modStatus?.status === "outdated" || modStatus?.status === "incompatible";
   const libraryCount = config?.library.length ?? 0;
 
   // AmongApi status-strip chip: prefer the richer version status over the
@@ -360,7 +366,7 @@ export default function HomeView({
     </Badge>
   ) : (
     <Badge variant="warning" showDot dotColor="warning">
-      {isReady ? "Update Required" : "Incomplete"}
+      {isReady ? "Update Needed" : "Incomplete"}
     </Badge>
   );
 
@@ -419,17 +425,17 @@ export default function HomeView({
                 </div>
                 <div className="min-w-0 space-y-1">
                   <h2 className="text-xl font-bold tracking-tight">
-                    {canPlay
-                      ? "Game Ready"
-                      : isReady
-                        ? "Update Required"
+                    {needsModUpdate
+                      ? "Update Needed"
+                      : canPlay
+                        ? "Game Ready"
                         : "Setup Needed"}
                   </h2>
                   <p className="text-13 text-muted-foreground">
-                    {canPlay
-                      ? "Everything is set up. Jump into a lobby."
-                      : isReady
-                        ? "AmongApi needs updating before you can play."
+                    {needsModUpdate
+                      ? "AmongApi needs updating before you can play."
+                      : canPlay
+                        ? "Everything is set up. Jump into a lobby."
                         : "Finish installing Among Us + BepInEx to play."}
                   </p>
                 </div>

@@ -11,7 +11,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { PageHeader } from "@/components/ui/page-header";
 import { SectionHeader } from "@/components/ui/section-header";
 import { showToast, formatError } from "@/components/Toast";
-import { Users, Hash, Copy, Check, Trash2, UserMinus, Globe, Gamepad2, Crown } from "lucide-react";
+import { Users, Hash, Copy, Check, Trash2, UserMinus, Globe, Gamepad2, Crown, Link } from "lucide-react";
 
 interface Player {
   name: string;
@@ -66,6 +66,9 @@ export default function HostControlPanelView() {
   const [isHost, setIsHost] = useState<boolean | null>(null);
   const [heartbeatOk, setHeartbeatOk] = useState(false);
   const [copied, setCopied] = useState(false);
+  // Separate confirmation state for the invite-link action so the two copy
+  // buttons don't flash each other's check.
+  const [linkCopied, setLinkCopied] = useState(false);
   const [loading, setLoading] = useState(false);
   const [confirmDisband, setConfirmDisband] = useState(false);
   const [kickTarget, setKickTarget] = useState<string | null>(null);
@@ -221,6 +224,20 @@ export default function HostControlPanelView() {
     }
   }
 
+  /** Copy the shareable deep link (`parse_deep_link` accepts this form). */
+  async function copyInviteLink() {
+    if (!lobbyInfo?.code) return;
+    try {
+      await navigator.clipboard.writeText(
+        `amonglauncher://join?code=${lobbyInfo.code}`
+      );
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 2000);
+    } catch (e) {
+      console.error("Failed to copy invite link:", e);
+    }
+  }
+
   async function handlePostLobby() {
     setLoading(true);
     // This handler commits `posted` in BOTH outcomes — claim the gate before
@@ -326,11 +343,28 @@ export default function HostControlPanelView() {
                 post, kick players, or disband it.
               </p>
               {lobbyInfo.code && (
-                <div className="flex items-center justify-between rounded-control border border-border bg-surface-2 px-4 py-3">
+                <div className="flex items-center justify-between gap-2 rounded-control border border-border bg-surface-2 px-4 py-3">
                   <span className="text-13 text-muted-foreground">Lobby Code</span>
-                  <span className="font-mono text-lg font-bold tracking-widest text-primary">
-                    {lobbyInfo.code}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-lg font-bold tracking-widest text-primary">
+                      {lobbyInfo.code}
+                    </span>
+                    <Tooltip content={linkCopied ? "Copied" : "Copy invite link"}>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={copyInviteLink}
+                        title={linkCopied ? "Copied" : "Copy invite link"}
+                        aria-label="Copy invite link"
+                      >
+                        {linkCopied ? (
+                          <Check className="h-4 w-4 text-success" />
+                        ) : (
+                          <Link className="h-4 w-4" />
+                        )}
+                      </Button>
+                    </Tooltip>
+                  </div>
                 </div>
               )}
             </CardContent>
@@ -364,21 +398,38 @@ export default function HostControlPanelView() {
                 <span className="font-mono text-2xl font-bold tracking-widest text-primary">
                   {lobbyInfo.code}
                 </span>
-                <Tooltip content={copied ? "Copied" : "Copy lobby code"}>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={copyLobbyCode}
-                    title={copied ? "Copied" : "Copy lobby code"}
-                    aria-label="Copy lobby code"
-                  >
-                    {copied ? (
-                      <Check className="h-4 w-4 text-success" />
-                    ) : (
-                      <Copy className="h-4 w-4" />
-                    )}
-                  </Button>
-                </Tooltip>
+                <div className="flex items-center gap-1">
+                  <Tooltip content={copied ? "Copied" : "Copy lobby code"}>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={copyLobbyCode}
+                      title={copied ? "Copied" : "Copy lobby code"}
+                      aria-label="Copy lobby code"
+                    >
+                      {copied ? (
+                        <Check className="h-4 w-4 text-success" />
+                      ) : (
+                        <Copy className="h-4 w-4" />
+                      )}
+                    </Button>
+                  </Tooltip>
+                  <Tooltip content={linkCopied ? "Copied" : "Copy invite link"}>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={copyInviteLink}
+                      title={linkCopied ? "Copied" : "Copy invite link"}
+                      aria-label="Copy invite link"
+                    >
+                      {linkCopied ? (
+                        <Check className="h-4 w-4 text-success" />
+                      ) : (
+                        <Link className="h-4 w-4" />
+                      )}
+                    </Button>
+                  </Tooltip>
+                </div>
               </div>
 
               {/* Compact chip row of lobby metadata. */}

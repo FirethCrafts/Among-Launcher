@@ -102,6 +102,12 @@ pub enum IpcMessage {
     JoinResult {
         success: bool,
         error: Option<String>,
+        /// Lobby code the result refers to. The mod (sibling change)
+        /// added this so the frontend can correlate a late result with the
+        /// code it actually tried to join. `#[serde(default)]` keeps older
+        /// mod builds (which omit it) parsing.
+        #[serde(default)]
+        code: Option<String>,
     },
     Unknown(String),
 }
@@ -492,12 +498,13 @@ pub async fn handle_ipc_message(app: &AppHandle, msg: IpcMessage) {
             // after `lobby-created`.
             let _ = app.emit("players_list", players_list_payload(&lobby.players));
         }
-        IpcMessage::JoinResult { success, error } => {
+        IpcMessage::JoinResult { success, error, code } => {
             let _ = app.emit(
                 "join-result",
                 serde_json::json!({
                     "success": success,
                     "error": error,
+                    "code": code,
                 }),
             );
         }
@@ -1149,9 +1156,11 @@ mod tests {
         let json = r#"{"type": "join_lobby_result", "payload": {"success": true}}"#;
         let msg: IpcMessage = serde_json::from_str(json).unwrap();
         match msg {
-            IpcMessage::JoinResult { success, error } => {
+            IpcMessage::JoinResult { success, error, code } => {
                 assert!(success);
                 assert_eq!(error, None);
+                // Older mod build: `code` absent → None.
+                assert_eq!(code, None);
             }
             _ => panic!("Expected JoinResult"),
         }
@@ -1162,9 +1171,25 @@ mod tests {
         let json = r#"{"type": "join_lobby_result", "payload": {"success": false, "error": "Lobby full"}}"#;
         let msg: IpcMessage = serde_json::from_str(json).unwrap();
         match msg {
-            IpcMessage::JoinResult { success, error } => {
+            IpcMessage::JoinResult { success, error, code } => {
                 assert!(!success);
                 assert_eq!(error, Some("Lobby full".to_string()));
+                assert_eq!(code, None);
+            }
+            _ => panic!("Expected JoinResult"),
+        }
+    }
+
+    #[test]
+    fn test_parse_join_result_with_code() {
+        // Sibling mod change: `join_lobby_result` now carries the lobby code.
+        let json = r#"{"type": "join_lobby_result", "payload": {"success": true, "error": null, "code": "AB12CD"}}"#;
+        let msg: IpcMessage = serde_json::from_str(json).unwrap();
+        match msg {
+            IpcMessage::JoinResult { success, error, code } => {
+                assert!(success);
+                assert_eq!(error, None);
+                assert_eq!(code, Some("AB12CD".to_string()));
             }
             _ => panic!("Expected JoinResult"),
         }

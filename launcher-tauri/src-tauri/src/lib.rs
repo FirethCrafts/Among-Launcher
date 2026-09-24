@@ -2325,11 +2325,7 @@ async fn post_lobby(app: AppHandle, state: State<'_, AppState>) -> Result<(), La
 /// values, so the mod can still attempt the join with its current region
 /// instead of rejecting the message.
 fn join_payload(code: &str, endpoint: Option<lobby_backend::LobbyEndpoint>) -> serde_json::Value {
-    let endpoint = endpoint.unwrap_or(lobby_backend::LobbyEndpoint {
-        region: None,
-        region_ip: None,
-        region_port: None,
-    });
+    let endpoint = endpoint.unwrap_or_default();
     serde_json::json!({
         "code": code,
         "region": endpoint.region.unwrap_or_default(),
@@ -2343,6 +2339,13 @@ fn join_payload(code: &str, endpoint: Option<lobby_backend::LobbyEndpoint>) -> s
 ///
 /// A lobby that is missing from the backend is NOT an error — we forward
 /// empty region fields and let the mod fall back to its current region.
+/// Likewise a backend/network failure while resolving the endpoint only
+/// logs a note and falls through: backend unavailability must never turn
+/// into a join failure, since the lobby may still be reachable by code.
+///
+/// The one exception is the joinability pre-check: a lobby the backend
+/// reports as FULL or already IN GAME is refused locally (no IPC sent) with
+/// a user-facing reason. See [`lobby_backend::join_block_reason`].
 #[tauri::command]
 async fn join_lobby(state: State<'_, AppState>, code: String) -> Result<(), LauncherError> {
     let token = {
@@ -2355,7 +2358,25 @@ async fn join_lobby(state: State<'_, AppState>, code: String) -> Result<(), Laun
     };
 
     let client = lobby_backend::LobbyBackendClient::new(token);
-    let endpoint = client.get_lobby_endpoint(&code).await?;
+    let endpoint = match client.get_lobby_endpoint(&code).await {
+        Ok(endpoint) => endpoint,
+        Err(e) => {
+            // Do NOT propagate: the lobby may be joinable by code with the
+            // game's current region even when the backend is unreachable.
+            eprintln!(
+                "join_lobby: endpoint lookup for '{}' failed ({}); joining with empty region",
+                code, e
+            );
+            None
+        }
+    };
+
+    // Only a lobby the backend explicitly reports full/started blocks the
+    // join. `Ok(None)` (404 / not posted) is never blocked.
+    if let Some(reason) = endpoint.as_ref().and_then(lobby_backend::join_block_reason) {
+        return Err(LauncherError::Lobby(reason));
+    }
+
     let payload = join_payload(&code, endpoint);
 
     let handle = state.pipe_handle.lock().await;
@@ -2363,6 +2384,29 @@ async fn join_lobby(state: State<'_, AppState>, code: String) -> Result<(), Laun
         h.send_envelope("join_lobby", Some(payload))
             .await
             .map_err(LauncherError::Ipc)
+    } else {
+        Err(LauncherError::Ipc("Pipe server not initialized".to_string()))
+    }
+}
+
+/// Ask the mod to abandon an in-flight join.
+///
+/// The mod answers with a `{ cancelled: bool }` result over the normal IPC
+/// pipe (not this command's return value), so `Ok(true)` only means the
+/// request was sent — not that a join was actually cancelled. `code` is
+/// optional and forwarded as `null` when absent so the mod can decide
+/// whether to scope the cancel to a specific lobby.
+#[tauri::command]
+async fn cancel_join(
+    state: State<'_, AppState>,
+    code: Option<String>,
+) -> Result<bool, LauncherError> {
+    let handle = state.pipe_handle.lock().await;
+    if let Some(ref h) = *handle {
+        h.send_envelope("cancel_join", Some(serde_json::json!({ "code": code })))
+            .await
+            .map_err(LauncherError::Ipc)?;
+        Ok(true)
     } else {
         Err(LauncherError::Ipc("Pipe server not initialized".to_string()))
     }
@@ -2775,6 +2819,7 @@ pub fn run() {
             get_mod_list,
             post_lobby,
             join_lobby,
+            cancel_join,
             disband_lobby,
             kick_player,
             get_lobby_state,
@@ -3155,6 +3200,7 @@ mod post_lobby_tests {
                 region: Some("EU".into()),
                 region_ip: Some("5.6.7.8".into()),
                 region_port: Some(22023),
+                ..Default::default()
             }),
         );
         assert_eq!(
@@ -3195,6 +3241,7 @@ mod post_lobby_tests {
                 region: Some("NA".into()),
                 region_ip: None,
                 region_port: None,
+                ..Default::default()
             }),
         );
         assert_eq!(payload["region"], "NA");

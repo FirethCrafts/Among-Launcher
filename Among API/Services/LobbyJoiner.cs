@@ -10,10 +10,33 @@ public class LobbyJoiner : IDisposable
     private const int PollIntervalMs = 500;
     private const int GameReadyWaitMs = 30_000;
     private const int PumpMaxDurationMs = GameReadyWaitMs + JoinConfirmTimeoutMs;
+    private const int LeaveWaitTimeoutMs = 10_000;
+    private const int LeavePollIntervalMs = 250;
+    private const int LeaveSettleMs = 750;
+    private const int LeaveSettleFloorMs = 2_000;
+
+    /// <summary>
+    /// How long a remembered cancellation can suppress a not-yet-enqueued join.
+    /// </summary>
+    private const int CancelledCodeTtlMs = 15_000;
 
     private readonly ConcurrentQueue<JoinRequest> _queue = new();
+
+    /// <summary>
+    /// Recently cancelled lobby codes. `cancel_join` is delivered fire-and-forget,
+    /// so a cancel can arrive before its matching `join_lobby` has been enqueued.
+    /// When no pending request matches we record the code here so the later
+    /// enqueue can still observe the cancellation. Entries are pruned after
+    /// <see cref="CancelledCodeTtlMs"/>; the dictionary is therefore bounded.
+    /// </summary>
+    private readonly ConcurrentDictionary<string, DateTimeOffset> _cancelledCodes =
+        new(StringComparer.OrdinalIgnoreCase);
+
     private readonly CancellationTokenSource _cts = new();
     private readonly Task _pumpTask;
+
+    /// <summary>Request currently being processed by the serial pump.</summary>
+    private volatile JoinRequest? _current;
 
     private sealed class JoinRequest
     {
@@ -22,6 +45,19 @@ public class LobbyJoiner : IDisposable
         public string RegionIp = "";
         public int RegionPort;
         public TaskCompletionSource<JoinResult>? Tcs;
+        /// <summary>Per-request cancellation, linked to the pump lifetime.</summary>
+        public CancellationTokenSource? Cts;
+        /// <summary>
+        /// Set true immediately before the Unity join is dispatched. Once true a
+        /// join coroutine is committed and cannot be aborted, so cancellation is
+        /// ignored from that point on.
+        /// </summary>
+        public volatile bool Dispatched;
+        /// <summary>
+        /// Invoked by the pump (after the result is resolved) with the final
+        /// result. Used to emit the out-of-band `join_lobby_result`.
+        /// </summary>
+        public Action<JoinResult>? OnComplete;
     }
 
     public LobbyJoiner(ManualLogSource _)
@@ -29,7 +65,7 @@ public class LobbyJoiner : IDisposable
         _pumpTask = Task.Run(PumpAsync);
     }
 
-    public async Task<JoinResult> JoinAsync(string code, string region, string regionIp, int regionPort)
+    public async Task<JoinResult> JoinAsync(string code, string region, string regionIp, int regionPort, Action<JoinResult>? onComplete = null)
     {
         code = code.Trim().ToUpperInvariant();
         region = region.Trim();
@@ -38,14 +74,35 @@ public class LobbyJoiner : IDisposable
         if (code.Length == 0)
             return new JoinResult(false, "Empty lobby code");
 
+        // Honour a `cancel_join` that raced ahead of this (not-yet-enqueued)
+        // `join_lobby`. The cancel is remembered until we get here; consume the
+        // entry and bail without enqueuing or touching the game.
+        PruneCancelledCodes();
+        if (_cancelledCodes.TryRemove(code, out var cancelledAt))
+        {
+            if (DateTimeOffset.UtcNow - cancelledAt < TimeSpan.FromMilliseconds(CancelledCodeTtlMs))
+            {
+                FileLogger.Info($"[LobbyJoiner] JoinAsync: '{code}' was cancelled before enqueue; skipping");
+                var cancelledResult = new JoinResult(false, "Cancelled");
+                try { onComplete?.Invoke(cancelledResult); }
+                catch (Exception ex) { FileLogger.Error($"[LobbyJoiner] OnComplete failed: {ex.Message}"); }
+                return cancelledResult;
+            }
+            // Stale entry (already removed above): fall through and join normally.
+            FileLogger.Info($"[LobbyJoiner] JoinAsync: ignoring stale cancellation for '{code}'");
+        }
+
         var request = new JoinRequest
         {
             Code = code,
             Region = region,
             RegionIp = regionIp,
             RegionPort = regionPort,
+            OnComplete = onComplete,
             Tcs = new TaskCompletionSource<JoinResult>(TaskCreationOptions.RunContinuationsAsynchronously)
         };
+        // Linked to the pump lifetime so Dispose() tears every pending request down.
+        request.Cts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
         _queue.Enqueue(request);
 
         try
@@ -62,12 +119,111 @@ public class LobbyJoiner : IDisposable
         }
     }
 
+    /// <summary>
+    /// Cancels the queued-or-in-progress join whose code matches
+    /// <paramref name="code"/> (case-insensitive), or the oldest pending join
+    /// when <paramref name="code"/> is empty, then awaits its result so the
+    /// caller knows the pump is quiescent before starting the next join.
+    /// Because the pump is strictly serial, a resolved request guarantees no
+    /// join is in flight afterwards.
+    /// </summary>
+    /// <remarks>
+    /// Cancellation only takes effect BEFORE dispatch. Once a Unity join
+    /// coroutine has been started it cannot be aborted, so an in-flight join is
+    /// awaited to completion instead (this is the "wait for the cancellation to
+    /// complete" guarantee).
+    /// </remarks>
+    /// <returns>True when a request was found and cancellation requested.</returns>
+    public async Task<bool> CancelPending(string? code)
+    {
+        var normalized = string.IsNullOrWhiteSpace(code) ? "" : code.Trim().ToUpperInvariant();
+
+        PruneCancelledCodes();
+
+        var target = FindPending(normalized);
+        if (target == null)
+        {
+            // `cancel_join` is fire-and-forget, so it can arrive before its
+            // `join_lobby` has been enqueued. Remember a code-scoped cancel so
+            // JoinAsync can observe it. An empty code means "oldest pending" and
+            // has no code to remember.
+            if (normalized.Length > 0)
+            {
+                _cancelledCodes[normalized] = DateTimeOffset.UtcNow;
+                FileLogger.Info($"[LobbyJoiner] CancelPending: no matching request; remembered '{normalized}' for a not-yet-enqueued join");
+            }
+            else
+            {
+                FileLogger.Info("[LobbyJoiner] CancelPending: no matching request (code='')");
+            }
+            return false;
+        }
+
+        FileLogger.Info($"[LobbyJoiner] CancelPending: cancelling '{target.Code}' (dispatched={target.Dispatched})");
+        try { target.Cts?.Cancel(); }
+        catch (ObjectDisposedException) { }
+
+        if (target.Tcs != null)
+        {
+            try
+            {
+                await target.Tcs.Task.WaitAsync(TimeSpan.FromMilliseconds(PumpMaxDurationMs + 5000));
+                FileLogger.Info($"[LobbyJoiner] CancelPending: '{target.Code}' settled");
+            }
+            catch (TimeoutException)
+            {
+                FileLogger.Warn($"[LobbyJoiner] CancelPending: timed out waiting for '{target.Code}' to settle");
+            }
+        }
+
+        return true;
+    }
+
+    private JoinRequest? FindPending(string normalizedCode)
+    {
+        // Prefer the in-progress request: it blocks everything queued behind it.
+        var current = _current;
+        if (current != null)
+        {
+            if (normalizedCode.Length == 0) return current;
+            if (string.Equals(current.Code, normalizedCode, StringComparison.OrdinalIgnoreCase))
+                return current;
+        }
+
+        // Otherwise the oldest queued request (ConcurrentQueue enumerates FIFO).
+        foreach (var req in _queue)
+        {
+            if (normalizedCode.Length == 0 || string.Equals(req.Code, normalizedCode, StringComparison.OrdinalIgnoreCase))
+                return req;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Drops remembered cancellations older than <see cref="CancelledCodeTtlMs"/>
+    /// so the dictionary stays bounded. Called opportunistically from both the
+    /// cancel and join paths. Safe to run concurrently.
+    /// </summary>
+    private void PruneCancelledCodes()
+    {
+        var cutoff = DateTimeOffset.UtcNow.AddMilliseconds(-CancelledCodeTtlMs);
+        foreach (var entry in _cancelledCodes)
+        {
+            if (entry.Value < cutoff)
+                _cancelledCodes.TryRemove(entry);
+        }
+    }
+
     public void Dispose()
     {
         _cts.Cancel();
-        _cts.Dispose();
         while (_queue.TryDequeue(out var req))
+        {
+            req.Cts?.Cancel();
             req.Tcs?.TrySetResult(new JoinResult(false, "Joiner disposed"));
+        }
+        _cts.Dispose();
     }
 
     private async Task PumpAsync()
@@ -79,15 +235,40 @@ public class LobbyJoiner : IDisposable
             {
                 if (_queue.TryDequeue(out var request) && request.Tcs != null)
                 {
+                    _current = request;
                     FileLogger.Info($"[LobbyJoiner] Processing join for '{request.Code}'");
-                    var result = await ProcessJoinAsync(request, cts.Token);
+
+                    JoinResult result;
+                    try
+                    {
+                        result = await ProcessJoinAsync(request, request.Cts?.Token ?? cts.Token);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        result = new JoinResult(false, "Cancelled");
+                    }
+                    catch (Exception ex)
+                    {
+                        FileLogger.Error($"[LobbyJoiner] Join failed: {ex.Message}");
+                        result = new JoinResult(false, ex.Message);
+                    }
+
+                    // Always resolve the TCS so JoinAsync / CancelPending never
+                    // hang, even if ProcessJoinAsync threw.
                     request.Tcs.TrySetResult(result);
-                    FileLogger.Info($"[LobbyJoiner] Result: success={result.Success} error={result.Error ?? "none"}");
+                    FileLogger.Info($"[LobbyJoiner] Result for '{request.Code}': success={result.Success} error={result.Error ?? "none"}");
+
+                    try { request.OnComplete?.Invoke(result); }
+                    catch (Exception ex) { FileLogger.Error($"[LobbyJoiner] OnComplete failed: {ex.Message}"); }
                 }
             }
             catch (Exception ex)
             {
                 FileLogger.Error($"[LobbyJoiner] Pump failed: {ex.Message}");
+            }
+            finally
+            {
+                _current = null;
             }
 
             try { await Task.Delay(100, cts.Token); }
@@ -98,27 +279,66 @@ public class LobbyJoiner : IDisposable
 
     private async Task<JoinResult> ProcessJoinAsync(JoinRequest request, CancellationToken ct)
     {
+        // --- Pre-dispatch: cancellation is safe and honoured. ---
+        if (ct.IsCancellationRequested || request.Dispatched)
+            return new JoinResult(false, "Cancelled");
+
         FileLogger.Info("[LobbyJoiner] Waiting for game to be ready...");
         if (!await WaitForGameReady(ct))
         {
-            return new JoinResult(false, "Game did not reach ready state");
+            return ct.IsCancellationRequested
+                ? new JoinResult(false, "Cancelled")
+                : new JoinResult(false, "Game did not reach ready state");
         }
 
-        JoinResult startResult;
+        if (ct.IsCancellationRequested)
+            return new JoinResult(false, "Cancelled");
+
+        bool wasInLobby;
         try
         {
-            await MainThreadDispatcher.EnqueueAsync(() =>
+            wasInLobby = await MainThreadDispatcher.EnqueueAsync(() =>
             {
                 if (GameAssembly.InLobby())
                 {
                     FileLogger.Info("[LobbyJoiner] In lobby, leaving...");
                     LeaveLobby();
+                    return true;
                 }
+                return false;
             });
 
-            await Task.Delay(1500, ct);
+            if (wasInLobby)
+            {
+                // Wait until the client has actually left before dispatching the
+                // next join. A blind leave-then-dispatch is a crash/misjoin hazard.
+                if (!await WaitForLeft(ct))
+                    return new JoinResult(false, "Cancelled");
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            return new JoinResult(false, "Cancelled");
+        }
+        catch (Exception ex)
+        {
+            FileLogger.Error($"[LobbyJoiner] Dispatch failed: {ex.Message}");
+            return new JoinResult(false, $"Dispatch failed: {ex.Message}");
+        }
 
-            startResult = await MainThreadDispatcher.EnqueueAsync(() => ExecuteJoin(request));
+        if (ct.IsCancellationRequested)
+            return new JoinResult(false, "Cancelled");
+
+        JoinResult startResult;
+        try
+        {
+            startResult = await MainThreadDispatcher.EnqueueAsync(() =>
+            {
+                // A Unity join coroutine is committed from here on; cancellation
+                // can no longer be honoured.
+                request.Dispatched = true;
+                return ExecuteJoin(request);
+            });
         }
         catch (Exception ex)
         {
@@ -129,21 +349,71 @@ public class LobbyJoiner : IDisposable
         if (!startResult.Success)
             return startResult;
 
+        // --- Post-dispatch: cancellation is ignored, join cannot be aborted. ---
         FileLogger.Info("[LobbyJoiner] Waiting for lobby...");
         var deadline = DateTimeOffset.UtcNow.AddMilliseconds(JoinConfirmTimeoutMs);
-        while (DateTimeOffset.UtcNow < deadline && !ct.IsCancellationRequested)
+        while (DateTimeOffset.UtcNow < deadline)
         {
-            await Task.Delay(PollIntervalMs, ct);
+            await Task.Delay(PollIntervalMs);
 
-            if (GameAssembly.InLobby())
-            {
-                var code = CurrentLobbyCode();
-                FileLogger.Info($"[LobbyJoiner] InLobby=true, code={code}");
+            bool inLobby = await MainThreadDispatcher.EnqueueAsync(() => GameAssembly.InLobby());
+            if (!inLobby)
+                continue;
+
+            var code = await MainThreadDispatcher.EnqueueAsync(CurrentLobbyCode);
+            FileLogger.Info($"[LobbyJoiner] InLobby=true, code={code}, expected={request.Code}");
+
+            // Only report success when we are in the *requested* lobby. A stale
+            // match (e.g. the old lobby) must not be reported as success.
+            if (string.Equals(code, request.Code, StringComparison.OrdinalIgnoreCase))
                 return new JoinResult(true, null);
-            }
         }
 
         return new JoinResult(false, "Join timed out");
+    }
+
+    /// <summary>
+    /// Waits until <c>GameAssembly.InLobby()</c> reports false (polling ~every
+    /// 250ms, up to ~10s), then applies a settle delay of ~750ms with a ~2s
+    /// minimum floor measured from the moment the leave began. Returns false if
+    /// cancelled while waiting.
+    /// </summary>
+    private static async Task<bool> WaitForLeft(CancellationToken ct)
+    {
+        var start = DateTimeOffset.UtcNow;
+        var deadline = start.AddMilliseconds(LeaveWaitTimeoutMs);
+
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            if (ct.IsCancellationRequested)
+                return false;
+
+            bool inLobby;
+            try
+            {
+                inLobby = await MainThreadDispatcher.EnqueueAsync(() => GameAssembly.InLobby());
+            }
+            catch
+            {
+                inLobby = false;
+            }
+
+            if (!inLobby)
+                break;
+
+            try { await Task.Delay(LeavePollIntervalMs, ct); }
+            catch (OperationCanceledException) { return false; }
+        }
+
+        var elapsedMs = (int)(DateTimeOffset.UtcNow - start).TotalMilliseconds;
+        var settleMs = Math.Max(LeaveSettleMs, LeaveSettleFloorMs - elapsedMs);
+        if (settleMs > 0)
+        {
+            try { await Task.Delay(settleMs, ct); }
+            catch (OperationCanceledException) { return false; }
+        }
+
+        return !ct.IsCancellationRequested;
     }
 
     private async Task<bool> WaitForGameReady(CancellationToken ct)
@@ -195,10 +465,14 @@ public class LobbyJoiner : IDisposable
     {
         FileLogger.Info($"[LobbyJoiner] ExecuteJoin: code={request.Code} region={request.Region} ip={request.RegionIp}:{request.RegionPort}");
 
+        // The caller has already left any previous lobby and waited for the
+        // client to settle (see ProcessJoinAsync/WaitForLeft). If we are somehow
+        // still in a lobby we must NOT leave and immediately dispatch — that race
+        // is a crash/misjoin hazard. Abort instead.
         if (GameAssembly.InLobby())
         {
-            FileLogger.Info("[LobbyJoiner] In lobby, leaving...");
-            LeaveLobby();
+            FileLogger.Warn("[LobbyJoiner] ExecuteJoin: still in a lobby; aborting join to avoid leave-then-dispatch race");
+            return new JoinResult(false, "Still in a lobby; aborting join");
         }
 
         var regionSet = SetRegion(request);

@@ -118,30 +118,58 @@ public class Plugin : BasePlugin
             var joiner = new LobbyJoiner(Log);
             pipe.Disconnected += (_, _) => joiner.Dispose();
 
-            pipe.RegisterHandler("join_lobby", async element =>
+            pipe.RegisterHandler("join_lobby", element =>
             {
-                JoinResult result;
+                var payload = element.TryGetProperty("payload", out var p) ? p : default;
+                var code = ReadString(payload, "code").Trim().ToUpperInvariant();
+                var region = ReadString(payload, "region");
+                var regionIp = ReadString(payload, "regionIp");
+                var regionPort = ReadInt(payload, "regionPort");
+
+                FileLogger.Info($"join_lobby received: code={code}, region={region}, regionIp={regionIp}, regionPort={regionPort}");
+
+                if (code.Length == 0)
+                {
+                    var empty = new JoinResult(false, "Empty lobby code");
+                    _ = pipe.SendMessageAsync("join_lobby_result", new { success = empty.Success, error = empty.Error, code });
+                    return Task.FromResult<object?>(new { success = empty.Success, error = empty.Error, code });
+                }
+
+                // Enqueue on the serial pump and return immediately. The join runs
+                // asynchronously and reports out-of-band via `join_lobby_result`.
+                // NOT awaiting here keeps the IPC read loop free, so `cancel_join`
+                // and `leave_lobby` can be received while a join is in progress.
+                _ = joiner.JoinAsync(code, region, regionIp, regionPort, result =>
+                {
+                    FileLogger.Info($"Join lobby result -> code={code} success={result.Success} error={result.Error ?? "none"}");
+                    _ = pipe.SendMessageAsync("join_lobby_result", new { success = result.Success, error = result.Error, code });
+                });
+
+                return Task.FromResult<object?>(new { queued = true, code });
+            });
+
+            pipe.RegisterHandler("cancel_join", async element =>
+            {
+                var payload = element.TryGetProperty("payload", out var p) ? p : default;
+                var code = ReadString(payload, "code");
+                FileLogger.Info($"cancel_join received: code='{code}'");
+                var cancelled = await joiner.CancelPending(code);
+                return new { cancelled };
+            });
+
+            pipe.RegisterHandler("leave_lobby", async _ =>
+            {
                 try
                 {
-                    var payload = element.TryGetProperty("payload", out var p) ? p : default;
-                    var code = ReadString(payload, "code");
-                    var region = ReadString(payload, "region");
-                    var regionIp = ReadString(payload, "regionIp");
-                    var regionPort = ReadInt(payload, "regionPort");
-
-                    FileLogger.Info($"join_lobby received: code={code}, region={region}, regionIp={regionIp}, regionPort={regionPort}");
-
-                    result = await joiner.JoinAsync(code, region, regionIp, regionPort);
+                    await MainThreadDispatcher.EnqueueAsync(() => LeaveLobby());
+                    FileLogger.Info("leave_lobby: ExitGame dispatched");
+                    return new { success = true };
                 }
                 catch (Exception ex)
                 {
-                    FileLogger.Error($"join_lobby handler exception: {ex.GetType().Name}: {ex.Message}");
-                    result = new JoinResult(false, ex.Message);
+                    FileLogger.Error($"leave_lobby failed: {ex.Message}");
+                    return new { success = false, error = ex.Message };
                 }
-
-                FileLogger.Info($"Join lobby result -> success={result.Success} error={result.Error ?? "none"}");
-                _ = pipe.SendMessageAsync("join_lobby_result", new { success = result.Success, error = result.Error });
-                return new { success = result.Success, error = result.Error };
             });
 
             await pipe.SendMessageAsync("game_ready", new { protocol = ProtocolVersion });

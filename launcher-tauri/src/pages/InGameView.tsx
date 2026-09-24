@@ -9,10 +9,11 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { PlayerRow } from "@/components/ui/player-row";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { Tooltip } from "@/components/ui/tooltip";
 import { PageHeader } from "@/components/ui/page-header";
 import { SectionHeader } from "@/components/ui/section-header";
 import { showToast, formatError } from "@/components/Toast";
-import { Users } from "lucide-react";
+import { Users, Copy, Check } from "lucide-react";
 
 interface Player {
   name: string;
@@ -36,10 +37,12 @@ interface PlayerPayload {
 }
 
 // Payload of the game's `join_lobby_result` IPC message (see
-// src-tauri/src/ipc_handler.rs — `JoinResult { success, error }`).
+// src-tauri/src/ipc_handler.rs — `JoinResult { success, error, code }`).
+// `code` is additive: it identifies which join request the result answers.
 interface JoinResultPayload {
   success?: boolean;
   error?: string | null;
+  code?: string | null;
 }
 
 interface InGameViewProps {
@@ -71,13 +74,44 @@ export default function InGameView({
   const [activeLobbyCode, setActiveLobbyCode] = useState<string | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
   const [joining, setJoining] = useState(false);
+  const [copied, setCopied] = useState(false);
   // Code awaiting confirmation because the user is already in a lobby.
   const [confirmJoinCode, setConfirmJoinCode] = useState<string | null>(null);
-  // Code of the most recent join request — used to set the active lobby on
-  // `join_lobby_result` success (the payload carries no code).
+  // Code of the most recent join request — used to attribute a
+  // `join_lobby_result` that (for safety) omits its own `code`.
   const lastSubmittedCode = useRef<string | null>(null);
+  // The join request we are currently awaiting a `join_lobby_result` for.
+  // `join_lobby` returns immediately, so THIS — not `joining` — is the real
+  // in-flight lock; it is cleared by the matching result (or the timeout).
+  const pendingJoinCode = useRef<string | null>(null);
+  // Timeout handle that drops `pendingJoinCode` if no result ever arrives.
+  const pendingTimeout = useRef<number | null>(null);
   // Deep-link codes must auto-submit at most once each.
   const autoJoinHandled = useRef<string | null>(null);
+
+  const clearPendingJoin = useCallback(() => {
+    if (pendingTimeout.current !== null) {
+      window.clearTimeout(pendingTimeout.current);
+      pendingTimeout.current = null;
+    }
+    pendingJoinCode.current = null;
+  }, []);
+
+  const armPendingJoin = useCallback((code: string) => {
+    if (pendingTimeout.current !== null) {
+      window.clearTimeout(pendingTimeout.current);
+    }
+    pendingJoinCode.current = code;
+    pendingTimeout.current = window.setTimeout(() => {
+      // No result arrived in time — drop the lock (and the working
+      // indicator) so a retry is possible instead of wedging forever.
+      if (pendingJoinCode.current === code) {
+        pendingJoinCode.current = null;
+        setJoining(false);
+      }
+      pendingTimeout.current = null;
+    }, 30000);
+  }, []);
 
   const handleIpcMessage = useCallback((event: { payload: IpcEnvelope }) => {
     const { type, payload } = event.payload;
@@ -91,6 +125,12 @@ export default function InGameView({
         break;
       }
       case "lobby_left":
+        setActiveLobbyCode(null);
+        setPlayers([]);
+        break;
+      case "lobby_closed":
+        // The mod now reports a real lobby closure. Drop the code and roster
+        // so the page falls back to the join input.
         setActiveLobbyCode(null);
         setPlayers([]);
         break;
@@ -120,10 +160,22 @@ export default function InGameView({
       }
       case "join_lobby_result": {
         // The game's answer to our join request — success/failure was
-        // previously invisible. Payload: { success, error }.
+        // previously invisible. Payload: { success, error, code }.
         const result = payload as JoinResultPayload;
+        const resultCode = (result?.code ?? "").trim().toUpperCase();
+        const pending = pendingJoinCode.current;
+        // Attribute the result to the request it belongs to: a result for a
+        // superseded request (e.g. A finishing after the user queued B) must
+        // NOT clear the newer pending request or flip the UI. When `code` is
+        // absent, fall back to the latest submitted code.
+        if (resultCode && (!pending || resultCode !== pending)) {
+          break;
+        }
+        clearPendingJoin();
+        setJoining(false);
+        const code =
+          resultCode || (lastSubmittedCode.current ?? "").trim().toUpperCase();
         if (result?.success) {
-          const code = (lastSubmittedCode.current ?? "").trim().toUpperCase();
           if (code) {
             setActiveLobbyCode(code);
           }
@@ -137,7 +189,7 @@ export default function InGameView({
         break;
       }
     }
-  }, []);
+  }, [clearPendingJoin]);
 
   useEffect(() => {
     const unlistenMessage = listen<IpcEnvelope>("ipc:message", handleIpcMessage);
@@ -145,6 +197,8 @@ export default function InGameView({
     // this listener just clears stale lobby data immediately on disconnect
     // (App will unmount this route right after).
     const unlistenDisconnected = listen("ipc:client-disconnected", () => {
+      clearPendingJoin();
+      setJoining(false);
       setActiveLobbyCode(null);
       setPlayers([]);
     });
@@ -153,7 +207,29 @@ export default function InGameView({
       unlistenMessage.then((fn) => fn());
       unlistenDisconnected.then((fn) => fn());
     };
-  }, [handleIpcMessage]);
+  }, [handleIpcMessage, clearPendingJoin]);
+
+  // Seed the current code on mount: a guest already in a lobby before this
+  // page opened has no `activeLobbyCode` from events we missed (mirrors how
+  // HostControlPanelView seeds from the same snapshot). Best-effort.
+  useEffect(() => {
+    let cancelled = false;
+    invoke<{ code: string | null }>("get_lobby_state")
+      .then((snapshot) => {
+        if (!cancelled && snapshot?.code) {
+          setActiveLobbyCode(snapshot.code);
+        }
+      })
+      .catch(() => {
+        // Snapshot unavailable — the listeners still keep us in sync.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Drop any in-flight join bookkeeping on unmount.
+  useEffect(() => () => clearPendingJoin(), [clearPendingJoin]);
 
   // Deep-link join: prefill the input and auto-submit once connected.
   useEffect(() => {
@@ -179,30 +255,73 @@ export default function InGameView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialJoinCode, connected]);
 
-  async function submitJoin(rawCode: string) {
-    const code = rawCode.trim().toUpperCase();
+  /**
+   * Shared join funnel. `skipConfirm` is used by the confirm dialog: the user
+   * has already accepted the "join another lobby" consequence, so we re-run
+   * the same guards (connected / already-in-that-lobby) but do not re-open the
+   * confirm dialog.
+   */
+  async function attemptJoin(code: string, skipConfirm: boolean) {
     // Gate on `connected`: the backend now errors honestly with
     // "Not connected" instead of silently queueing the message.
-    if (!code || !connected || joining) return;
+    if (!code || !connected) return;
+    // Short-circuit: already in exactly this lobby — inform, no IPC sent.
+    if (activeLobbyCode && activeLobbyCode.trim().toUpperCase() === code) {
+      showToast(`Already in lobby ${code}`, "neutral");
+      return;
+    }
     // Guard rail: joining another lobby kicks you from the current one, so
-    // confirm first. This is the single funnel for manual join, Enter,
-    // deep links, and pending-link recovery — one check covers all.
-    if (inLobby) {
+    // confirm first. This is the single funnel for manual join, Enter, deep
+    // links, pending-link recovery, and the confirm dialog.
+    if (inLobby && !skipConfirm) {
       setConfirmJoinCode(code);
       return;
     }
     await performJoin(code);
   }
 
-  async function performJoin(code: string) {
+  async function submitJoin(rawCode: string) {
+    await attemptJoin(rawCode.trim().toUpperCase(), false);
+  }
+
+  async function performJoin(rawCode: string) {
+    const code = rawCode.trim().toUpperCase();
+    if (!code) return;
+
+    // Duplicate guard: the Join button is no longer gated on `joining`, so a
+    // second click on the SAME code must not enqueue another join. The
+    // supersede path below only cancels when `prev !== code`, so without this
+    // an identical code would start a wasted duplicate cycle. Ignore it
+    // silently — the button already reads "Joining..." and the roster shows
+    // skeletons, so a toast here would just be noise.
+    if (pendingJoinCode.current === code) return;
+
     lastSubmittedCode.current = code;
+
+    // Serialize requests: if a previous join is still in flight, ask the mod
+    // to cancel it and WAIT for the cancellation to finish before dispatching
+    // the next one. The await is deliberate — skipping it can crash the game.
+    const prev = pendingJoinCode.current;
+    if (prev && prev !== code) {
+      try {
+        await invoke("cancel_join", { code: prev });
+      } catch (e) {
+        console.error("Failed to cancel pending join:", e);
+      }
+    }
+
+    // `join_lobby` returns as soon as the mod enqueues the request; the real
+    // outcome arrives later via the `join_lobby_result` IPC message, so the
+    // pending lock is armed here and cleared by that result (or the timeout).
+    armPendingJoin(code);
     setJoining(true);
     try {
       await invoke("join_lobby", { code });
     } catch (e) {
-      showToast(`Failed to join lobby: ${formatError(e)}`, "error");
-    } finally {
+      // The invoke itself failed, so no result message is coming.
+      clearPendingJoin();
       setJoining(false);
+      showToast(`Failed to join lobby: ${formatError(e)}`, "error");
     }
   }
 
@@ -220,6 +339,21 @@ export default function InGameView({
       setPlayers([]);
     } catch (e) {
       console.error("Failed to leave lobby:", e);
+    }
+  }
+
+  async function copyInviteLink() {
+    if (!activeLobbyCode) return;
+    // The app's accepted deep-link shape (see src-tauri/src/lib.rs
+    // `parse_deep_link`): amonglauncher://join?code=<CODE>.
+    const link = `amonglauncher://join?code=${activeLobbyCode}`;
+    try {
+      await navigator.clipboard.writeText(link);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (e) {
+      console.error("Failed to copy invite link:", e);
+      showToast("Failed to copy invite link", "error");
     }
   }
 
@@ -250,6 +384,21 @@ export default function InGameView({
                   <span className="font-mono text-xl font-bold tracking-widest text-primary">
                     {activeLobbyCode}
                   </span>
+                  <Tooltip content={copied ? "Copied" : "Copy invite link"}>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => void copyInviteLink()}
+                      title={copied ? "Copied" : "Copy invite link"}
+                      aria-label="Copy invite link"
+                    >
+                      {copied ? (
+                        <Check className="h-4 w-4 text-success" />
+                      ) : (
+                        <Copy className="h-4 w-4" />
+                      )}
+                    </Button>
+                  </Tooltip>
                 </div>
                 <Button
                   onClick={() => void leaveLobby()}
@@ -279,7 +428,7 @@ export default function InGameView({
                   size="lg"
                   className="w-full"
                   onClick={() => void joinLobby()}
-                  disabled={!lobbyCode.trim() || joining || !connected}
+                  disabled={!lobbyCode.trim() || !connected}
                   title={connected ? "Join lobby" : "Connect to the game first"}
                 >
                   {joining ? "Joining..." : "Join"}
@@ -328,7 +477,10 @@ export default function InGameView({
         onClose={() => setConfirmJoinCode(null)}
         onConfirm={() => {
           const code = confirmJoinCode;
-          if (code) void performJoin(code);
+          setConfirmJoinCode(null);
+          // Same funnel/guards as submitJoin, but skip the (already-accepted)
+          // confirm branch so "Join anyway" actually joins.
+          if (code) void attemptJoin(code.trim().toUpperCase(), true);
         }}
         title="Join another lobby?"
         message="You're already in a lobby. Joining another will kick you from your current lobby."
