@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -9,17 +9,14 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { PlayerRow } from "@/components/ui/player-row";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { PageHeader } from "@/components/ui/page-header";
+import { SectionHeader } from "@/components/ui/section-header";
 import { showToast, formatError } from "@/components/Toast";
-import { Users, Gamepad2, Hash } from "lucide-react";
+import { Users } from "lucide-react";
 
 interface Player {
   name: string;
   color: string;
-}
-
-interface ModEntry {
-  name: string;
-  version?: string;
 }
 
 interface IpcEnvelope {
@@ -73,7 +70,6 @@ export default function InGameView({
   const [lobbyCode, setLobbyCode] = useState("");
   const [activeLobbyCode, setActiveLobbyCode] = useState<string | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
-  const [mods, setMods] = useState<ModEntry[]>([]);
   const [joining, setJoining] = useState(false);
   // Code awaiting confirmation because the user is already in a lobby.
   const [confirmJoinCode, setConfirmJoinCode] = useState<string | null>(null);
@@ -144,8 +140,6 @@ export default function InGameView({
   }, []);
 
   useEffect(() => {
-    loadMods();
-
     const unlistenMessage = listen<IpcEnvelope>("ipc:message", handleIpcMessage);
     // Connection state itself comes from the `connected` prop (App level);
     // this listener just clears stale lobby data immediately on disconnect
@@ -184,15 +178,6 @@ export default function InGameView({
     // App render and must not retrigger this effect.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialJoinCode, connected]);
-
-  async function loadMods() {
-    try {
-      const installedMods = await invoke<ModEntry[]>("get_mods");
-      setMods(installedMods);
-    } catch (e) {
-      console.error("Failed to get mods:", e);
-    }
-  }
 
   async function submitJoin(rawCode: string) {
     const code = rawCode.trim().toUpperCase();
@@ -239,51 +224,60 @@ export default function InGameView({
   }
 
   return (
-    <div className="min-h-full space-y-6 p-6">
-      <div className="flex items-center justify-between gap-4">
-        <h1 className="text-display font-bold tracking-tight">In Game</h1>
-        <Badge
-          variant={connected ? "success" : "danger"}
-          showDot
-          dotColor={connected ? "success" : "danger"}
-        >
-          {connected ? "Game Connected" : "Game Disconnected"}
-        </Badge>
-      </div>
+    <div className="min-h-full space-y-6 pb-6">
+      <PageHeader
+        title="In Game"
+        actions={
+          <Badge
+            variant={connected ? "success" : "danger"}
+            showDot
+            dotColor={connected ? "success" : "danger"}
+          >
+            {connected ? "Game Connected" : "Game Disconnected"}
+          </Badge>
+        }
+      />
 
-      <div className="grid gap-6 md:grid-cols-2">
+      <div className="space-y-6 px-6">
+        {/* Joining is the whole point of this page: the code input and the
+            Join button own the hero instead of sharing a row. */}
         <Card className="w-full">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Hash className="h-5 w-5 text-muted-foreground" />
-              {activeLobbyCode ? "Lobby" : "Join Lobby"}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="pt-6">
             {activeLobbyCode ? (
-              <div className="space-y-3">
-                <div className="flex items-center justify-between rounded-control border border-border bg-surface-2 px-3 py-2">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-center gap-3 rounded-control border border-border bg-surface-2 px-4 py-2.5">
                   <span className="text-13 text-muted-foreground">Current Code</span>
-                  <span className="font-mono text-lg font-bold tracking-widest text-primary">
+                  <span className="font-mono text-xl font-bold tracking-widest text-primary">
                     {activeLobbyCode}
                   </span>
                 </div>
-                <Button onClick={() => void leaveLobby()} variant="destructive" className="w-full">
+                <Button
+                  onClick={() => void leaveLobby()}
+                  variant="outline"
+                  size="sm"
+                  className="self-start border-danger/40 text-danger hover:bg-danger/10 hover:text-danger sm:self-auto"
+                >
                   Leave Lobby
                 </Button>
               </div>
             ) : (
-              <div className="flex gap-2">
+              <div className="space-y-3">
+                <p className="text-13 text-muted-foreground">
+                  Enter a lobby code to join your friends.
+                </p>
                 <Input
                   value={lobbyCode}
                   onChange={(e) => setLobbyCode(e.target.value)}
                   placeholder="Enter lobby code"
-                  className="flex-1 font-mono uppercase tracking-widest"
+                  className="h-12 w-full text-center font-mono text-xl uppercase tracking-widest"
                   maxLength={6}
                   onKeyDown={(e) => e.key === "Enter" && joinLobby()}
+                  aria-label="Lobby code"
                 />
                 <Button
                   variant="primary"
+                  size="lg"
+                  className="w-full"
                   onClick={() => void joinLobby()}
                   disabled={!lobbyCode.trim() || joining || !connected}
                   title={connected ? "Join lobby" : "Connect to the game first"}
@@ -295,75 +289,36 @@ export default function InGameView({
           </CardContent>
         </Card>
 
-        <Card className="w-full">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Users className="h-5 w-5 text-muted-foreground" />
-              Players ({players.length})
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {!connected ? (
-              <EmptyState
-                icon={<Users className="h-5 w-5" />}
-                title="Game not connected"
-                description="Connect to the game first to see the lobby roster."
-              />
-            ) : joining && players.length === 0 ? (
-              // Pending join: roster is still settling, show placeholders
-              // instead of a misleading "no players" empty state.
-              <div className="space-y-2">
-                <Skeleton className="h-10 w-full" />
-                <Skeleton className="h-10 w-full" />
-              </div>
-            ) : players.length === 0 ? (
-              <EmptyState
-                icon={<Users className="h-5 w-5" />}
-                title="No players detected"
-                description="Players will appear here once they join the lobby."
-              />
-            ) : (
-              <ul className="space-y-2">
-                {players.map((player) => (
-                  <PlayerRow key={player.name} name={player.name} color={player.color} />
-                ))}
-              </ul>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-
-      <Card className="w-full">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Gamepad2 className="h-5 w-5 text-muted-foreground" />
-            Active Mods
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {mods.length === 0 ? (
+        <section className="space-y-3">
+          <SectionHeader title="Players" count={players.length} />
+          {!connected ? (
             <EmptyState
-              icon={<Gamepad2 className="h-5 w-5" />}
-              title="No mods installed"
-              description="Installed mods will be listed here."
+              icon={<Users className="h-5 w-5" />}
+              title="Game not connected"
+              description="Connect to the game first to see the lobby roster."
+            />
+          ) : joining && players.length === 0 ? (
+            // Pending join: roster is still settling, show placeholders
+            // instead of a misleading "no players" empty state.
+            <div className="space-y-2">
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+            </div>
+          ) : players.length === 0 ? (
+            <EmptyState
+              icon={<Users className="h-5 w-5" />}
+              title="No players detected"
+              description="Players will appear here once they join the lobby."
             />
           ) : (
             <ul className="space-y-2">
-              {mods.map((mod) => (
-                <li
-                  key={mod.name}
-                  className="flex items-center justify-between rounded-control border border-border bg-surface-2 px-3 py-2"
-                >
-                  <span className="text-sm font-medium text-foreground">{mod.name}</span>
-                  {mod.version && (
-                    <span className="text-2xs text-muted-foreground">v{mod.version}</span>
-                  )}
-                </li>
+              {players.map((player) => (
+                <PlayerRow key={player.name} name={player.name} color={player.color} />
               ))}
             </ul>
           )}
-        </CardContent>
-      </Card>
+        </section>
+      </div>
 
       {/* Guard rail: joining while already in a lobby kicks you from the
           current one, so make the consequence explicit before proceeding.

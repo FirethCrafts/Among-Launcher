@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { formatError } from "@/components/Toast";
-import { Check, Gamepad2, Loader2 } from "lucide-react";
+import { Gamepad2, Loader2 } from "lucide-react";
 
 interface UserInfo {
   id: string;
@@ -47,21 +47,6 @@ export default function WelcomeView({ onLogin }: WelcomeViewProps) {
             <p className="text-13 text-muted-foreground">
               Play modded Among Us with friends.
             </p>
-          </div>
-          <div className="flex w-full flex-col items-center gap-2">
-            {[
-              "One-click setup",
-              "Auto mod sync",
-              "Host & join lobbies",
-            ].map((feature) => (
-              <div
-                key={feature}
-                className="flex w-full max-w-xs items-center gap-2 text-13 text-muted-foreground"
-              >
-                <Check className="h-4 w-4 shrink-0 text-primary" />
-                {feature}
-              </div>
-            ))}
           </div>
           <Button
             onClick={handleLogin}

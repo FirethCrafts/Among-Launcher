@@ -2,16 +2,17 @@ import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { join, localDataDir } from "@tauri-apps/api/path";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Select } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip } from "@/components/ui/tooltip";
-import { User, FolderOpen, RotateCcw, Info, LogOut, LogIn, Store, Wand2, Copy, Loader2 } from "lucide-react";
+import { PageHeader } from "@/components/ui/page-header";
+import { SettingsRow } from "@/components/ui/settings-row";
+import { User, FolderOpen, RotateCcw, Info, LogOut, LogIn, Store, Wand2, Copy, Loader2, SlidersHorizontal } from "lucide-react";
 import { showToast, formatError } from "@/components/Toast";
-import { useLauncher, type UserInfo } from "@/state/LauncherContext";
+import { useLauncher, type UserInfo, type LauncherConfig } from "@/state/LauncherContext";
 
 interface GameSearchResult {
   path?: string | null;
@@ -24,6 +25,9 @@ const STOREFRONT_OPTIONS = [
   { value: "epic", label: "Epic Games" },
   { value: "microsoft_store", label: "Microsoft Store" },
 ] as const;
+
+/** Bordered, compact container for a `divide-y` list of SettingsRows. */
+const ROW_LIST_CLASS = "rounded-card border border-border bg-surface divide-y divide-border px-4";
 
 export default function SettingsView() {
   const { config, updateConfig, loggedIn, username, avatarUrl, login, logout } =
@@ -115,6 +119,26 @@ export default function SettingsView() {
     }
   }
 
+  async function handleToggle(field: "auto_post_lobby" | "debug_mode") {
+    // Guard BEFORE any optimistic flip: without config there is nothing to
+    // merge into or persist, and flipping first shows a phantom toggle.
+    if (!config) {
+      showToast("Settings are still loading", "error");
+      return;
+    }
+    try {
+      const partial: Partial<LauncherConfig> =
+        field === "auto_post_lobby"
+          ? { auto_post_lobby: !config.auto_post_lobby }
+          : { debug_mode: !config.debug_mode };
+      // updateConfig applies the flip optimistically and rolls it back on
+      // failure — no local mirror state to desync.
+      await updateConfig(partial);
+    } catch {
+      showToast("Failed to save option", "error");
+    }
+  }
+
   function storefrontLabel(value: string | null): string {
     const match = STOREFRONT_OPTIONS.find((o) => o.value === value);
     return match ? match.label : "Original";
@@ -152,20 +176,50 @@ export default function SettingsView() {
     }
   }
 
-  return (
-    <div className="min-h-full p-6">
-      <header className="mb-6 space-y-1">
-        <h1 className="text-display font-bold tracking-tight">Settings</h1>
-        <p className="text-sm text-muted-foreground">
-          Manage your account, install locations, and launcher preferences.
-        </p>
-      </header>
+  const accountIdentity = (
+    <div className="flex items-center gap-3">
+      {avatarUrl ? (
+        <img
+          src={avatarUrl}
+          alt="Avatar"
+          className="h-10 w-10 shrink-0 rounded-full border border-border"
+        />
+      ) : (
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-border bg-surface-2">
+          <User className="h-5 w-5 text-muted-foreground" />
+        </div>
+      )}
+      <div className="min-w-0">
+        <div className="truncate font-medium text-foreground">
+          {username || "Signed in"}
+        </div>
+        <div className="mt-1 flex items-center gap-2">
+          <Badge variant="success" showDot dotColor="success">
+            Connected
+          </Badge>
+          <Badge variant="neutral">Discord</Badge>
+        </div>
+      </div>
+    </div>
+  );
 
+  return (
+    <div className="min-h-full space-y-6 pb-6">
+      <PageHeader
+        title="Settings"
+        description="Manage your account, install locations, and launcher preferences."
+      />
+
+      <div className="space-y-6 px-6">
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList className="flex-wrap">
           <TabsTrigger value="account" className="h-8 gap-2">
             <User className="h-4 w-4" />
             Account
+          </TabsTrigger>
+          <TabsTrigger value="general" className="h-8 gap-2">
+            <SlidersHorizontal className="h-4 w-4" />
+            General
           </TabsTrigger>
           <TabsTrigger value="storage" className="h-8 gap-2">
             <FolderOpen className="h-4 w-4" />
@@ -182,53 +236,45 @@ export default function SettingsView() {
         </TabsList>
 
         <TabsContent value="account">
-          <Card>
-            <CardHeader>
-              <CardTitle>Account</CardTitle>
-              <CardDescription>Your Discord identity used for lobbies and friends.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {loggedIn ? (
-                <>
-                  <div className="flex items-center gap-4">
-                    {avatarUrl ? (
-                      <img
-                        src={avatarUrl}
-                        alt="Avatar"
-                        className="h-12 w-12 shrink-0 rounded-full border-2 border-primary"
-                      />
-                    ) : (
-                      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-border bg-surface-2">
-                        <User className="h-6 w-6 text-muted-foreground" />
-                      </div>
-                    )}
-                    <div className="min-w-0">
-                      <p className="truncate font-medium text-foreground">{username || "Signed in"}</p>
-                      <div className="mt-1 flex items-center gap-2">
-                        <Badge variant="success" showDot dotColor="success">
-                          Connected
-                        </Badge>
-                        <Badge variant="neutral">Discord</Badge>
-                      </div>
-                    </div>
-                  </div>
-                  <Button onClick={() => void handleLogout()} variant="destructive" className="w-full">
+          <div className={ROW_LIST_CLASS}>
+            {loggedIn ? (
+              <SettingsRow
+                className="py-4"
+                label={accountIdentity}
+                control={
+                  <Button
+                    onClick={() => void handleLogout()}
+                    variant="destructive"
+                    size="sm"
+                  >
                     <LogOut className="h-4 w-4" />
                     Logout
                   </Button>
-                </>
-              ) : (
-                <>
-                  <div className="flex items-center gap-4">
-                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-border bg-surface-2">
-                      <User className="h-6 w-6 text-muted-foreground" />
+                }
+              />
+            ) : (
+              <SettingsRow
+                className="py-4"
+                label={
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-border bg-surface-2">
+                      <User className="h-5 w-5 text-muted-foreground" />
                     </div>
                     <div>
-                      <p className="font-medium text-foreground">Not logged in</p>
-                      <p className="text-sm text-muted-foreground">Sign in to host and join lobbies.</p>
+                      <div className="font-medium text-foreground">Not logged in</div>
+                      <div className="text-13 text-muted-foreground">
+                        Sign in to host and join lobbies.
+                      </div>
                     </div>
                   </div>
-                  <Button onClick={() => void signIn()} className="w-full" disabled={signingIn}>
+                }
+                control={
+                  <Button
+                    onClick={() => void signIn()}
+                    variant="primary"
+                    size="sm"
+                    disabled={signingIn}
+                  >
                     {signingIn ? (
                       <Loader2 className="h-4 w-4 animate-spin" />
                     ) : (
@@ -236,53 +282,80 @@ export default function SettingsView() {
                     )}
                     Sign in
                   </Button>
-                </>
-              )}
-            </CardContent>
-          </Card>
+                }
+              />
+            )}
+          </div>
+        </TabsContent>
+
+        <TabsContent value="general">
+          <div className={ROW_LIST_CLASS}>
+            <SettingsRow
+              id="settings-auto-post-lobby"
+              label="Auto-post game data"
+              description="Automatically post your hosted lobby to the public lobby list."
+              control={
+                <Switch
+                  checked={config?.auto_post_lobby ?? false}
+                  disabled={!config}
+                  onCheckedChange={() => void handleToggle("auto_post_lobby")}
+                />
+              }
+            />
+            <SettingsRow
+              id="settings-debug-mode"
+              label="Debug mode"
+              description="Enable verbose diagnostics in the launcher log."
+              control={
+                <Switch
+                  checked={config?.debug_mode ?? false}
+                  disabled={!config}
+                  onCheckedChange={() => void handleToggle("debug_mode")}
+                />
+              }
+            />
+          </div>
         </TabsContent>
 
         <TabsContent value="storage">
-          <Card>
-            <CardHeader>
-              <CardTitle>Storage</CardTitle>
-              <CardDescription>Where the launcher reads and writes Among Us game files.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-5">
-              <div className="space-y-2">
-                <label className="text-sm font-medium">
-                  {storefrontLabel(detectedStorefront || storefront || null)} Game Path
-                </label>
-                <div className="flex gap-2">
-                  <Input
-                    value={detectedPath ?? ""}
-                    readOnly
-                    placeholder="Not detected — install Among Us via Steam/Epic first"
-                    className="flex-1 truncate font-mono text-13"
-                  />
-                  <Tooltip content="Copy detected path">
-                    <Button
-                      onClick={() => void copyDetectedPath()}
-                      variant="ghost"
-                      size="icon"
-                      disabled={!detectedPath}
-                      title="Copy detected path"
-                      aria-label="Copy detected path"
-                    >
-                      <Copy className="h-4 w-4" />
-                    </Button>
-                  </Tooltip>
-                </div>
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Modded Game Path</label>
-                <div className="flex gap-2">
-                  <Input
-                    value={gamePath}
-                    readOnly
-                    placeholder="No path set"
-                    className="flex-1 truncate font-mono text-13"
-                  />
+          <div className={ROW_LIST_CLASS}>
+            <SettingsRow
+              className="py-4"
+              label={`${storefrontLabel(detectedStorefront || storefront || null)} Game Path`}
+              description={
+                detectedPath ? (
+                  <span className="block truncate font-mono text-13">{detectedPath}</span>
+                ) : (
+                  "Not detected — install Among Us via Steam/Epic first"
+                )
+              }
+              control={
+                <Tooltip content="Copy detected path">
+                  <Button
+                    onClick={() => void copyDetectedPath()}
+                    variant="ghost"
+                    size="icon"
+                    disabled={!detectedPath}
+                    title="Copy detected path"
+                    aria-label="Copy detected path"
+                  >
+                    <Copy className="h-4 w-4" />
+                  </Button>
+                </Tooltip>
+              }
+            />
+            <SettingsRow
+              className="py-4"
+              label="Modded Game Path"
+              description={
+                gamePath ? (
+                  <span className="block truncate font-mono text-13">{gamePath}</span>
+                ) : (
+                  "No path set"
+                )
+              }
+              control={
+                <>
                   <Tooltip content="Browse for modded game folder">
                     <Button
                       onClick={() => void browseGamePath()}
@@ -305,62 +378,64 @@ export default function SettingsView() {
                       <RotateCcw className="h-4 w-4" />
                     </Button>
                   </Tooltip>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+                </>
+              }
+            />
+          </div>
         </TabsContent>
 
         <TabsContent value="storefront">
-          <Card>
-            <CardHeader>
-              <CardTitle>Storefront</CardTitle>
-              <CardDescription>Which store your Among Us installation comes from.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <div className="flex items-center justify-between gap-2">
-                  <label className="text-sm font-medium">Platform</label>
-                  <Button variant="outline" size="sm" onClick={() => void autoDetect()} disabled={detecting}>
-                    {detecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
+          <div className={ROW_LIST_CLASS}>
+            <SettingsRow
+              label="Platform"
+              description="Which store your Among Us installation comes from."
+              control={
+                <div className="flex items-center gap-2">
+                  <Select
+                    wrapperClassName="w-40"
+                    value={storefront}
+                    onChange={(e) => void setStorefrontValue(e.target.value)}
+                  >
+                    {!STOREFRONT_OPTIONS.some((o) => o.value === storefront) && (
+                      <option value="" disabled>
+                        Original
+                      </option>
+                    )}
+                    {STOREFRONT_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </Select>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void autoDetect()}
+                    disabled={detecting}
+                  >
+                    {detecting ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Wand2 className="h-4 w-4" />
+                    )}
                     {detecting ? "Detecting..." : "Auto-detect"}
                   </Button>
                 </div>
-                <Select
-                  value={storefront}
-                  onChange={(e) => void setStorefrontValue(e.target.value)}
-                >
-                  {!STOREFRONT_OPTIONS.some((o) => o.value === storefront) && (
-                    <option value="" disabled>
-                      Original
-                    </option>
-                  )}
-                  {STOREFRONT_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-            </CardContent>
-          </Card>
+              }
+            />
+          </div>
         </TabsContent>
 
         <TabsContent value="about">
-          <Card>
-            <CardHeader>
-              <CardTitle>About</CardTitle>
-              <CardDescription>Build and update information.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-muted-foreground">Version</span>
-                <Badge variant="neutral">{version || "…"}</Badge>
-              </div>
-            </CardContent>
-          </Card>
+          <div className={ROW_LIST_CLASS}>
+            <SettingsRow
+              label="Version"
+              control={<Badge variant="neutral">{version || "…"}</Badge>}
+            />
+          </div>
         </TabsContent>
       </Tabs>
+      </div>
     </div>
   );
 }

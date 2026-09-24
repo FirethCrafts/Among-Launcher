@@ -3,20 +3,21 @@ import { useNavigate } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import { Badge, type BadgeDotColor } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Switch } from "@/components/ui/switch";
-import { StatTile } from "@/components/ui/stat-tile";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Tooltip } from "@/components/ui/tooltip";
+import { PageHeader } from "@/components/ui/page-header";
+import { SectionHeader } from "@/components/ui/section-header";
+import { ListRow } from "@/components/ui/list-row";
 import { showToast, formatError } from "@/components/Toast";
 import { ConfirmModal } from "@/components/Modal";
 import { LibraryPickerModal } from "@/components/LibraryPickerModal";
-import { useLauncher, type LauncherConfig } from "@/state/LauncherContext";
+import { useLauncher } from "@/state/LauncherContext";
 import type { ModStatus } from "@/App";
-import { Play, Square, Gamepad2, FolderOpen, Package, Folder, Copy, Trash2, Archive, Library, Store, Cpu, RefreshCw } from "lucide-react";
+import { Play, Square, Gamepad2, FolderOpen, Package, Folder, Trash2, Archive, Library, RefreshCw } from "lucide-react";
 
 interface GameSearchResult {
   path?: string | null;
@@ -50,6 +51,14 @@ interface HomeViewProps {
   onRequireModUpdate?: () => void;
 }
 
+/** Status-strip tone → dot colour (Badge variants reuse the same palette). */
+const TONE_DOT: Record<"neutral" | "success" | "warning" | "danger", BadgeDotColor> = {
+  neutral: "info",
+  success: "success",
+  warning: "warning",
+  danger: "danger",
+};
+
 function formatBytes(bytes: number): string {
   if (bytes === 0) return "0 B";
   const k = 1024;
@@ -63,7 +72,7 @@ export default function HomeView({
   onRequireModUpdate,
 }: HomeViewProps) {
   const navigate = useNavigate();
-  const { config, updateConfig } = useLauncher();
+  const { config } = useLauncher();
   const [gamePath, setGamePath] = useState<string | null>(null);
   const [storefront, setStorefront] = useState<string | null>(null);
   const [detected, setDetected] = useState<GameSearchResult | null>(null);
@@ -73,7 +82,6 @@ export default function HomeView({
   const [mods, setMods] = useState<ModEntry[]>([]);
   const [installProgress, setInstallProgress] = useState<InstallProgress | null>(null);
   const [loading, setLoading] = useState(true);
-  const [redetecting, setRedetecting] = useState(false);
   const [modsLoading, setModsLoading] = useState(false);
   const [libraryPickerOpen, setLibraryPickerOpen] = useState(false);
   const [removeTarget, setRemoveTarget] = useState<ModEntry | null>(null);
@@ -131,21 +139,6 @@ export default function HomeView({
     }
   }, [gamePath]);
 
-  async function redetect() {
-    // Explicit user action — force past the cache (incl. cached negatives) so
-    // a game installed after the mount scan is found. Feeds the same
-    // `detected` state the mount call sets.
-    setRedetecting(true);
-    try {
-      const result = await invoke<GameSearchResult>("detect_game", { force: true });
-      setDetected(result);
-    } catch {
-      showToast("Failed to detect game", "error");
-    } finally {
-      setRedetecting(false);
-    }
-  }
-
   async function checkInstallStatus() {
     if (!gamePath) return;
     try {
@@ -178,16 +171,6 @@ export default function HomeView({
     }
   }
 
-  async function copyPath() {
-    if (!gamePath) return;
-    try {
-      await navigator.clipboard.writeText(gamePath);
-      showToast("Path copied to clipboard", "success");
-    } catch {
-      showToast("Failed to copy path", "error");
-    }
-  }
-
   async function launchGame() {
     if (!gamePath) return;
     try {
@@ -210,26 +193,6 @@ export default function HomeView({
       setIsRunning(false);
     } catch {
       showToast("Failed to stop game", "error");
-    }
-  }
-
-  async function handleToggle(field: "auto_post_lobby" | "debug_mode") {
-    // Guard BEFORE any optimistic flip: without config there is nothing to
-    // merge into or persist, and flipping first shows a phantom toggle. (#8)
-    if (!config) {
-      showToast("Settings are still loading", "error");
-      return;
-    }
-    try {
-      const partial: Partial<LauncherConfig> =
-        field === "auto_post_lobby"
-          ? { auto_post_lobby: !config.auto_post_lobby }
-          : { debug_mode: !config.debug_mode };
-      // updateConfig applies the flip optimistically and rolls it back on
-      // failure — no local mirror state to desync.
-      await updateConfig(partial);
-    } catch {
-      showToast("Failed to save option", "error");
     }
   }
 
@@ -280,21 +243,21 @@ export default function HomeView({
   const canPlay = isReady && modReady;
   const libraryCount = config?.library.length ?? 0;
 
-  // AmongApi stat tile: prefer the richer version status over the presence
-  // flag. Until the check resolves (`modStatus === null`) we say "checking"
-  // rather than claiming "up to date".
+  // AmongApi status-strip chip: prefer the richer version status over the
+  // presence flag. Until the check resolves (`modStatus === null`) we say
+  // "checking" rather than claiming "up to date".
   let amongApiValue = amongApiInstalled ? "Installed" : "Missing";
   let amongApiHint = amongApiInstalled ? "Checking version…" : "Run setup to install";
-  let amongApiTone: "default" | "success" | "danger" | "warning" = amongApiInstalled
+  let amongApiTone: "neutral" | "success" | "danger" | "warning" = amongApiInstalled
     ? "success"
     : "danger";
   if (modStatus) {
     switch (modStatus.status) {
       case "current":
-        amongApiValue = "Up to date";
-        amongApiHint = modStatus.installedVersion
+        amongApiValue = modStatus.installedVersion
           ? `v${modStatus.installedVersion}`
-          : "Mod up to date";
+          : "Up to date";
+        amongApiHint = "Mod up to date";
         amongApiTone = "success";
         break;
       case "outdated":
@@ -318,41 +281,219 @@ export default function HomeView({
       case "unknown":
         amongApiValue = amongApiInstalled ? "Installed" : "Unknown";
         amongApiHint = "Couldn't verify version";
-        amongApiTone = "default";
+        amongApiTone = "neutral";
         break;
     }
   }
 
-  return (
-    <div className="min-h-full p-6 space-y-6">
-      <h1 className="text-display font-bold tracking-tight">Home</h1>
+  const statusPill = canPlay ? (
+    <Badge variant="success" showDot dotColor="success">
+      Ready
+    </Badge>
+  ) : (
+    <Badge variant="warning" showDot dotColor="warning">
+      {isReady ? "Update Required" : "Incomplete"}
+    </Badge>
+  );
 
+  return (
+    <div className="min-h-full space-y-6 pb-6">
+      <PageHeader title="Home" actions={statusPill} />
+
+      <div className="space-y-6 px-6">
       {loading ? (
-        <div className="grid gap-6 md:grid-cols-2">
-          <Card className="shadow-card">
-            <CardHeader>
-              <Skeleton className="h-5 w-32" />
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <Skeleton className="h-4 w-full" />
-              <Skeleton className="h-4 w-3/4" />
-              <Skeleton className="h-4 w-1/2" />
-              <Skeleton className="h-9 w-full mt-4" />
-            </CardContent>
-          </Card>
-          <Card className="shadow-card">
-            <CardHeader>
-              <Skeleton className="h-5 w-32" />
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <Skeleton className="h-12 w-full" />
-              <Skeleton className="h-12 w-full" />
-              <Skeleton className="h-9 w-full mt-4" />
-            </CardContent>
-          </Card>
+        <div className="space-y-6">
+          <div className="space-y-3">
+            <Skeleton className="h-8 w-56" />
+            <Skeleton className="h-4 w-72" />
+            <Skeleton className="h-10 w-36" />
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Skeleton className="h-6 w-24 rounded-pill" />
+            <Skeleton className="h-6 w-24 rounded-pill" />
+            <Skeleton className="h-6 w-28 rounded-pill" />
+          </div>
+          <div className="space-y-2">
+            <Skeleton className="h-12 w-full" />
+            <Skeleton className="h-12 w-full" />
+          </div>
         </div>
       ) : (
         <>
+          {/* HERO — no card chrome; Play is the dominant primary action. */}
+          <section className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="space-y-1">
+              <h2 className="text-display font-bold tracking-tight">
+                {canPlay
+                  ? "Game Ready"
+                  : isReady
+                    ? "Update Required"
+                    : "Setup Needed"}
+              </h2>
+              <p className="text-13 text-muted-foreground">
+                {canPlay
+                  ? "Everything is set up. Jump into a lobby."
+                  : isReady
+                    ? "AmongApi needs updating before you can play."
+                    : "Finish installing Among Us + BepInEx to play."}
+              </p>
+            </div>
+            <div className="shrink-0">
+              {!isReady ? (
+                <Button onClick={() => navigate("/setup")} variant="primary" size="lg">
+                  <Gamepad2 className="h-5 w-5" />
+                  Set Up Game
+                </Button>
+              ) : isRunning ? (
+                <Button onClick={() => setConfirmStop(true)} variant="destructive" size="lg">
+                  <Square className="h-5 w-5" />
+                  Stop
+                </Button>
+              ) : !modReady ? (
+                <div className="flex flex-col items-stretch gap-2 sm:items-end">
+                  <Tooltip content="AmongApi needs updating">
+                    <span className="inline-flex">
+                      <Button variant="primary" size="lg" disabled>
+                        <Play className="h-5 w-5" />
+                        Play
+                      </Button>
+                    </span>
+                  </Tooltip>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => onRequireModUpdate?.()}
+                  >
+                    <RefreshCw className="h-3.5 w-3.5" />
+                    Update AmongApi
+                  </Button>
+                </div>
+              ) : (
+                <Button onClick={() => void launchGame()} variant="primary" size="lg">
+                  <Play className="h-5 w-5" />
+                  Play
+                </Button>
+              )}
+            </div>
+          </section>
+
+          {/* STATUS STRIP — compact chips, not cards. */}
+          <section className="flex flex-wrap items-center gap-2" aria-label="Install status">
+            <Badge
+              variant={storefront ? "neutral" : "muted"}
+              showDot={!!storefront}
+              dotColor="info"
+              className="capitalize"
+              title={storefront ? "Source install" : "Browse to locate the game"}
+            >
+              {storefront ? storefront.replace("_", " ") : "No storefront"}
+            </Badge>
+            <Badge
+              variant={bepinexInstalled ? "success" : "danger"}
+              showDot
+              dotColor={bepinexInstalled ? "success" : "danger"}
+              title={bepinexInstalled ? "Mod loader ready" : "Run setup to install"}
+            >
+              BepInEx {bepinexInstalled ? "✓" : "Missing"}
+            </Badge>
+            <Badge
+              variant={amongApiTone}
+              showDot
+              dotColor={TONE_DOT[amongApiTone]}
+              title={amongApiHint}
+            >
+              AmongApi {amongApiValue}
+            </Badge>
+          </section>
+
+          {/* INSTALLED MODS — dense full-width rows. */}
+          <section className="space-y-3">
+            <SectionHeader
+              title="Installed Mods"
+              count={mods.length}
+              actions={
+                <>
+                  <Button onClick={() => void handleImportMod()} variant="outline" size="sm">
+                    <FolderOpen className="h-4 w-4" />
+                    Import Mod
+                  </Button>
+                  <Button
+                    onClick={() => setLibraryPickerOpen(true)}
+                    variant="outline"
+                    size="sm"
+                    disabled={libraryCount === 0}
+                    title={libraryCount === 0 ? "Library is empty" : "Install a mod from your library"}
+                  >
+                    <Library className="h-4 w-4" />
+                    From Library
+                  </Button>
+                </>
+              }
+            />
+            {modsLoading ? (
+              <div className="space-y-2">
+                <Skeleton className="h-12 w-full" />
+                <Skeleton className="h-12 w-full" />
+                <Skeleton className="h-12 w-full" />
+              </div>
+            ) : mods.length === 0 ? (
+              <EmptyState
+                icon={<Package className="h-4 w-4" />}
+                title="No mods installed"
+                description="Import a .dll or install one from your library to get started."
+                className="py-4"
+              />
+            ) : (
+              <ul className="space-y-1">
+                {mods.map((mod) => (
+                  <ListRow
+                    key={mod.filename}
+                    leading={<Package className="h-4 w-4" />}
+                    title={mod.name}
+                    meta={`${mod.version ? `v${mod.version} · ` : ""}${formatBytes(mod.size)}`}
+                    actions={
+                      <>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => void copyModToLibrary(mod)}
+                          aria-label={`Save ${mod.name} to library`}
+                          title="Save to library"
+                        >
+                          <Archive className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => void browseFiles(mod.path)}
+                          aria-label={`Open ${mod.name} folder`}
+                          title="Open folder"
+                        >
+                          <Folder className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => setRemoveTarget(mod)}
+                          aria-label={`Remove ${mod.name}`}
+                          title="Remove mod"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </>
+                    }
+                  />
+                ))}
+              </ul>
+            )}
+            <LibraryPickerModal
+              isOpen={libraryPickerOpen}
+              onClose={() => setLibraryPickerOpen(false)}
+              gamePath={gamePath}
+              onInstalled={loadMods}
+            />
+          </section>
+
           {installProgress && (
             <Card className="shadow-card">
               <CardContent className="pt-6">
@@ -383,258 +524,6 @@ export default function HomeView({
             </Card>
           )}
 
-          <Card className="shadow-card">
-            <CardContent className="p-8">
-              <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
-                <div className="space-y-2">
-                  <div className="flex items-center gap-3">
-                    <h2 className="text-display font-bold tracking-tight">
-                      {canPlay
-                        ? "Game Ready"
-                        : isReady
-                          ? "Update Required"
-                          : "Setup Needed"}
-                    </h2>
-                    {canPlay ? (
-                      <Badge variant="success" showDot dotColor="success">
-                        Ready
-                      </Badge>
-                    ) : (
-                      <Badge variant="warning" showDot dotColor="warning">
-                        {isReady ? "Update Required" : "Incomplete"}
-                      </Badge>
-                    )}
-                  </div>
-                  <p className="text-13 text-muted-foreground">
-                    {canPlay
-                      ? "Everything is set up. Jump into a lobby."
-                      : isReady
-                        ? "AmongApi needs updating before you can play."
-                        : "Finish installing Among Us + BepInEx to play."}
-                  </p>
-                </div>
-                <div>
-                  {!isReady ? (
-                    <Button onClick={() => navigate("/setup")} variant="outline" size="lg">
-                      <Gamepad2 className="h-5 w-5" />
-                      Set Up Game
-                    </Button>
-                  ) : isRunning ? (
-                    <Button onClick={() => setConfirmStop(true)} variant="destructive" size="lg">
-                      <Square className="h-5 w-5" />
-                      Stop
-                    </Button>
-                  ) : !modReady ? (
-                    <div className="flex flex-col items-stretch gap-2 sm:items-end">
-                      <Tooltip content="AmongApi needs updating">
-                        <span className="inline-flex">
-                          <Button variant="primary" size="lg" disabled>
-                            <Play className="h-5 w-5" />
-                            Play
-                          </Button>
-                        </span>
-                      </Tooltip>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => onRequireModUpdate?.()}
-                      >
-                        <RefreshCw className="h-3.5 w-3.5" />
-                        Update AmongApi
-                      </Button>
-                    </div>
-                  ) : (
-                    <Button onClick={() => void launchGame()} variant="primary" size="lg">
-                      <Play className="h-5 w-5" />
-                      Play
-                    </Button>
-                  )}
-                </div>
-              </div>
-
-              <div className="mt-6 flex flex-wrap items-center gap-3 border-t border-border pt-6">
-                {gamePath ? (
-                  <div className="flex min-w-0 items-center gap-1">
-                    <span className="max-w-[320px] truncate font-mono text-2xs text-muted-foreground">
-                      {gamePath}
-                    </span>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => void copyPath()}
-                      aria-label="Copy game path"
-                      title="Copy game path"
-                    >
-                      <Copy className="h-3.5 w-3.5" />
-                    </Button>
-                  </div>
-                ) : (
-                  <span className="text-2xs text-muted-foreground">No game path detected</span>
-                )}
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="ml-auto"
-                  onClick={() => void redetect()}
-                  disabled={redetecting}
-                  title="Re-scan for Among Us installations"
-                  aria-label="Re-detect game"
-                >
-                  <RefreshCw className={`h-3.5 w-3.5${redetecting ? " animate-spin" : ""}`} />
-                  Re-detect
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-
-          <div className="grid gap-4 sm:grid-cols-3">
-            <StatTile
-              label="Storefront"
-              value={storefront ? storefront.replace("_", " ") : "Not detected"}
-              hint={storefront ? "Source install" : "Browse to locate the game"}
-              icon={<Store className="h-4 w-4" />}
-              className="capitalize"
-            />
-            <StatTile
-              label="BepInEx"
-              value={bepinexInstalled ? "Installed" : "Missing"}
-              hint={bepinexInstalled ? "Mod loader ready" : "Run setup to install"}
-              tone={bepinexInstalled ? "success" : "danger"}
-              icon={<Package className="h-4 w-4" />}
-            />
-            <StatTile
-              label="AmongApi"
-              value={amongApiValue}
-              hint={amongApiHint}
-              tone={amongApiTone}
-              icon={<Cpu className="h-4 w-4" />}
-            />
-          </div>
-
-          <div className="grid gap-6 md:grid-cols-2">
-            <Card className="shadow-card">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Package className="h-5 w-5 text-muted-foreground" />
-                  Installed Mods
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                {modsLoading ? (
-                  <div className="space-y-2">
-                    <Skeleton className="h-12 w-full" />
-                    <Skeleton className="h-12 w-full" />
-                    <Skeleton className="h-12 w-full" />
-                  </div>
-                ) : mods.length === 0 ? (
-                  <EmptyState
-                    icon={<Package className="h-5 w-5" />}
-                    title="No mods installed"
-                    description="Import a .dll or install one from your library to get started."
-                  />
-                ) : (
-                  <ul className="space-y-1">
-                    {mods.map((mod) => (
-                      <li
-                        key={mod.filename}
-                        className="flex items-center justify-between rounded-control px-3 py-2 transition-colors hover:bg-surface-2"
-                      >
-                        <div className="min-w-0">
-                          <span className="text-sm font-medium">{mod.name}</span>
-                          {mod.version && (
-                            <span className="ml-2 text-2xs text-muted-foreground">
-                              v{mod.version}
-                            </span>
-                          )}
-                          <span className="ml-2 text-2xs text-muted-foreground">
-                            {formatBytes(mod.size)}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-1">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => void copyModToLibrary(mod)}
-                            aria-label={`Save ${mod.name} to library`}
-                            title="Save to library"
-                          >
-                            <Archive className="h-3.5 w-3.5" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => void browseFiles(mod.path)}
-                            aria-label={`Open ${mod.name} folder`}
-                            title="Open folder"
-                          >
-                            <Folder className="h-3.5 w-3.5" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => setRemoveTarget(mod)}
-                            aria-label={`Remove ${mod.name}`}
-                            title="Remove mod"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </Button>
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-                <div className="mt-4 flex gap-2">
-                  <Button onClick={() => void handleImportMod()} variant="outline" className="flex-1">
-                    <FolderOpen className="h-4 w-4" />
-                    Import Mod
-                  </Button>
-                  <Button
-                    onClick={() => setLibraryPickerOpen(true)}
-                    variant="outline"
-                    className="flex-1"
-                    disabled={libraryCount === 0}
-                    title={libraryCount === 0 ? "Library is empty" : "Install a mod from your library"}
-                  >
-                    <Library className="h-4 w-4" />
-                    From Library
-                  </Button>
-                </div>
-                <LibraryPickerModal
-                  isOpen={libraryPickerOpen}
-                  onClose={() => setLibraryPickerOpen(false)}
-                  gamePath={gamePath}
-                  onInstalled={loadMods}
-                />
-              </CardContent>
-            </Card>
-
-            <Card className="shadow-card">
-              <CardHeader>
-                <CardTitle>Options</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium">Auto-post game data</span>
-                    <Switch
-                      checked={config?.auto_post_lobby ?? false}
-                      disabled={!config}
-                      onCheckedChange={() => void handleToggle("auto_post_lobby")}
-                    />
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium">Debug mode</span>
-                    <Switch
-                      checked={config?.debug_mode ?? false}
-                      disabled={!config}
-                      onCheckedChange={() => void handleToggle("debug_mode")}
-                    />
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-
           <ConfirmModal
             isOpen={removeTarget !== null}
             onClose={() => setRemoveTarget(null)}
@@ -657,6 +546,7 @@ export default function HomeView({
           />
         </>
       )}
+      </div>
     </div>
   );
 }

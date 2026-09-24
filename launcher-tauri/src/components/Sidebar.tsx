@@ -1,5 +1,7 @@
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Home, Archive, Settings, Gamepad2, Users } from 'lucide-react';
+import { Home, Archive, Settings, Gamepad2, Users, ChevronsLeft, ChevronsRight } from 'lucide-react';
+import { NavItem } from '@/components/ui/nav-item';
+import { cn } from '@/lib/utils';
 
 const navItems = [
   { path: '/', label: 'Home', icon: Home },
@@ -13,9 +15,19 @@ interface SidebarProps {
   avatarUrl: string;
   /** App-level lobby membership: `true` = this machine hosts the lobby. */
   lobbyIsHost: boolean | null;
+  /** `true` renders the 64px icon rail; `false` (default) shows icon + label. */
+  collapsed?: boolean;
+  onToggleCollapsed?: () => void;
 }
 
-export function Sidebar({ gameConnected, username, avatarUrl, lobbyIsHost }: SidebarProps) {
+export function Sidebar({
+  gameConnected,
+  username,
+  avatarUrl,
+  lobbyIsHost,
+  collapsed = false,
+  onToggleCollapsed,
+}: SidebarProps) {
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -29,52 +41,98 @@ export function Sidebar({ gameConnected, username, avatarUrl, lobbyIsHost }: Sid
       : []),
   ];
 
-  const itemClass = (path: string) =>
-    `flex h-12 w-12 items-center justify-center rounded-control transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring ${
-      location.pathname === path
-        ? 'bg-primary text-primary-foreground'
-        : 'text-muted-foreground hover:bg-surface-2 hover:text-foreground'
-    }`;
+  const isActive = (path: string) => location.pathname === path;
 
   return (
-    <nav className="flex w-16 flex-col items-center gap-2 border-r border-border bg-surface py-4" aria-label="Main navigation">
-      {navItems.map(item => (
-        <button key={item.path}
-          onClick={() => navigate(item.path)}
-          title={item.label}
-          aria-label={item.label}
-          className={itemClass(item.path)}>
-          <item.icon className="h-5 w-5" />
-        </button>
-      ))}
-      {gameConnected && (
-        <>
-          <span className="mt-2 text-2xs font-semibold uppercase tracking-widest text-muted-foreground">
-            Game
-          </span>
-          {gameItems.map(item => (
-            <button key={item.path}
-              onClick={() => navigate(item.path)}
-              title={item.label}
-              aria-label={item.label}
-              className={itemClass(item.path)}>
-              <item.icon className="h-5 w-5" />
-            </button>
-          ))}
-        </>
+    <nav
+      className={cn(
+        'flex flex-col gap-2 border-r border-border bg-surface py-4',
+        collapsed ? 'w-16 items-center' : 'w-[200px] px-3'
       )}
-      <div className="mt-auto flex flex-col items-center gap-2">
-        {avatarUrl && (
-          <img
-            src={avatarUrl}
-            alt={username}
-            className="h-8 w-8 rounded-pill border border-border"
+      aria-label="Main navigation"
+    >
+      <div className={cn('flex flex-col gap-1', collapsed ? 'items-center' : 'w-full')}>
+        {navItems.map(item => (
+          <NavItem
+            key={item.path}
+            icon={item.icon}
+            label={item.label}
+            active={isActive(item.path)}
+            collapsed={collapsed}
+            onClick={() => navigate(item.path)}
           />
+        ))}
+      </div>
+
+      {gameConnected && (
+        <div className={cn('flex flex-col gap-1', collapsed ? 'items-center' : 'w-full')}>
+          {collapsed ? (
+            <span className="mt-2 h-px w-8 bg-border" aria-hidden="true" />
+          ) : (
+            <span className="mt-2 px-3 text-2xs font-semibold uppercase tracking-widest text-muted-foreground">
+              Game
+            </span>
+          )}
+          {gameItems.map(item => (
+            <NavItem
+              key={item.path}
+              icon={item.icon}
+              label={item.label}
+              active={isActive(item.path)}
+              collapsed={collapsed}
+              onClick={() => navigate(item.path)}
+            />
+          ))}
+        </div>
+      )}
+
+      <div className={cn('mt-auto flex flex-col gap-2', collapsed ? 'items-center' : 'w-full')}>
+        {collapsed ? (
+          avatarUrl && (
+            <img
+              src={avatarUrl}
+              alt={username}
+              title={username}
+              className="h-8 w-8 rounded-pill border border-border"
+            />
+          )
+        ) : (
+          (avatarUrl || username) && (
+            <div className="flex min-w-0 items-center gap-2 px-3">
+              {avatarUrl && (
+                <img
+                  src={avatarUrl}
+                  alt={username}
+                  className="h-8 w-8 shrink-0 rounded-pill border border-border"
+                />
+              )}
+              {username && (
+                <span className="truncate text-sm text-muted-foreground">{username}</span>
+              )}
+            </div>
+          )
         )}
-        {username && (
-          <span className="max-w-[56px] truncate text-xs text-muted-foreground">
-            {username}
-          </span>
+
+        {onToggleCollapsed && (
+          <button
+            type="button"
+            onClick={onToggleCollapsed}
+            title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            className={cn(
+              'flex items-center justify-center rounded-control text-muted-foreground transition-colors hover:bg-surface-2 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+              collapsed ? 'h-9 w-9' : 'h-9 w-full gap-2 px-3'
+            )}
+          >
+            {collapsed ? (
+              <ChevronsRight className="h-4 w-4 shrink-0" />
+            ) : (
+              <>
+                <ChevronsLeft className="h-4 w-4 shrink-0" />
+                <span className="text-13">Collapse</span>
+              </>
+            )}
+          </button>
         )}
       </div>
     </nav>

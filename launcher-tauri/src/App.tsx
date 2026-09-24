@@ -102,6 +102,27 @@ function AppShell() {
   const [gameConnected, setGameConnected] = useState(false);
   const [needsSetup, setNeedsSetup] = useState<boolean | null>(null);
   const [pendingJoinCode, setPendingJoinCode] = useState<string | null>(null);
+  // Sidebar presentation only: `false` = expanded (icon + label). Never affects
+  // routing/behavior. Persisted so the chosen width survives a reload.
+  const [navCollapsed, setNavCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem("among-launcher.sidebar-collapsed") === "1";
+    } catch {
+      return false;
+    }
+  });
+
+  function toggleNavCollapsed() {
+    setNavCollapsed((c) => {
+      const next = !c;
+      try {
+        localStorage.setItem("among-launcher.sidebar-collapsed", next ? "1" : "0");
+      } catch {
+        // Persistence is best-effort; presentation state still applies.
+      }
+      return next;
+    });
+  }
   // App-level lobby membership, sourced from the backend's lobby lifecycle
   // events: `null` = not in a lobby; `true`/`false` = in a lobby as
   // host/guest. Owned here (not in a page) so navigation can react to it and
@@ -555,64 +576,73 @@ function AppShell() {
             username={username}
             avatarUrl={avatarUrl}
             lobbyIsHost={lobbyIsHost}
+            collapsed={navCollapsed}
+            onToggleCollapsed={toggleNavCollapsed}
           />
-          <main className="flex-1 overflow-y-auto p-6">
+          {/* Banner lives in a non-scrolling region ABOVE the page scroller so
+              it stays visible without being covered by each page's sticky
+              `PageHeader` (which sticks to the top of the inner scroller). */}
+          <main className="flex-1 min-w-0 flex flex-col overflow-hidden">
             {modStatus?.status === "unknown" && (
-              <div className="mb-4 flex items-start gap-2 rounded-control border border-warning/40 bg-warning/10 px-3 py-2 text-2xs text-foreground">
-                <AlertTriangle
-                  className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning"
-                  aria-hidden="true"
-                />
-                <span>
-                  Couldn&apos;t verify the AmongApi version. Check your
-                  connection — it may need updating.
-                </span>
+              <div className="shrink-0 px-6 pt-4">
+                <div className="flex items-start gap-2 rounded-control border border-warning/40 bg-warning/10 px-3 py-2 text-2xs text-foreground">
+                  <AlertTriangle
+                    className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning"
+                    aria-hidden="true"
+                  />
+                  <span>
+                    Couldn&apos;t verify the AmongApi version. Check your
+                    connection — it may need updating.
+                  </span>
+                </div>
               </div>
             )}
-            <Routes>
-              <Route
-                path="/"
-                element={
-                  <HomeView
-                    modStatus={modStatus}
-                    onRequireModUpdate={() => {
-                      if (modStatus) {
-                        openForcedModUpdate(
-                          modStatus,
-                          modStatus.status === "incompatible"
-                            ? INCOMPATIBLE_REASON
-                            : null
-                        );
-                      } else {
-                        void checkModStatus();
-                      }
-                    }}
-                  />
-                }
-              />
-              <Route path="/library" element={<LibraryView />} />
-              <Route path="/settings" element={<SettingsView />} />
-              {!gameConnected && <Route path="/setup" element={<SetupPage />} />}
-              {gameConnected && (
+            <div className="flex-1 min-h-0 overflow-y-auto">
+              <Routes>
                 <Route
-                  path="/ingame"
+                  path="/"
                   element={
-                    <InGameView
-                      connected={gameConnected}
-                      inLobby={lobbyIsHost !== null}
-                      initialJoinCode={pendingJoinCode}
-                      onJoinCodeConsumed={() => setPendingJoinCode(null)}
+                    <HomeView
+                      modStatus={modStatus}
+                      onRequireModUpdate={() => {
+                        if (modStatus) {
+                          openForcedModUpdate(
+                            modStatus,
+                            modStatus.status === "incompatible"
+                              ? INCOMPATIBLE_REASON
+                              : null
+                          );
+                        } else {
+                          void checkModStatus();
+                        }
+                      }}
                     />
                   }
                 />
-              )}
-              {gameConnected && (
-                <Route path="/host" element={<HostControlPanelView />} />
-              )}
-              {/* Gated routes that don't exist for the current state (e.g.
-                  /ingame while disconnected) fall through to home. */}
-              <Route path="*" element={<Navigate to="/" replace />} />
-            </Routes>
+                <Route path="/library" element={<LibraryView />} />
+                <Route path="/settings" element={<SettingsView />} />
+                {!gameConnected && <Route path="/setup" element={<SetupPage />} />}
+                {gameConnected && (
+                  <Route
+                    path="/ingame"
+                    element={
+                      <InGameView
+                        connected={gameConnected}
+                        inLobby={lobbyIsHost !== null}
+                        initialJoinCode={pendingJoinCode}
+                        onJoinCodeConsumed={() => setPendingJoinCode(null)}
+                      />
+                    }
+                  />
+                )}
+                {gameConnected && (
+                  <Route path="/host" element={<HostControlPanelView />} />
+                )}
+                {/* Gated routes that don't exist for the current state (e.g.
+                    /ingame while disconnected) fall through to home. */}
+                <Route path="*" element={<Navigate to="/" replace />} />
+              </Routes>
+            </div>
           </main>
         </div>
 

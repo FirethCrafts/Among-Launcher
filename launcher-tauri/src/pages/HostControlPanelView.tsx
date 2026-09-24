@@ -1,14 +1,15 @@
 import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PlayerRow } from "@/components/ui/player-row";
-import { StatTile } from "@/components/ui/stat-tile";
 import { Tooltip } from "@/components/ui/tooltip";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { PageHeader } from "@/components/ui/page-header";
+import { SectionHeader } from "@/components/ui/section-header";
 import { showToast, formatError } from "@/components/Toast";
 import { Users, Hash, Copy, Check, Trash2, UserMinus, Globe, Gamepad2, Crown } from "lucide-react";
 
@@ -270,19 +271,42 @@ export default function HostControlPanelView() {
     }
   }
 
+  // Shared header for all three branches (no-lobby / guest / host): one
+  // <h1>, one sticky bar. The heartbeat pill only applies when a lobby
+  // exists — there is no heartbeat to report otherwise.
+  const header = (
+    <PageHeader
+      title="Host Panel"
+      actions={
+        lobbyInfo ? (
+          <Badge
+            variant={heartbeatOk ? "success" : "danger"}
+            showDot
+            dotColor={heartbeatOk ? "success" : "danger"}
+            title={heartbeatOk ? "Server heartbeat OK" : "No server heartbeat"}
+          >
+            {heartbeatOk ? "Online" : "Offline"}
+          </Badge>
+        ) : null
+      }
+    />
+  );
+
   if (!lobbyInfo) {
     return (
-      <div className="min-h-full space-y-6 p-6">
-        <h1 className="text-display font-bold tracking-tight">Host Control Panel</h1>
-        <Card>
-          <CardContent className="pt-6">
-            <EmptyState
-              icon={<Hash className="h-5 w-5" />}
-              title="No active lobby"
-              description="Create a lobby in-game to manage it here."
-            />
-          </CardContent>
-        </Card>
+      <div className="min-h-full space-y-6 pb-6">
+        {header}
+        <div className="space-y-6 px-6">
+          <Card>
+            <CardContent className="pt-6">
+              <EmptyState
+                icon={<Hash className="h-5 w-5" />}
+                title="No active lobby"
+                description="Create a lobby in-game to manage it here."
+              />
+            </CardContent>
+          </Card>
+        </div>
       </div>
     );
   }
@@ -292,125 +316,39 @@ export default function HostControlPanelView() {
   // Disband/Kick controls.
   if (isHost === false) {
     return (
-      <div className="min-h-full space-y-6 p-6">
-        <h1 className="text-display font-bold tracking-tight">Host Control Panel</h1>
-        <Card>
-          <CardContent className="space-y-4 pt-6">
-            <p className="text-sm text-muted-foreground text-center">
-              You're in a lobby, but you're not the host. Only the host can
-              post, kick players, or disband it.
-            </p>
-            {lobbyInfo.code && (
-              <div className="flex items-center justify-between rounded-control border border-border bg-surface-2 px-4 py-3">
-                <span className="text-13 text-muted-foreground">Lobby Code</span>
-                <span className="font-mono text-lg font-bold tracking-widest text-primary">
-                  {lobbyInfo.code}
-                </span>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+      <div className="min-h-full space-y-6 pb-6">
+        {header}
+        <div className="space-y-6 px-6">
+          <Card>
+            <CardContent className="space-y-4 pt-6">
+              <p className="text-sm text-muted-foreground text-center">
+                You're in a lobby, but you're not the host. Only the host can
+                post, kick players, or disband it.
+              </p>
+              {lobbyInfo.code && (
+                <div className="flex items-center justify-between rounded-control border border-border bg-surface-2 px-4 py-3">
+                  <span className="text-13 text-muted-foreground">Lobby Code</span>
+                  <span className="font-mono text-lg font-bold tracking-widest text-primary">
+                    {lobbyInfo.code}
+                  </span>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-full space-y-6 p-6">
-      <h1 className="text-display font-bold tracking-tight">Host Control Panel</h1>
-
+    <div className="min-h-full space-y-6 pb-6">
+      {header}
+      <div className="space-y-6 px-6">
       <div className="grid gap-6 md:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Hash className="h-5 w-5 text-muted-foreground" />
-              Lobby Code
-              {/* Heartbeat pill: Online/Offline right next to the code. */}
-              <Badge
-                variant={heartbeatOk ? "success" : "danger"}
-                showDot
-                dotColor={heartbeatOk ? "success" : "danger"}
-                className="ml-auto"
-                title={heartbeatOk ? "Server heartbeat OK" : "No server heartbeat"}
-              >
-                {heartbeatOk ? "Online" : "Offline"}
-              </Badge>
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex items-center justify-between gap-2 rounded-control border border-border bg-surface-2 px-4 py-3">
-              <span className="font-mono text-2xl font-bold tracking-widest text-primary">
-                {lobbyInfo.code}
-              </span>
-              <Tooltip content={copied ? "Copied" : "Copy lobby code"}>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={copyLobbyCode}
-                  title={copied ? "Copied" : "Copy lobby code"}
-                  aria-label="Copy lobby code"
-                >
-                  {copied ? (
-                    <Check className="h-4 w-4 text-success" />
-                  ) : (
-                    <Copy className="h-4 w-4" />
-                  )}
-                </Button>
-              </Tooltip>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-              {lobbyInfo.host && (
-                <StatTile
-                  label="Host"
-                  value={lobbyInfo.host}
-                  icon={<Crown className="h-3.5 w-3.5" />}
-                />
-              )}
-              {lobbyInfo.map && (
-                <StatTile
-                  label="Map"
-                  value={lobbyInfo.map}
-                  icon={<Gamepad2 className="h-3.5 w-3.5" />}
-                />
-              )}
-              {lobbyInfo.maxPlayers && (
-                <StatTile
-                  label="Max Players"
-                  value={lobbyInfo.maxPlayers}
-                  icon={<Users className="h-3.5 w-3.5" />}
-                />
-              )}
-              {lobbyInfo.region && (
-                <StatTile
-                  label="Region"
-                  value={lobbyInfo.region}
-                  icon={<Globe className="h-3.5 w-3.5" />}
-                />
-              )}
-            </div>
-
-            <div className="flex gap-2 pt-2">
-              <Button
-                onClick={() => void handlePostLobby()}
-                disabled={posted || loading}
-                className="flex-1"
-              >
-                {posted ? "Already Posted" : "POST"}
-              </Button>
-              <Button
-                onClick={() => setConfirmDisband(true)}
-                variant="destructive"
-                disabled={loading}
-                className="flex-1"
-              >
-                <Trash2 className="h-4 w-4" />
-                Disband
-              </Button>
-            </div>
-
-            {/* Status line moved directly under the action buttons so it
-                stays visible in short (~500px) windows. */}
-            <div className="flex justify-center pt-1">
+        <section className="space-y-3">
+          <SectionHeader
+            title="Lobby"
+            actions={
               <Badge
                 variant={posted ? "success" : "muted"}
                 showDot
@@ -418,52 +356,131 @@ export default function HostControlPanelView() {
               >
                 {posted ? "Posted to Server" : "Local Only"}
               </Badge>
-            </div>
-          </CardContent>
-        </Card>
+            }
+          />
+          <Card>
+            <CardContent className="space-y-4 pt-6">
+              <div className="flex items-center justify-between gap-2 rounded-control border border-border bg-surface-2 px-4 py-3">
+                <span className="font-mono text-2xl font-bold tracking-widest text-primary">
+                  {lobbyInfo.code}
+                </span>
+                <Tooltip content={copied ? "Copied" : "Copy lobby code"}>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={copyLobbyCode}
+                    title={copied ? "Copied" : "Copy lobby code"}
+                    aria-label="Copy lobby code"
+                  >
+                    {copied ? (
+                      <Check className="h-4 w-4 text-success" />
+                    ) : (
+                      <Copy className="h-4 w-4" />
+                    )}
+                  </Button>
+                </Tooltip>
+              </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Users className="h-5 w-5 text-muted-foreground" />
-              Players ({players.length})
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {players.length === 0 ? (
-              <EmptyState
-                icon={<Users className="h-5 w-5" />}
-                title="No players in lobby"
-                description="Players who join will show up here."
-              />
-            ) : (
-              <ul className="space-y-2">
-                {players.map((player) => (
-                  <PlayerRow
-                    key={player.name}
-                    name={player.name}
-                    color={player.color}
-                    level={player.level}
-                    ping={player.ping}
-                    isHost={player.is_host}
-                    actions={
-                      <Button
-                        variant="danger"
-                        size="sm"
-                        onClick={() => setKickTarget(player.name)}
-                        disabled={player.is_host}
-                        title={`Kick ${player.name}`}
-                        aria-label={`Kick ${player.name}`}
-                      >
-                        <UserMinus className="h-4 w-4" />
-                      </Button>
-                    }
-                  />
-                ))}
-              </ul>
-            )}
-          </CardContent>
-        </Card>
+              {/* Compact chip row of lobby metadata. */}
+              <div className="flex flex-wrap items-center gap-2">
+                {lobbyInfo.host && (
+                  <Badge variant="neutral" title="Host">
+                    <Crown className="h-3 w-3 text-muted-foreground" />
+                    <span className="text-muted-foreground">Host</span>
+                    <span className="font-medium text-foreground">{lobbyInfo.host}</span>
+                  </Badge>
+                )}
+                {lobbyInfo.map && (
+                  <Badge variant="neutral" title="Map">
+                    <Gamepad2 className="h-3 w-3 text-muted-foreground" />
+                    <span className="text-muted-foreground">Map</span>
+                    <span className="font-medium text-foreground">{lobbyInfo.map}</span>
+                  </Badge>
+                )}
+                {lobbyInfo.maxPlayers && (
+                  <Badge variant="neutral" title="Max Players">
+                    <Users className="h-3 w-3 text-muted-foreground" />
+                    <span className="text-muted-foreground">Max</span>
+                    <span className="font-medium text-foreground">{lobbyInfo.maxPlayers}</span>
+                  </Badge>
+                )}
+                {lobbyInfo.region && (
+                  <Badge variant="neutral" title="Region">
+                    <Globe className="h-3 w-3 text-muted-foreground" />
+                    <span className="text-muted-foreground">Region</span>
+                    <span className="font-medium text-foreground">{lobbyInfo.region}</span>
+                  </Badge>
+                )}
+              </div>
+
+              {/* POST is the dominant action (primary + lg). Disband stays
+                  smaller and lighter in weight, but keeps a danger signal
+                  because it is destructive. */}
+              <div className="flex items-center gap-2">
+                <Button
+                  onClick={() => void handlePostLobby()}
+                  disabled={posted || loading}
+                  variant="primary"
+                  size="lg"
+                  className="flex-1"
+                >
+                  {posted ? "Already Posted" : "POST"}
+                </Button>
+                <Button
+                  onClick={() => setConfirmDisband(true)}
+                  variant="outline"
+                  size="sm"
+                  disabled={loading}
+                  className="border-danger/40 text-danger hover:bg-danger/10 hover:text-danger"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Disband
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </section>
+
+        <section className="space-y-3">
+          <SectionHeader title="Players" count={players.length} />
+          <Card>
+            <CardContent className="pt-6">
+              {players.length === 0 ? (
+                <EmptyState
+                  icon={<Users className="h-5 w-5" />}
+                  title="No players in lobby"
+                  description="Players who join will show up here."
+                />
+              ) : (
+                <ul className="space-y-2">
+                  {players.map((player) => (
+                    <PlayerRow
+                      key={player.name}
+                      name={player.name}
+                      color={player.color}
+                      level={player.level}
+                      ping={player.ping}
+                      isHost={player.is_host}
+                      actions={
+                        <Button
+                          variant="danger"
+                          size="sm"
+                          onClick={() => setKickTarget(player.name)}
+                          disabled={player.is_host}
+                          title={`Kick ${player.name}`}
+                          aria-label={`Kick ${player.name}`}
+                        >
+                          <UserMinus className="h-4 w-4" />
+                        </Button>
+                      }
+                    />
+                  ))}
+                </ul>
+              )}
+            </CardContent>
+          </Card>
+        </section>
+      </div>
       </div>
 
       <ConfirmDialog
